@@ -51,13 +51,17 @@ def sha256_file(path: Path) -> str:
 
 
 def ensure_input(request: dict) -> Path:
-    path = ROOT / Path(request["inputName"]).name
-    if not path.is_file():
+    name = Path(request["inputName"]).name
+    if not name or name in {".", ".."}:
+        raise ValueError(f"unsafe inputName: {request['inputName']!r}")
+    path = ROOT / name
+    resolved = path.resolve()
+    if resolved.parent != ROOT.resolve() or not resolved.is_file():
         raise FileNotFoundError(path)
-    actual = sha256_file(path)
+    actual = sha256_file(resolved)
     if actual != request["inputSha256"]:
         raise RuntimeError(f"input hash mismatch: {actual} != {request['inputSha256']}")
-    return path
+    return resolved
 
 
 def ensure_torch() -> None:
