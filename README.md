@@ -15,6 +15,8 @@ convert it, and Codex prepares the run, controls the approved Colab notebook,
 verifies the returned files, assembles the PSD, and reports the result. You
 remain in control of Google sign-in, the Chrome profile, GPU selection, and
 Colab connection approval.
+To use another agent such as Claude Code, or a local See-through, see
+"Using another agent or a local See-through" below.
 
 > **Status: v0.1 alpha.** A single neutral image cannot reliably provide real
 > closed-eye and alternate-mouth artwork. Still2Rig PSD reports missing
@@ -31,6 +33,23 @@ Colab connection approval.
 - A built-in WebUI for blink, mouth, body, hair, drag, and zoom previews, plus
   plain-language front/back overlap repair, before/after comparison, progress
   feedback for slower PSD rebuilds, and safe export
+
+## Using another agent or a local See-through
+
+The steps in this README are written for Codex with Google Colab, but you can
+swap either one for something else.
+
+- **Agents other than Codex (Claude Code, for example):** the workflow is
+  written in `.agents/skills/still2rig-psd/SKILL.md` and `AGENTS.md`. Ask your
+  agent to read both files and convert your image to a PSD. To use Colab,
+  register `scripts/start-colab-mcp.sh` as an MCP server with the same settings
+  as `.codex/config.toml`. How you register it depends on the agent.
+- **Local See-through:** to run See-through on your own GPU instead of Colab,
+  tell the agent not to use Colab and to separate the layers with your local
+  See-through. This repository does not ship commands for a local run, so you
+  set up and run See-through together with your agent. Once the separated
+  layers are imported in this project's format, PSD assembly, QA, and the WebUI
+  preview work the same way as with Colab.
 
 ## Quick start
 
