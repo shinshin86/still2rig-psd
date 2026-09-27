@@ -168,15 +168,15 @@ weights, and downloaded archives are ignored by Git by default.
 
 ## Quality checks and limitations
 
-The current CLI automatically reports the first two cumulative levels below.
-The third level is used only when a separately implemented renderer adapter has
-recorded and evaluated the required motion evidence.
+The CLI reports the first two cumulative levels below after `finalize` or
+`repair`. The third level comes from `motion-qa`, which records the built-in
+preview renderer against `configs/motion-qa-contract.json`.
 
 | Level | Meaning |
 | --- | --- |
 | **Structure checked** | The PSD was written in the configured order and structural QA passed its required layers and critical front/back relationships. Hashes are verified separately by the workflow. |
 | **Mouth/closed-eye files checked** | `mouth_open` and `eye_close` are present, are not built-in placeholders, and passed registration and numeric mouth checks. Visual review is still required. |
-| **Motion checked by an adapter** | Captures from the target renderer passed the declared motion checks. No capture adapter is bundled yet. |
+| **Motion checked by an adapter** | `motion-qa` recorded the built-in preview renderer and every declared motion check passed. Other renderers are not covered. |
 
 The default back-to-front order is `back hair` → lower-body clothing → arms →
 upper-body clothing → neck → ears → face → eyes, brows, nose, and mouth →
@@ -187,7 +187,10 @@ artwork; one arm layer cannot represent both depths.
 
 If the source does not show an open mouth or closed eyes, those states cannot be
 determined reliably. `--preview-placeholders` is only for exercising the
-controls and is not treated as real expression art.
+controls and is not treated as real expression art. `derive-expressions` draws
+a preview open mouth and closed eyes from the neutral layers; passed with
+`--preview-expressions`, they appear in the preview but keep
+`productionReady=false`.
 
 See [Understanding the generated PSD](docs/quality-gates.md) for the exact layer
 contract, required expression files, and what each reported level proves.
@@ -205,6 +208,9 @@ npm run still2rig-psd -- status demo
 npm run still2rig-psd -- import demo /path/to/still2rig-psd-demo.zip
 npm run still2rig-psd -- finalize demo --expressions /path/to/expression-layers
 npm run still2rig-psd -- repair demo --expressions /path/to/repaired-expression-layers
+npm run still2rig-psd -- derive-expressions demo
+npm run still2rig-psd -- repair demo --preview-expressions .still2rig-psd/jobs/demo/preview-expressions
+npm run still2rig-psd -- motion-qa demo
 ```
 
 `repair` reuses the verified imported result without rerunning Colab. It backs

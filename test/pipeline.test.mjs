@@ -81,6 +81,25 @@ test('labels expression placeholders as preview-only', () => {
   assert.equal(result.qa.productionReady, false);
 });
 
+test('keeps derived preview expressions out of production readiness', () => {
+  const root = tempRoot('preview-expressions');
+  const layerDir = fixture(root);
+  const psdFile = path.join(root, 'output', 'fixture.psd');
+  const buildReportFile = path.join(root, 'reports', 'build.json');
+  const build = buildPsd({
+    layerDir,
+    output: psdFile,
+    reportFile: buildReportFile,
+    previewExpressionTargets: ['mouth_open', 'eye_close'],
+  });
+  const qa = runQa({ psdFile, layerDir, buildReportFile, reportFile: path.join(root, 'reports', 'qa.json') });
+  assert.deepEqual(build.previewExpressions.map((entry) => entry.layer), ['mouth_open', 'eye_close']);
+  assert.equal(build.productionReady, false);
+  assert.equal(qa.structuralPass, true);
+  assert.equal(qa.checks.productionExpressions, false);
+  assert.equal(qa.productionReady, false);
+});
+
 test('runs prepare, verified import, and finalize through the public CLI', () => {
   const fixtureRoot = tempRoot('e2e-fixture');
   const layerDir = fixture(fixtureRoot);

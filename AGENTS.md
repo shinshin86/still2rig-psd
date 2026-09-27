@@ -31,9 +31,11 @@ Treat this folder as a future public repository.
   trustworthy blink or opposite mouth state from a neutral image.
 - Missing or placeholder expression layers must keep `productionReady=false`.
 - Body layers must remain behind neck and face in back-to-front PSD order.
-- Do not claim paper-slip, seam, or hair-motion quality without a renderer
-  adapter that records and evaluates the captures in
-  `configs/motion-qa-contract.json`.
+- Do not claim paper-slip, seam, or hair-motion quality without a passing
+  `npm run still2rig-psd -- motion-qa JOB` report for the current PSD. The
+  report covers the built-in preview renderer only.
+- Expression art from `derive-expressions` is preview art. Pass it only with
+  `--preview-expressions`, and never describe it as drawn blink or lip-sync art.
 
 ## Local PSD preview
 

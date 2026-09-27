@@ -157,14 +157,14 @@ Still2Rig PSDは、Chromeの自動操作、Googleへのログイン、アカウ�
 ## 品質確認と制限
 
 現在のCLIが自動報告するのは、次のうち最初の2段階です。後の段階は前の段階を
-満たしたうえで報告します。3段階目は、別途実装したレンダラー用アダプターで動きを
-収録・評価した場合だけ使用します。
+満たしたうえで報告します。3段階目は`motion-qa`の結果で、内蔵のプレビュー用
+レンダラーで動きを収録し、`configs/motion-qa-contract.json`の検査で評価します。
 
 | 状態 | 意味 |
 | --- | --- |
 | **構造確認済み** | 設定順でPSDを書き出し、必須レイヤーと重要な前後関係の構造QAを通過済み。ハッシュは処理全体の別工程で確認します。 |
 | **口・閉じ目ファイル自動検査済み** | `mouth_open`と`eye_close`があり、組み込みプレースホルダーではなく、位置合わせと口の数値検査を通過済み。絵として正しいかは目視確認が必要です。 |
-| **アダプターによる動作確認済み** | 対象レンダラーで動きを収録し、定めた検査を通過済み。収録アダプターはまだ同梱していません。 |
+| **アダプターによる動作確認済み** | `motion-qa`で内蔵のプレビュー用レンダラーの動きを収録し、定めた検査をすべて通過済み。ほかのレンダラーは対象外です。 |
 
 標準の前後順は、奥から`back hair` → 下半身の服 → 腕 → 上半身の服 → 首 → 耳 →
 顔 → 目・眉・鼻・口 → `front hair` → 頭の装飾です。横に下ろした腕を服より後ろへ置くため、今回の
@@ -173,7 +173,9 @@ Still2Rig PSDは、Chromeの自動操作、Googleへのログイン、アカウ�
 
 元画像に開き口や閉じ目が写っていない場合、本物の口・まばたき素材は自動では
 確定できません。`--preview-placeholders`は操作確認用であり、実際の表情素材としては
-扱いません。
+扱いません。`derive-expressions`は元のレイヤーから仮の開き口と閉じ目を描きます。
+`--preview-expressions`で渡すとプレビューで動きを確認できますが、`productionReady=false`
+のままです。
 
 詳しい前後順、必要な表情画像、各状態の判定範囲は
 [生成されたPSDで確認できていること](docs/quality-gates.ja.md)を参照してください。
@@ -191,6 +193,9 @@ npm run still2rig-psd -- status demo
 npm run still2rig-psd -- import demo /path/to/still2rig-psd-demo.zip
 npm run still2rig-psd -- finalize demo --expressions /path/to/expression-layers
 npm run still2rig-psd -- repair demo --expressions /path/to/repaired-expression-layers
+npm run still2rig-psd -- derive-expressions demo
+npm run still2rig-psd -- repair demo --preview-expressions .still2rig-psd/jobs/demo/preview-expressions
+npm run still2rig-psd -- motion-qa demo
 ```
 
 `repair` は検証済みの取り込み結果を再利用するため、Colab推論をやり直しません。

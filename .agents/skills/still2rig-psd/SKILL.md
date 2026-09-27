@@ -66,6 +66,12 @@ If the user provides full-canvas, registered expression files named
 non-production preview. Never describe copied or missing expressions as real
 lip-sync or blink art.
 
+When the user wants to see blinking and mouth movement without drawn art, run
+`npm run still2rig-psd -- derive-expressions <job>` and rebuild with
+`repair <job> --preview-expressions <dir>`. The derived layers are preview art;
+the reports list them under `previewExpressions` and keep
+`productionReady=false`.
+
 For mouth repair, prefer extracting the closed-mouth ink from the registered
 original artwork. Do not fill the component interior or carry a skin-colored
 rectangle into an expression layer. A derived opposite mouth state is preview
@@ -73,11 +79,19 @@ art, not trustworthy production art. Render both mouth states at full-canvas
 scale and as a face crop, then require `expressionArtwork=true` and
 `mouthWithinTolerance=true` in the QA report before reporting the repair.
 
+## Motion QA
+
+Run `npm run still2rig-psd -- motion-qa <job>` after the PSD is final. It records
+the contract captures in the built-in preview renderer and scores them. Run it
+again with `--negative-fixture` when the checks themselves changed; that run must
+FAIL. Only a passing `motion-qa` report for the current PSD SHA-256 supports a
+motion, seam, or hair-motion claim, and only for the built-in renderer.
+
 ## Completion report
 
 Report the job id, input SHA-256, pinned See-through revision, PSD path and
-SHA-256, contact sheet, structural QA result, expression readiness, and any
-remaining motion-renderer QA. A structurally valid PSD is not automatically a
+SHA-256, contact sheet, structural QA result, expression readiness (including
+any `previewExpressions`), and the `motion-qa` result or that it was not run. A structurally valid PSD is not automatically a
 Live2D- or renderer-ready rig.
 
 Tell the user that `npm run preview` starts the built-in local PSD preview. It
