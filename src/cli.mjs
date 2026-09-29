@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { readPsd, writePsdBuffer } from 'ag-psd';
 import { buildPsd } from './psd.mjs';
 import { colabBridgePaths, colabConnectionInfo } from './colab.mjs';
 import { listJobs, loadJob, prepareJob, updateJob } from './job.mjs';
@@ -25,8 +26,10 @@ Usage:
   still2rig-psd colab-url [--json]
   still2rig-psd cell JOB CELL_FILE
   still2rig-psd import JOB RESULT.zip
-  still2rig-psd finalize JOB [--expressions DIR] [--layer-overrides DIR] [--preview-placeholders]
-  still2rig-psd repair JOB [--expressions DIR] [--layer-overrides DIR] [--preview-placeholders]
+  still2rig-psd finalize JOB [--expressions DIR | --preview-expressions DIR] [--layer-overrides DIR] [--preview-placeholders]
+  still2rig-psd repair JOB [--expressions DIR | --preview-expressions DIR] [--layer-overrides DIR] [--preview-placeholders]
+  still2rig-psd derive-expressions JOB
+  still2rig-psd motion-qa JOB [--negative-fixture]
   still2rig-psd status [JOB] [--json]
   still2rig-psd self-test
 
@@ -149,7 +152,11 @@ function assembleArtifacts({ jobId, root, options, outputPsd, layerDir, reportsR
     '--minimum-component-pixels', String(defaults.quality.minimumComponentPixels),
     '--drop-optional-below', String(defaults.quality.dropOptionalBelowPixels),
   ];
-  if (options.expressions) inspectArgs.push('--expressions', path.resolve(options.expressions));
+  if (options.expressions && options['preview-expressions']) {
+    throw new Error('Use either --expressions (drawn artwork) or --preview-expressions (derived preview artwork), not both.');
+  }
+  const expressionDir = options.expressions || options['preview-expressions'];
+  if (expressionDir) inspectArgs.push('--expressions', path.resolve(expressionDir));
   if (options['layer-overrides']) inspectArgs.push('--layer-overrides', path.resolve(options['layer-overrides']));
   runPython('inspect_layers.py', inspectArgs);
   const buildReportFile = path.join(reportsRoot, 'psd-build.json');
@@ -158,10 +165,22 @@ function assembleArtifacts({ jobId, root, options, outputPsd, layerDir, reportsR
     output: outputPsd,
     reportFile: buildReportFile,
     previewPlaceholders: Boolean(options['preview-placeholders']),
+    previewExpressionTargets: options['preview-expressions'] ? previewExpressionTargets(inspectionReport) : [],
   });
   const qaReportFile = path.join(reportsRoot, 'qa-report.json');
   const qa = runQa({ psdFile: outputPsd, layerDir, buildReportFile, reportFile: qaReportFile });
   return { build, qa, outputPsd, qaReportFile, contactSheet, buildReportFile, inspectionReport };
+}
+
+const EXPRESSION_TARGETS = {
+  'mouth_open.png': 'mouth_open',
+  'mouth_close.png': 'mouth_close',
+  'eye_close.png': 'eye_close',
+};
+
+function previewExpressionTargets(inspectionReport) {
+  const report = JSON.parse(fs.readFileSync(inspectionReport, 'utf8'));
+  return (report.expressionFiles || []).map((name) => EXPRESSION_TARGETS[name]).filter(Boolean);
 }
 
 function finalize(jobId, options) {
@@ -187,6 +206,7 @@ function finalize(jobId, options) {
       qaReport: relativeProjectPath(assembled.qaReportFile),
       contactSheet: relativeProjectPath(assembled.contactSheet),
       productionReady: assembled.qa.productionReady,
+      previewExpressions: assembled.build.previewExpressions,
     },
   }));
   return { jobId, build: assembled.build, qa: assembled.qa };
@@ -253,6 +273,7 @@ function repair(jobId, options) {
     qaReport: relativeProjectPath(assembled.qaReportFile),
     contactSheet: relativeProjectPath(assembled.contactSheet),
     productionReady: assembled.qa.productionReady,
+    previewExpressions: assembled.build.previewExpressions,
   };
   updateJob(jobId, (job) => ({
     ...job,
@@ -265,6 +286,89 @@ function repair(jobId, options) {
     },
   }));
   return { jobId, repairId, before, build: assembled.build, qa: assembled.qa, result: after };
+}
+
+function currentLayerDir(root, manifest) {
+  const repairs = manifest.result?.repairs || [];
+  const latest = repairs.length ? repairs[repairs.length - 1].repairId : null;
+  const dir = latest
+    ? path.join(root, 'repairs', latest, 'after', 'processed', 'layers')
+    : path.join(root, 'processed', 'layers');
+  if (!fs.existsSync(dir)) throw new Error('Finalize the job before deriving expressions.');
+  return dir;
+}
+
+function deriveExpressions(jobId) {
+  const { root, manifest } = loadJob(jobId);
+  const outputDir = path.join(root, 'preview-expressions');
+  const report = path.join(outputDir, 'report.json');
+  runPython('build_preview_expressions.py', [
+    '--layer-dir', currentLayerDir(root, manifest),
+    '--output-dir', outputDir,
+    '--report', report,
+  ]);
+  return {
+    jobId,
+    outputDir: relativeProjectPath(outputDir),
+    report: relativeProjectPath(report),
+    next: `still2rig-psd repair ${jobId} --preview-expressions ${relativeProjectPath(outputDir)}`,
+    note: 'Derived preview art. The PSD stays productionReady=false until drawn expression art is supplied with --expressions.',
+  };
+}
+
+function shiftedMouthFixture(psdFile, output) {
+  // Contract negative fixture: shift mouth_close by +24px in a temporary copy.
+  const psd = readPsd(new Uint8Array(fs.readFileSync(psdFile)), { useImageData: true, skipThumbnail: true });
+  const mouth = (psd.children || []).find((layer) => layer.name === 'mouth_close');
+  if (!mouth?.imageData) throw new Error('The PSD has no mouth_close layer for the negative fixture.');
+  const { width, height, data } = mouth.imageData;
+  const shifted = new Uint8ClampedArray(data.length);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x + 24 < width; x += 1) {
+      shifted.set(data.subarray((y * width + x) * 4, (y * width + x) * 4 + 4), (y * width + x + 24) * 4);
+    }
+  }
+  mouth.imageData = { width, height, data: shifted };
+  fs.mkdirSync(path.dirname(output), { recursive: true });
+  fs.writeFileSync(output, writePsdBuffer(psd));
+  return output;
+}
+
+function motionQa(jobId, options) {
+  const { root, manifest } = loadJob(jobId);
+  if (!manifest.result?.psd) throw new Error('Finalize the job before running motion QA.');
+  const psdFile = path.resolve(PROJECT_ROOT, manifest.result.psd);
+  const negative = Boolean(options['negative-fixture']);
+  const outDir = path.join(root, 'reports', negative ? 'motion-qa-negative' : 'motion-qa');
+  const renderPsd = negative ? shiftedMouthFixture(psdFile, path.join(root, 'reports', 'motion-qa-negative-fixture.psd')) : psdFile;
+  const result = spawnSync(process.execPath, [
+    path.join(PROJECT_ROOT, 'webui', 'scripts', 'run-motion-qa.mjs'),
+    '--psd', renderPsd,
+    '--reference-psd', psdFile,
+    '--out', outDir,
+  ], { cwd: path.join(PROJECT_ROOT, 'webui'), encoding: 'utf8', maxBuffer: 20 * 1024 * 1024 });
+  if (negative) fs.rmSync(renderPsd, { force: true });
+  if (result.status !== 0) throw new Error((result.stderr || result.stdout || 'motion QA failed to run').trim());
+  const reportFile = path.join(outDir, 'motion-qa.json');
+  const report = JSON.parse(fs.readFileSync(reportFile, 'utf8'));
+  if (negative) {
+    const behavedAsExpected = report.pass === false && report.checks.mouthToEyesRelativeResidual === false;
+    return { jobId, negativeFixture: 'shift mouth_close by +24px', expected: 'FAIL', result: report.pass ? 'PASS' : 'FAIL', behavedAsExpected, report: relativeProjectPath(reportFile), metrics: report.metrics };
+  }
+  updateJob(jobId, (job) => ({
+    ...job,
+    updatedAt: new Date().toISOString(),
+    result: {
+      ...job.result,
+      motionQa: {
+        pass: report.pass,
+        psdSha256: sha256File(psdFile),
+        report: relativeProjectPath(reportFile),
+        failedChecks: Object.entries(report.checks).filter(([, ok]) => !ok).map(([name]) => name),
+      },
+    },
+  }));
+  return { jobId, pass: report.pass, checks: report.checks, metrics: report.metrics, report: relativeProjectPath(reportFile) };
 }
 
 function selfTest() {
@@ -315,6 +419,12 @@ export async function main(argv = process.argv.slice(2)) {
     print(finalize(positional[0], options), true);
   } else if (command === 'repair') {
     print(repair(positional[0], options), true);
+  } else if (command === 'motion-qa') {
+    const result = motionQa(positional[0], options);
+    print(result, true);
+    if (options['negative-fixture'] ? !result.behavedAsExpected : !result.pass) process.exitCode = 1;
+  } else if (command === 'derive-expressions') {
+    print(deriveExpressions(positional[0]), true);
   } else if (command === 'status') {
     print(positional[0] ? loadJob(positional[0]).manifest : listJobs(), options.json);
   } else if (command === 'self-test') {

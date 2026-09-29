@@ -23,7 +23,11 @@ function paeth(a, b, c) {
 }
 
 export function readPngRgba(file) {
-  const buffer = fs.readFileSync(file);
+  return decodePngRgba(fs.readFileSync(file), path.basename(file));
+}
+
+export function decodePngRgba(buffer, label = 'PNG') {
+  const file = label;
   if (buffer.subarray(0, 8).toString('hex') !== '89504e470d0a1a0a') throw new Error(`Not a PNG: ${path.basename(file)}`);
   let offset = 8;
   let width = 0;
@@ -113,7 +117,7 @@ function composite(layers, width, height) {
   return result;
 }
 
-export function buildPsd({ layerDir, output, reportFile, previewPlaceholders = false }) {
+export function buildPsd({ layerDir, output, reportFile, previewPlaceholders = false, previewExpressionTargets = [] }) {
   const map = loadLayerMap();
   const orderedTargets = [];
   const selected = new Map();
@@ -148,6 +152,10 @@ export function buildPsd({ layerDir, output, reportFile, previewPlaceholders = f
   }
   const names = layers.map((layer) => layer.name);
   const missingProduction = productionTargets.filter((target) => !names.includes(target));
+  // Expression art derived from the neutral image is preview art, never production art.
+  const previewExpressions = previewExpressionTargets
+    .filter((target) => names.includes(target))
+    .map((layer) => ({ layer, provenance: 'derived-preview' }));
   fs.mkdirSync(path.dirname(output), { recursive: true });
   const psd = { width, height, imageData: composite(layers, width, height), children: layers };
   fs.writeFileSync(output, writePsdBuffer(psd));
@@ -166,8 +174,9 @@ export function buildPsd({ layerDir, output, reportFile, previewPlaceholders = f
     canvas: [width, height],
     layerOrder: names,
     placeholders,
+    previewExpressions,
     missingProduction,
-    productionReady: missingProduction.length === 0 && placeholders.length === 0,
+    productionReady: missingProduction.length === 0 && placeholders.length === 0 && previewExpressions.length === 0,
   };
   writeJson(reportFile, report);
   return report;
@@ -182,6 +191,6 @@ export function inspectPsd(file) {
   return {
     width: psd.width,
     height: psd.height,
-    layers: (psd.children || []).map((layer) => ({ name: layer.name, imageData: layer.imageData })),
+    layers: (psd.children || []).map((layer) => ({ name: layer.name, left: layer.left || 0, top: layer.top || 0, imageData: layer.imageData })),
   };
 }

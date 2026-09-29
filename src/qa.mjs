@@ -160,7 +160,7 @@ export function runQa({ psdFile, layerDir, buildReportFile, reportFile }) {
     neckBehindFace: before('neck', 'face'),
     facePartsInFront: ['eyewhite', 'irides', 'eyelash', 'eyebrow', 'mouth_close', 'mouth_open', 'eye_close'].every((name) => before('face', name)),
     frontHairInFront: ['face', 'eyewhite', 'irides', 'mouth_close', 'eye_close'].every((name) => before(name, 'front hair')),
-    productionExpressions: build.missingProduction.length === 0 && build.placeholders.length === 0,
+    productionExpressions: build.missingProduction.length === 0 && build.placeholders.length === 0 && (build.previewExpressions || []).length === 0,
     expressionRegistration: Object.values(registration.checks).every(Boolean),
     expressionArtwork: Object.values(mouthArtwork.checks).every(Boolean),
   };
@@ -175,11 +175,12 @@ export function runQa({ psdFile, layerDir, buildReportFile, reportFile }) {
     checks,
     structuralPass,
     productionReady,
+    previewExpressions: build.previewExpressions || [],
     registration,
     mouthArtwork,
     limitations: [
       'Production readiness here covers PSD structure and expression registration, not deformation quality in a particular renderer.',
-      'Paper-slip, hair physics, seams, and motion continuity require a renderer adapter that records frames against configs/motion-qa-contract.json.',
+      'Paper-slip, hair physics, seams, and motion continuity are checked separately by `still2rig-psd motion-qa`, which records the built-in preview renderer against configs/motion-qa-contract.json.',
     ],
   };
   writeJson(reportFile, report);

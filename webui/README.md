@@ -78,7 +78,9 @@ parts reduce available animation states.
 
 This preview does not replace Still2Rig PSD structural QA. Publication-quality
 motion claims still require the capture contract in
-`../configs/motion-qa-contract.json`.
+`../configs/motion-qa-contract.json`. `scripts/run-motion-qa.mjs` is the
+capture adapter for that contract; run it through
+`npm run still2rig-psd -- motion-qa JOB` from the repository root.
 
 ## Privacy and licensing
 

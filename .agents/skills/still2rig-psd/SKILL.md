@@ -66,6 +66,21 @@ If the user provides full-canvas, registered expression files named
 non-production preview. Never describe copied or missing expressions as real
 lip-sync or blink art.
 
+Choose the expression source in this order:
+
+1. Drawn expression files from the user: pass them with `--expressions <dir>`.
+2. An available image generation tool (for example, Codex image generation):
+   generate full-canvas `eye_close.png` and `mouth_open.png` registered to the
+   source, pass them with `--expressions <dir>`, and report them as generated
+   art. Require `expressionRegistration=true` and `expressionArtwork=true`
+   before calling them ready.
+3. Only when neither is available, as a stopgap: run
+   `npm run still2rig-psd -- derive-expressions <job>` and rebuild with
+   `repair <job> --preview-expressions <dir>`. The derived layers reuse the
+   upper lash line and draw a small fixed-shape mouth, so they are less accurate
+   than generated or drawn art. The reports list them under
+   `previewExpressions` and keep `productionReady=false`.
+
 For mouth repair, prefer extracting the closed-mouth ink from the registered
 original artwork. Do not fill the component interior or carry a skin-colored
 rectangle into an expression layer. A derived opposite mouth state is preview
@@ -73,11 +88,19 @@ art, not trustworthy production art. Render both mouth states at full-canvas
 scale and as a face crop, then require `expressionArtwork=true` and
 `mouthWithinTolerance=true` in the QA report before reporting the repair.
 
+## Motion QA
+
+Run `npm run still2rig-psd -- motion-qa <job>` after the PSD is final. It records
+the contract captures in the built-in preview renderer and scores them. Run it
+again with `--negative-fixture` when the checks themselves changed; that run must
+FAIL. Only a passing `motion-qa` report for the current PSD SHA-256 supports a
+motion, seam, or hair-motion claim, and only for the built-in renderer.
+
 ## Completion report
 
 Report the job id, input SHA-256, pinned See-through revision, PSD path and
-SHA-256, contact sheet, structural QA result, expression readiness, and any
-remaining motion-renderer QA. A structurally valid PSD is not automatically a
+SHA-256, contact sheet, structural QA result, expression readiness (including
+any `previewExpressions`), and the `motion-qa` result or that it was not run. A structurally valid PSD is not automatically a
 Live2D- or renderer-ready rig.
 
 Tell the user that `npm run preview` starts the built-in local PSD preview. It

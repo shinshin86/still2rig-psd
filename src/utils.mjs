@@ -76,7 +76,7 @@ export function parseOptions(argv) {
       continue;
     }
     const key = token.slice(2);
-    if (['preview-placeholders', 'json'].includes(key)) {
+    if (['preview-placeholders', 'json', 'negative-fixture'].includes(key)) {
       options[key] = true;
       continue;
     }
