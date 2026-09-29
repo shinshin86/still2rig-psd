@@ -78,6 +78,20 @@ file checked.
 
 ## Preview expressions derived from the neutral image
 
+This is a stopgap for when no better expression art is available. Use the
+first option that applies:
+
+1. Drawn `eye_close.png` and `mouth_open.png`, passed with `--expressions`.
+2. Files made with an image generation tool (for example, Codex image
+   generation), registered to the source canvas and passed with
+   `--expressions`. They must pass the registration and mouth checks.
+3. Derived preview art from `derive-expressions`, described below.
+
+The derived art has a fixed shape: the closed lids are the upper lash line
+flipped and flattened, and the open mouth is a small opening drawn under the
+closed-mouth line. It cannot show a smiling closed eye or a rounded mouth, and
+it may not line up with the iris when the character looks to the side.
+
 `still2rig-psd derive-expressions JOB` draws a preview open mouth and closed
 eyes from the finalized layers (the closed lids reuse the upper lash line). Pass
 the result with `--preview-expressions DIR` instead of `--expressions DIR`:

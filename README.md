@@ -187,8 +187,10 @@ artwork; one arm layer cannot represent both depths.
 
 If the source does not show an open mouth or closed eyes, those states cannot be
 determined reliably. `--preview-placeholders` is only for exercising the
-controls and is not treated as real expression art. `derive-expressions` draws
-a preview open mouth and closed eyes from the neutral layers; passed with
+controls and is not treated as real expression art. Prefer drawn expression
+files, or files made with an image generation tool, passed with
+`--expressions`. When neither is available, `derive-expressions` can draw a
+stopgap open mouth and closed eyes from the neutral layers; passed with
 `--preview-expressions`, they appear in the preview but keep
 `productionReady=false`.
 

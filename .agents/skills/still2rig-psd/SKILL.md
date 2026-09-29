@@ -66,11 +66,20 @@ If the user provides full-canvas, registered expression files named
 non-production preview. Never describe copied or missing expressions as real
 lip-sync or blink art.
 
-When the user wants to see blinking and mouth movement without drawn art, run
-`npm run still2rig-psd -- derive-expressions <job>` and rebuild with
-`repair <job> --preview-expressions <dir>`. The derived layers are preview art;
-the reports list them under `previewExpressions` and keep
-`productionReady=false`.
+Choose the expression source in this order:
+
+1. Drawn expression files from the user: pass them with `--expressions <dir>`.
+2. An available image generation tool (for example, Codex image generation):
+   generate full-canvas `eye_close.png` and `mouth_open.png` registered to the
+   source, pass them with `--expressions <dir>`, and report them as generated
+   art. Require `expressionRegistration=true` and `expressionArtwork=true`
+   before calling them ready.
+3. Only when neither is available, as a stopgap: run
+   `npm run still2rig-psd -- derive-expressions <job>` and rebuild with
+   `repair <job> --preview-expressions <dir>`. The derived layers reuse the
+   upper lash line and draw a small fixed-shape mouth, so they are less accurate
+   than generated or drawn art. The reports list them under
+   `previewExpressions` and keep `productionReady=false`.
 
 For mouth repair, prefer extracting the closed-mouth ink from the registered
 original artwork. Do not fill the component interior or carry a skin-colored

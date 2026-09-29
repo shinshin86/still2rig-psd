@@ -34,8 +34,10 @@ Treat this folder as a future public repository.
 - Do not claim paper-slip, seam, or hair-motion quality without a passing
   `npm run still2rig-psd -- motion-qa JOB` report for the current PSD. The
   report covers the built-in preview renderer only.
-- Expression art from `derive-expressions` is preview art. Pass it only with
-  `--preview-expressions`, and never describe it as drawn blink or lip-sync art.
+- Expression art from `derive-expressions` is a stopgap preview. Use it only
+  when neither drawn nor image-generated expression files are available, pass
+  it only with `--preview-expressions`, and never describe it as drawn blink or
+  lip-sync art.
 
 ## Local PSD preview
 

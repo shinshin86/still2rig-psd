@@ -173,7 +173,9 @@ Still2Rig PSDは、Chromeの自動操作、Googleへのログイン、アカウ�
 
 元画像に開き口や閉じ目が写っていない場合、本物の口・まばたき素材は自動では
 確定できません。`--preview-placeholders`は操作確認用であり、実際の表情素材としては
-扱いません。`derive-expressions`は元のレイヤーから仮の開き口と閉じ目を描きます。
+扱いません。表情画像は、描いたものか画像生成ツールで作ったものを`--expressions`で
+渡すことを優先してください。どちらも用意できない場合の応急処置として、
+`derive-expressions`で元のレイヤーから仮の開き口と閉じ目を描けます。
 `--preview-expressions`で渡すとプレビューで動きを確認できますが、`productionReady=false`
 のままです。
 
