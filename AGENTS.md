@@ -10,6 +10,9 @@ Treat this folder as a future public repository.
   generated cells under the ignored `.still2rig-psd/` directory.
 - Never add API keys, cookies, Google account details, personal images, chat
   transcripts, local absolute paths, or model weights to tracked files.
+- Before sending character images or face crops to an image generation service,
+  explain which images and service will be used and wait for the user's approval.
+  Preparing local `expression-requests` files alone does not send images.
 - Do not run `git init`, commit, push, publish a package, or create a release
   unless the user explicitly asks for that separate action.
 - Do not change `~/.codex/config.toml`. This project uses its own trusted

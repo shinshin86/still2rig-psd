@@ -76,6 +76,49 @@ the WebUI controls can be exercised. It does not generate a real open mouth, so
 the two states may look identical and the report remains below expression
 file checked.
 
+## Expression requests for image generation
+
+```bash
+npm run still2rig-psd -- expression-requests demo
+npm run still2rig-psd -- import-expressions demo
+npm run still2rig-psd -- repair demo --expressions .still2rig-psd/jobs/demo/generated-expressions
+```
+
+`expression-requests` writes `input.png`, `mask.png` and `prompt.txt` for each of
+`eye_close` and `mouth_open` under the ignored work directory. The input is a
+face crop of the current neutral PSD layer composite, including the latest
+repair, rather than the original image whose dimensions may differ. Transparent
+mask pixels may change; opaque mask pixels must remain identical.
+Layers above the expressions, including front hair and headwear, are hidden in
+both the input and the underlay. The generator must not add hair or accessories.
+Each variant also has a local `underlay.png` containing the face without that
+variant's source eyes or mouth. This reference is used only for extraction;
+do not edit it or send it to the generator.
+
+Ask the image owner before sending these crops to a generation service. Save
+the returned images as `expression-requests/results/eye_close.png` and
+`mouth_open.png`. `import-expressions JOB [DIR]` accepts another results directory
+when supplied. Proportional size changes within 1% aspect-ratio error are resized
+back. The protected-area premultiplied RGBA difference must have mean at most 3
+and 99th percentile at most 20 on the 0–255 scale; `--max-outside-mean` and
+`--max-outside-p99` configure these limits. The import report records the measured
+values, including failed validation. Changed layers require new requests and new
+generated results.
+
+Inside the editable area, import compares the result to the underlay in
+premultiplied RGBA and keeps only pixels whose maximum channel difference exceeds
+8 (`--artwork-threshold`). Alpha rises smoothly from zero to full opacity over
+the next 16 intensity levels. Components smaller than 4 pixels are discarded
+(`--minimum-component-pixels`). This removes matching skin and small noise while
+preserving the new mouth or eyelid drawing. Differences over transparent underlay
+are retained. Older requests without an underlay must be regenerated.
+
+The new artwork is restored onto transparent full-canvas files in
+`generated-expressions/`. Import does not approve it: skin-color drift above the
+threshold and mismatched edges still require visual review. Use `repair --expressions` for the existing
+registration and mouth checks, and visually review both expression states. Only
+those checks determine `productionReady`; image generation alone does not.
+
 ## Preview expressions derived from the neutral image
 
 This is a stopgap for when no better expression art is available. Use the

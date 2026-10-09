@@ -36,6 +36,7 @@ interface GeneratedPsd {
   state: string;
   productionReady: boolean | null;
   bytes: number;
+  jobId: string | null;
 }
 
 interface RigQaApi {
@@ -96,6 +97,9 @@ const generatedPsdSelect = requireElement<HTMLSelectElement>('#generated-psd-sel
 const generatedPsdRefresh = requireElement<HTMLButtonElement>('#generated-psd-refresh');
 const generatedPsdOpenFolder = requireElement<HTMLButtonElement>('#generated-psd-open-folder');
 const generatedPsdNote = requireElement<HTMLElement>('#generated-psd-note');
+const expressionRequestControl = requireElement<HTMLElement>('#expression-request-control');
+const expressionRequestCopy = requireElement<HTMLButtonElement>('#expression-request-copy');
+const expressionRequestStatus = requireElement<HTMLElement>('#expression-request-status');
 const psdFileInput = requireElement<HTMLInputElement>('#psd-file-input');
 const dropOverlay = requireElement<HTMLElement>('#drop-overlay');
 const motionTab = requireElement<HTMLButtonElement>('#motion-tab');
@@ -1487,6 +1491,7 @@ async function loadLocalPsd(file: File): Promise<void> {
   generatedPsdSelect.value = '';
   activeGeneratedPsdId = '';
   generatedPsdOpenFolder.disabled = true;
+  syncExpressionRequestControl();
   const buffer = await file.arrayBuffer();
   initializeLayerEditor(buffer, file.name);
   setWorkspaceMode('motion');
@@ -1504,6 +1509,8 @@ function generatedPsdLabel(item: GeneratedPsd): string {
 
 async function loadGeneratedPsd(item: GeneratedPsd): Promise<void> {
   const token = ++loadToken;
+  activeGeneratedPsdId = '';
+  syncExpressionRequestControl();
   setLoadingState(item.name);
   const response = await fetch(item.url, { cache: 'no-store' });
   if (!response.ok) throw new Error(`生成済みPSDを読み込めませんでした（${response.status}）。`);
@@ -1515,6 +1522,37 @@ async function loadGeneratedPsd(item: GeneratedPsd): Promise<void> {
   generatedPsdSelect.value = item.id;
   activeGeneratedPsdId = item.id;
   generatedPsdOpenFolder.disabled = false;
+  syncExpressionRequestControl();
+}
+
+function syncExpressionRequestControl(): void {
+  const item = generatedPsds.find((candidate) => candidate.id === activeGeneratedPsdId);
+  expressionRequestControl.hidden = !item?.jobId;
+  expressionRequestStatus.textContent = '';
+}
+
+async function copyExpressionRequest(): Promise<void> {
+  const item = generatedPsds.find((candidate) => candidate.id === activeGeneratedPsdId);
+  if (!item?.jobId) return;
+  const id = item.jobId;
+  const root = `.still2rig-psd/jobs/${id}`;
+  const message = [
+    '$still2rig-psd を使い、このPSDの閉じた目と開いた口の表情画像を作って組み込んでください。',
+    `対象: ${item.name}（変換の識別名: ${id}）。リポジトリの AGENTS.md とスキルを読んでください。`,
+    `まず npm run still2rig-psd -- expression-requests ${id} を実行してください。`,
+    '顔の画像を画像生成サービスへ送信する前に、送信先と送る画像を説明して私の承認を待ってください。',
+    `承認後、${root}/expression-requests/ の eye_close と mouth_open それぞれの input.png、mask.png、prompt.txt を使って画像を生成してください。`,
+    `結果を ${root}/expression-requests/results/eye_close.png と mouth_open.png に保存し、npm run still2rig-psd -- import-expressions ${id} を実行してください。`,
+    `取り込みが通ったら npm run still2rig-psd -- repair ${id} --expressions ${root}/generated-expressions を実行し、既存の品質検査と絵の目視確認をしてください。`,
+    'Claude Codeなど画像生成ができないエージェントの場合は、準備したファイルと渡し方を教えて、画像生成の段階で止めてください。仮の表情で置き換えないでください。',
+    '対象は保存済みPSDのレイヤーです。ブラウザ内の未保存の並べ替えは含めません。コミット・pushはしないでください。',
+  ].join('\n');
+  try {
+    await navigator.clipboard.writeText(message);
+    expressionRequestStatus.textContent = '依頼文をコピーしました。Codexに貼り付けてください。';
+  } catch {
+    expressionRequestStatus.textContent = 'コピーできませんでした。ブラウザのクリップボード許可を確認してください。';
+  }
 }
 
 async function openGeneratedPsdFolder(): Promise<void> {
@@ -1591,6 +1629,7 @@ async function refreshGeneratedPsdList(autoLoad = false): Promise<void> {
     generatedPsdNote.textContent = error instanceof Error ? error.message : String(error);
   } finally {
     generatedPsdRefresh.disabled = false;
+    syncExpressionRequestControl();
   }
 }
 
@@ -1715,6 +1754,9 @@ function installEventListeners(): void {
   });
   generatedPsdOpenFolder.addEventListener('click', () => {
     void openGeneratedPsdFolder();
+  });
+  expressionRequestCopy.addEventListener('click', () => {
+    void copyExpressionRequest();
   });
 
   let fileDragDepth = 0;

@@ -42,6 +42,8 @@ function listGeneratedPsds() {
         state: manifest?.state ?? 'generated',
         productionReady: manifest?.result?.productionReady ?? null,
         bytes: stat.size,
+        jobId: manifest?.jobId === entry.name && /^[a-z0-9][a-z0-9._-]{0,79}$/.test(entry.name)
+          ? entry.name : null,
         file,
       });
     }

@@ -25,6 +25,7 @@ def main():
     parser.add_argument("--mouth-shift", type=int, default=0)
     parser.add_argument("--mouth-patch", action="store_true")
     parser.add_argument("--without-expressions", action="store_true")
+    parser.add_argument("--hair-over-eyes", action="store_true")
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
 
@@ -56,7 +57,9 @@ def main():
         draw.rectangle((33, 32, 41, 37), fill=(70, 30, 20, 255))
         draw.rectangle((55, 32, 63, 37), fill=(70, 30, 20, 255))
         image.save(args.output / "eye_close.png")
-    save_rect(args.output, "front hair.png", (20, 5, 76, 28), (85, 45, 25, 255))
+    save_rect(args.output, "front hair.png", (20, 5, 76, 38 if args.hair_over_eyes else 28), (85, 45, 25, 255))
+    if args.hair_over_eyes:
+        save_rect(args.output, "headwear.png", (20, 5, 76, 38), (10, 240, 10, 255))
 
 
 if __name__ == "__main__":

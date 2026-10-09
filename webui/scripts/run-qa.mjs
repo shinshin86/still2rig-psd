@@ -150,6 +150,8 @@ try {
     avatarReady: document.body.dataset.avatarReady,
     generatedOptions: document.querySelectorAll('#generated-psd-select option').length - 1,
     openFolderDisabled: document.querySelector('#generated-psd-open-folder')?.disabled,
+    expressionRequestHidden: document.querySelector('#expression-request-control')?.hidden,
+    emptyStateOpacity: getComputedStyle(document.querySelector('.empty-state')).opacity,
     legacyBadgeCount: document.querySelectorAll('.badge').length,
     titleParent: document.querySelector('h1')?.parentElement?.className,
   }));
@@ -167,7 +169,23 @@ try {
     modelName: document.querySelector('#model-name')?.textContent,
     selectedValue: document.querySelector('#generated-psd-select')?.value,
     openFolderDisabled: document.querySelector('#generated-psd-open-folder')?.disabled,
+    expressionRequestHidden: document.querySelector('#expression-request-control')?.hidden,
+    emptyStateOpacity: getComputedStyle(document.querySelector('.empty-state')).opacity,
   }));
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+  await page.locator('#expression-request-control summary').click();
+  await page.click('#expression-request-copy');
+  await page.waitForFunction(() => document.querySelector('#expression-request-status')?.textContent?.includes('コピーしました'));
+  const expressionRequestMessage = await page.evaluate(() => navigator.clipboard.readText());
+  await page.waitForFunction(() =>
+    document.body.dataset.avatarReady === 'true' &&
+    getComputedStyle(document.querySelector('.empty-state')).opacity === '0',
+  );
+  const expressionRequestEmptyStateOpacity = await page.locator('.empty-state').evaluate(
+    (element) => getComputedStyle(element).opacity,
+  );
+  await page.screenshot({ path: path.join(qaRoot, 'expression-request-review-1.png') });
+  await page.locator('#expression-request-control summary').click();
   await page.click('#generated-psd-open-folder');
   await page.waitForFunction(
     () => document.querySelector('#generated-psd-note')?.textContent?.includes('保存先を開きました'),
@@ -608,6 +626,7 @@ try {
   await page.waitForTimeout(500);
   const summary = await page.evaluate(() => window.rigQa.summary);
   const localFolderButtonDisabled = await page.locator('#generated-psd-open-folder').isDisabled();
+  const localExpressionRequestHidden = await page.locator('#expression-request-control').evaluate((element) => element.hidden);
   await page.screenshot({ path: path.join(qaRoot, 'uploaded.png') });
   const canvas = page.locator('#rig-canvas');
 
@@ -792,6 +811,12 @@ try {
     };
   });
   await mobilePage.screenshot({ path: path.join(qaRoot, 'mobile-loaded.png'), fullPage: true });
+  await mobilePage.locator('#expression-request-control summary').click();
+  const mobileExpressionRequestFits = await mobilePage.locator('#expression-request-control').evaluate(
+    (element) => element.scrollWidth <= element.clientWidth,
+  );
+  await mobilePage.screenshot({ path: path.join(qaRoot, 'mobile-expression-request.png'), fullPage: true });
+  await mobilePage.locator('#expression-request-control summary').click();
   await mobilePage.click('#layer-edit-tab');
   await mobilePage.waitForTimeout(220);
   await mobilePage.evaluate(() => window.rigQa.setLayerProcessingPreview(true));
@@ -932,6 +957,18 @@ try {
   await compactPage.close();
 
   const checks = {
+    expressionRequestCopiesCurrentSavedPsd:
+      waitingState.expressionRequestHidden === true &&
+      selectedGeneratedState.expressionRequestHidden === false &&
+      expressionRequestMessage.includes(`expression-requests ${fixtureJobId}`) &&
+      expressionRequestMessage.includes(`import-expressions ${fixtureJobId}`) &&
+      expressionRequestMessage.includes(`repair ${fixtureJobId} --expressions`) &&
+      expressionRequestMessage.includes('承認を待って') &&
+      expressionRequestMessage.includes('Claude Code') &&
+      !expressionRequestMessage.includes(repositoryRoot) &&
+      localExpressionRequestHidden === true &&
+      mobileExpressionRequestFits === true,
+    expressionRequestScreenshotHasNoEmptyOverlay: expressionRequestEmptyStateOpacity === '0',
     startsWithoutBundledArtwork:
       waitingState.ready === false &&
       waitingState.status === '待機中' &&
@@ -1213,6 +1250,7 @@ try {
     openFolderUiState,
     localFolderButtonDisabled,
     selectedGeneratedState,
+    expressionRequestEmptyStateOpacity,
     autoLoadedState,
     initialLayout,
     layerEditorInitial,

@@ -123,6 +123,30 @@ npm run preview
 かかる場合は、プレビュー上に処理中の内容を表示します。細かい並べ替えはPCのマウスで
 右端の点々をドラッグして行えます。スマートフォンのタッチ操作には対応していません。
 
+### 5. 閉じた目と開いた口の絵を用意する
+
+生成済みPSDを選ぶと、「閉じた目と開いた口の絵を作ってもらう」からCodexへの
+依頼文をコピーできます。画像生成サービスへ顔の画像を送る前に、承認を求める
+依頼文です。Claude Codeは画像を生成できませんが、サービスへ渡すファイルを
+準備できます。
+
+直接操作する場合は、次の順で実行します。
+
+```bash
+npm run still2rig-psd -- expression-requests demo
+# 送信を承認したあと、各表情の input.png、mask.png、prompt.txt で画像を生成します。
+# 結果は .still2rig-psd/jobs/demo/expression-requests/results/ に保存します。
+npm run still2rig-psd -- import-expressions demo
+npm run still2rig-psd -- repair demo --expressions .still2rig-psd/jobs/demo/generated-expressions
+```
+
+依頼用の画像は、最新の修復を含むPSDレイヤーから、前髪・頭の装飾を隠して顔を
+切り抜きます。取り込みでは、顔の下地と同じ画素を除き、新しい表情の描画だけを
+PSDと同じ寸法・位置へ戻します。
+依頼後のレイヤー変更、縦横比の違い、編集範囲外の大きな変更は拒否します。
+手描きの素材を優先し、生成した絵も既存の表情検査と目視確認を行ってください。
+取り込みが通っただけでは、絵の品質を確認したことにはなりません。
+
 ## 自動化される部分とユーザーが行う部分
 
 | Codexが行うこと | ユーザーが行うこと |

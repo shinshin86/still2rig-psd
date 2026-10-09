@@ -29,6 +29,9 @@ Usage:
   still2rig-psd finalize JOB [--expressions DIR | --preview-expressions DIR] [--layer-overrides DIR] [--preview-placeholders]
   still2rig-psd repair JOB [--expressions DIR | --preview-expressions DIR] [--layer-overrides DIR] [--preview-placeholders]
   still2rig-psd derive-expressions JOB
+  still2rig-psd expression-requests JOB
+  still2rig-psd import-expressions JOB [DIR] [--max-outside-mean 3] [--max-outside-p99 20]
+    [--artwork-threshold 8] [--minimum-component-pixels 4]
   still2rig-psd motion-qa JOB [--negative-fixture]
   still2rig-psd status [JOB] [--json]
   still2rig-psd self-test
@@ -153,7 +156,7 @@ function assembleArtifacts({ jobId, root, options, outputPsd, layerDir, reportsR
     '--drop-optional-below', String(defaults.quality.dropOptionalBelowPixels),
   ];
   if (options.expressions && options['preview-expressions']) {
-    throw new Error('Use either --expressions (drawn artwork) or --preview-expressions (derived preview artwork), not both.');
+    throw new Error('Use either --expressions (drawn or image-generated artwork) or --preview-expressions (derived preview artwork), not both.');
   }
   const expressionDir = options.expressions || options['preview-expressions'];
   if (expressionDir) inspectArgs.push('--expressions', path.resolve(expressionDir));
@@ -294,7 +297,7 @@ function currentLayerDir(root, manifest) {
   const dir = latest
     ? path.join(root, 'repairs', latest, 'after', 'processed', 'layers')
     : path.join(root, 'processed', 'layers');
-  if (!fs.existsSync(dir)) throw new Error('Finalize the job before deriving expressions.');
+  if (!fs.existsSync(dir)) throw new Error('Finalize the job before preparing expressions.');
   return dir;
 }
 
@@ -313,6 +316,48 @@ function deriveExpressions(jobId) {
     report: relativeProjectPath(report),
     next: `still2rig-psd repair ${jobId} --preview-expressions ${relativeProjectPath(outputDir)}`,
     note: 'Derived preview art. The PSD stays productionReady=false until drawn expression art is supplied with --expressions.',
+  };
+}
+
+function expressionRequests(jobId) {
+  const { root, manifest } = loadJob(jobId);
+  const outputDir = path.join(root, 'expression-requests');
+  const requests = JSON.parse(runPython('build_expression_requests.py', [
+    '--job-id', jobId,
+    '--layer-dir', currentLayerDir(root, manifest),
+    '--output-dir', outputDir,
+  ]));
+  return {
+    jobId,
+    outputDir: relativeProjectPath(outputDir),
+    requests: relativeProjectPath(path.join(outputDir, 'requests.json')),
+    canvas: requests.canvas,
+    layerDir: requests.layerDir,
+    layerSha256: requests.layerSha256,
+    next: `still2rig-psd import-expressions ${jobId}`,
+    note: 'Local requests only. Ask the image owner before sending these crops to an image generation service.',
+  };
+}
+
+function importExpressions(jobId, directory, options) {
+  const { root, manifest } = loadJob(jobId);
+  const requestDir = path.join(root, 'expression-requests');
+  const outputDir = path.join(root, 'generated-expressions');
+  const reportFile = path.join(outputDir, 'report.json');
+  const args = [
+    '--job-id', jobId, '--layer-dir', currentLayerDir(root, manifest),
+    '--request-dir', requestDir, '--result-dir', directory ? path.resolve(directory) : path.join(requestDir, 'results'),
+    '--output-dir', outputDir, '--report', reportFile,
+  ];
+  for (const key of ['max-outside-mean', 'max-outside-p99', 'artwork-threshold', 'minimum-component-pixels']) {
+    if (options[key] !== undefined) args.push(`--${key}`, options[key]);
+  }
+  const report = JSON.parse(runPython('import_expression_results.py', args));
+  return {
+    ...report,
+    outputDir: relativeProjectPath(outputDir),
+    report: relativeProjectPath(reportFile),
+    next: `still2rig-psd repair ${jobId} --expressions ${relativeProjectPath(outputDir)}`,
   };
 }
 
@@ -425,6 +470,10 @@ export async function main(argv = process.argv.slice(2)) {
     if (options['negative-fixture'] ? !result.behavedAsExpected : !result.pass) process.exitCode = 1;
   } else if (command === 'derive-expressions') {
     print(deriveExpressions(positional[0]), true);
+  } else if (command === 'expression-requests') {
+    print(expressionRequests(positional[0]), true);
+  } else if (command === 'import-expressions') {
+    print(importExpressions(positional[0], positional[1], options), true);
   } else if (command === 'status') {
     print(positional[0] ? loadJob(positional[0]).manifest : listJobs(), options.json);
   } else if (command === 'self-test') {

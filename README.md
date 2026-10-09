@@ -134,6 +134,30 @@ with the source, supports detailed mouse-based drag sorting on desktop, and
 downloads a verified copy without overwriting the original PSD. Touch-based layer
 sorting on phones is not supported.
 
+### 5. Prepare closed-eye and open-mouth artwork
+
+For a generated PSD, **閉じた目と開いた口の絵を作ってもらう** in the preview copies
+a request to paste into Codex. The request asks for approval before sending face
+crops to an image generation service. Claude Code can prepare the files to hand
+to a generator, but cannot generate the images itself.
+
+You can also run the commands directly:
+
+```bash
+npm run still2rig-psd -- expression-requests demo
+# After approval, generate each variant using its input.png, mask.png and prompt.txt.
+# Save results in .still2rig-psd/jobs/demo/expression-requests/results/.
+npm run still2rig-psd -- import-expressions demo
+npm run still2rig-psd -- repair demo --expressions .still2rig-psd/jobs/demo/generated-expressions
+```
+
+Requests use a face crop of the current PSD layers, including the latest repair,
+with front hair and head accessories hidden. Import removes pixels matching the
+face underlay and restores only the new expression artwork to the PSD canvas. It rejects changed
+layers, wrong proportions, or excessive changes outside the mask. Drawn artwork
+remains the first choice. Generated art must pass the existing expression QA and
+visual review; importing it does not establish readiness.
+
 ## Automation and consent boundaries
 
 | Codex handles | You control |

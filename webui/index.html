@@ -172,6 +172,8 @@
       .tuning-item { display: grid; gap: 5px; }
       .tuning-item .field-head { font-size: 11px; }
       .tuning-note { margin: 9px 0 0; color: #8f9ab7; font-size: 11px; line-height: 1.45; }
+      .request-steps { margin: 0; padding-left: 18px; color: #c4cde0; font-size: 11px; line-height: 1.55; }
+      .request-steps li + li { margin-top: 4px; }
       .advanced-panel { border: 1px solid #495570; border-radius: 11px; background: rgb(25 31 45 / 72%); }
       .advanced-panel > summary { display: flex; justify-content: space-between; gap: 10px; align-items: center; padding: 12px; color: #dbe3f5; font-size: 12px; font-weight: 750; cursor: pointer; list-style: none; }
       .advanced-panel > summary::-webkit-details-marker { display: none; }
@@ -312,6 +314,21 @@
           </div>
           <section id="motion-panel" role="tabpanel" aria-labelledby="motion-tab">
           <h2 class="panel-title">動作を確認</h2>
+          <details id="expression-request-control" class="advanced-panel" hidden>
+            <summary>閉じた目と開いた口の絵を作ってもらう</summary>
+            <div class="advanced-content">
+              <p class="tuning-note">元の絵に閉じた目や開いた口がないと、まばたきや口パクが不自然になります。Codexの画像生成でその絵を描き足し、このPSDに組み込めます。</p>
+              <ol class="request-steps">
+                <li>下のボタンで依頼文をコピーします。</li>
+                <li>このフォルダで開いたCodexに貼り付けて送ります。</li>
+                <li>顔の画像を画像生成サービスへ送ってよいか聞かれるので、内容を確認して答えます。送るまでは画像は外に出ません。</li>
+                <li>完了の連絡が来たら、上の「一覧を更新」を押してPSDを開き直し、まばたきと口の動きを確認します。</li>
+              </ol>
+              <button id="expression-request-copy" type="button">依頼文をコピー</button>
+              <p id="expression-request-status" class="source-note" role="status" aria-live="polite"></p>
+              <p class="tuning-note">Claude Codeは画像を描けないため、画像生成サービスに渡すファイルを用意するところまで行います。</p>
+            </div>
+          </details>
           <div class="quick-check">
             <div class="field-head"><span>最初にまとめて確認</span></div>
             <p class="quick-check-copy">口・まばたき・髪揺れ・全身モーションを順番に再生します。</p>

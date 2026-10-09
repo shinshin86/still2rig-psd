@@ -70,10 +70,10 @@ Choose the expression source in this order:
 
 1. Drawn expression files from the user: pass them with `--expressions <dir>`.
 2. An available image generation tool (for example, Codex image generation):
-   generate full-canvas `eye_close.png` and `mouth_open.png` registered to the
-   source, pass them with `--expressions <dir>`, and report them as generated
-   art. Require `expressionRegistration=true` and `expressionArtwork=true`
-   before calling them ready.
+   use the masked request and import flow below, pass the resulting full-canvas
+   files with `--expressions <dir>`, and report them as generated art. Require
+   `expressionRegistration=true` and `expressionArtwork=true`, plus visual
+   review, before calling them checked.
 3. Only when neither is available, as a stopgap: run
    `npm run still2rig-psd -- derive-expressions <job>` and rebuild with
    `repair <job> --preview-expressions <dir>`. The derived layers reuse the
@@ -87,6 +87,55 @@ rectangle into an expression layer. A derived opposite mouth state is preview
 art, not trustworthy production art. Render both mouth states at full-canvas
 scale and as a face crop, then require `expressionArtwork=true` and
 `mouthWithinTolerance=true` in the QA report before reporting the repair.
+
+## Image-generated expressions
+
+Prepare local requests with:
+
+```bash
+npm run still2rig-psd -- expression-requests <job>
+```
+
+This creates `.still2rig-psd/jobs/<job>/expression-requests/` with `input.png`,
+`mask.png` and `prompt.txt` for `eye_close` and `mouth_open`. The inputs are face
+crops of the current PSD layers, including the latest repair. Do not substitute
+`input/source.png`: See-through may resize or pad it to a different canvas.
+Front hair and head accessories above the expressions are intentionally hidden;
+tell the generator not to add them. Each variant's `underlay.png` is the face
+without the source eyes or mouth; keep it local and unchanged for extraction.
+Transparent mask pixels may change; opaque mask pixels must remain identical.
+
+Before generation, explain which face crops and service will be used, then ask
+the user for approval and wait. The images leave the machine when sent to the
+generator. Preparing local request files alone does not require this consent.
+
+If image generation is available (for example, Codex imagegen), inspect each
+input and mask, then generate each variant using its `input.png`, `mask.png` and
+the exact instructions in `prompt.txt`. Save the returned PNGs as
+`expression-requests/results/eye_close.png` and `mouth_open.png`. If the agent
+cannot generate images (for example, Claude Code), stop at this stage and tell
+the user which three files for each variant to hand to a generator, where to
+save the results, and how to resume. Do not substitute derived preview art.
+
+After results are available:
+
+```bash
+npm run still2rig-psd -- import-expressions <job>
+npm run still2rig-psd -- repair <job> --expressions .still2rig-psd/jobs/<job>/generated-expressions
+```
+
+Import validates proportions, changes outside the mask and current layer hashes,
+then compares the editable area against the underlay, removes matching skin and
+tiny noise components, and restores only the new artwork to full-canvas
+transparent files with soft alpha edges. Read
+`generated-expressions/report.json`, including measured protected-pixel errors.
+If layers changed, regenerate the requests and results. If protected pixels
+changed too much, request a corrected image rather than increasing tolerances
+just to obtain a pass. Requests without the underlay must be regenerated. Color
+drift above the extraction threshold may still leave skin; existing mouth QA
+must still reject unsuitable patches. Inspect face crops and
+both full-canvas expression states for color, alignment and edge seams after
+repair. Import does not set `productionReady`; existing QA remains authoritative.
 
 ## Motion QA
 
