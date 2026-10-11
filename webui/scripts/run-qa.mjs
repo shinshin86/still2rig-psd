@@ -170,13 +170,31 @@ try {
     selectedValue: document.querySelector('#generated-psd-select')?.value,
     openFolderDisabled: document.querySelector('#generated-psd-open-folder')?.disabled,
     expressionRequestHidden: document.querySelector('#expression-request-control')?.hidden,
+    expressionRequestOpen: document.querySelector('#expression-request-control')?.open,
+    expressionRequestBodyHidden: document.querySelector('#expression-request-body')?.hidden,
     emptyStateOpacity: getComputedStyle(document.querySelector('.empty-state')).opacity,
   }));
+  const selectedGeneratedProductionReady = await page.evaluate(async (id) => {
+    const response = await fetch('/api/generated-psds', { cache: 'no-store' });
+    const body = await response.json();
+    return body.items.find((item) => item.id === id)?.productionReady ?? null;
+  }, generatedId);
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
-  await page.locator('#expression-request-control summary').click();
-  await page.click('#expression-request-copy');
-  await page.waitForFunction(() => document.querySelector('#expression-request-status')?.textContent?.includes('コピーしました'));
-  const expressionRequestMessage = await page.evaluate(() => navigator.clipboard.readText());
+  await page.evaluate(() => { document.querySelector('#expression-request-control').open = true; });
+  const copyExpressionRequest = async (recipient) => {
+    await page.click(`[data-recipient="${recipient}"]`);
+    await page.click('#expression-request-copy');
+    await page.waitForFunction(() => document.querySelector('#expression-request-status')?.textContent?.includes('コピーしました'));
+    return page.evaluate(async () => ({
+      message: await navigator.clipboard.readText(),
+      disclosureHidden: document.querySelector('#expression-request-disclosure')?.hidden,
+      codexStepsHidden: document.querySelector('[data-recipient-steps="codex"]')?.hidden,
+      claudeStepsHidden: document.querySelector('[data-recipient-steps="claude"]')?.hidden,
+    }));
+  };
+  const claudeExpressionRequest = await copyExpressionRequest('claude');
+  const codexExpressionRequest = await copyExpressionRequest('codex');
+  const expressionRequestMessage = codexExpressionRequest.message;
   await page.waitForFunction(() =>
     document.body.dataset.avatarReady === 'true' &&
     getComputedStyle(document.querySelector('.empty-state')).opacity === '0',
@@ -185,7 +203,10 @@ try {
     (element) => getComputedStyle(element).opacity,
   );
   await page.screenshot({ path: path.join(qaRoot, 'expression-request-review-1.png') });
-  await page.locator('#expression-request-control summary').click();
+  await page.click('[data-recipient="claude"]');
+  await page.screenshot({ path: path.join(qaRoot, 'expression-request-claude.png') });
+  await page.click('[data-recipient="codex"]');
+  await page.evaluate(() => { document.querySelector('#expression-request-control').open = false; });
   await page.click('#generated-psd-open-folder');
   await page.waitForFunction(
     () => document.querySelector('#generated-psd-note')?.textContent?.includes('保存先を開きました'),
@@ -626,7 +647,12 @@ try {
   await page.waitForTimeout(500);
   const summary = await page.evaluate(() => window.rigQa.summary);
   const localFolderButtonDisabled = await page.locator('#generated-psd-open-folder').isDisabled();
-  const localExpressionRequestHidden = await page.locator('#expression-request-control').evaluate((element) => element.hidden);
+  const localExpressionRequestState = await page.evaluate(() => ({
+    hidden: document.querySelector('#expression-request-control')?.hidden,
+    open: document.querySelector('#expression-request-control')?.open,
+    bodyHidden: document.querySelector('#expression-request-body')?.hidden,
+    summary: document.querySelector('#expression-request-summary')?.textContent,
+  }));
   await page.screenshot({ path: path.join(qaRoot, 'uploaded.png') });
   const canvas = page.locator('#rig-canvas');
 
@@ -811,12 +837,12 @@ try {
     };
   });
   await mobilePage.screenshot({ path: path.join(qaRoot, 'mobile-loaded.png'), fullPage: true });
-  await mobilePage.locator('#expression-request-control summary').click();
+  await mobilePage.evaluate(() => { document.querySelector('#expression-request-control').open = true; });
   const mobileExpressionRequestFits = await mobilePage.locator('#expression-request-control').evaluate(
     (element) => element.scrollWidth <= element.clientWidth,
   );
   await mobilePage.screenshot({ path: path.join(qaRoot, 'mobile-expression-request.png'), fullPage: true });
-  await mobilePage.locator('#expression-request-control summary').click();
+  await mobilePage.evaluate(() => { document.querySelector('#expression-request-control').open = false; });
   await mobilePage.click('#layer-edit-tab');
   await mobilePage.waitForTimeout(220);
   await mobilePage.evaluate(() => window.rigQa.setLayerProcessingPreview(true));
@@ -963,11 +989,31 @@ try {
       expressionRequestMessage.includes(`expression-requests ${fixtureJobId}`) &&
       expressionRequestMessage.includes(`import-expressions ${fixtureJobId}`) &&
       expressionRequestMessage.includes(`repair ${fixtureJobId} --expressions`) &&
-      expressionRequestMessage.includes('承認を待って') &&
-      expressionRequestMessage.includes('Claude Code') &&
+      expressionRequestMessage.includes('同意済み') &&
+      expressionRequestMessage.includes('imagegen') &&
+      !expressionRequestMessage.includes('Claude Code') &&
       !expressionRequestMessage.includes(repositoryRoot) &&
-      localExpressionRequestHidden === true &&
+      codexExpressionRequest.disclosureHidden === false &&
+      codexExpressionRequest.codexStepsHidden === false &&
+      codexExpressionRequest.claudeStepsHidden === true &&
+      selectedGeneratedState.expressionRequestBodyHidden === false &&
+      selectedGeneratedState.expressionRequestOpen === (selectedGeneratedProductionReady !== true) &&
       mobileExpressionRequestFits === true,
+    expressionRequestClaudeStopsBeforeGeneration:
+      claudeExpressionRequest.message.includes(`expression-requests ${fixtureJobId}`) &&
+      claudeExpressionRequest.message.includes('画像を生成できません') &&
+      claudeExpressionRequest.message.includes('そこで止まって') &&
+      !claudeExpressionRequest.message.includes('同意済み') &&
+      !claudeExpressionRequest.message.includes('$still2rig-psd') &&
+      !claudeExpressionRequest.message.includes(repositoryRoot) &&
+      claudeExpressionRequest.disclosureHidden === true &&
+      claudeExpressionRequest.codexStepsHidden === true &&
+      claudeExpressionRequest.claudeStepsHidden === false,
+    expressionRequestExplainsLocalPsd:
+      localExpressionRequestState.hidden === false &&
+      localExpressionRequestState.open === false &&
+      localExpressionRequestState.bodyHidden === true &&
+      Boolean(localExpressionRequestState.summary?.includes('このツールで変換したPSD')),
     expressionRequestScreenshotHasNoEmptyOverlay: expressionRequestEmptyStateOpacity === '0',
     startsWithoutBundledArtwork:
       waitingState.ready === false &&

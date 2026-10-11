@@ -105,9 +105,12 @@ tell the generator not to add them. Each variant's `underlay.png` is the face
 without the source eyes or mouth; keep it local and unchanged for extraction.
 Transparent mask pixels may change; opaque mask pixels must remain identical.
 
-Before generation, explain which face crops and service will be used, then ask
-the user for approval and wait. The images leave the machine when sent to the
-generator. Preparing local request files alone does not require this consent.
+Before generation, get the user's approval. The images leave the machine when
+sent to the generator. A request copied from the preview with **Codex** selected
+says the user already agreed to Codex's built-in image generation; that counts
+as approval for Codex imagegen only, not for other services. Otherwise, explain
+which face crops and service will be used, then ask and wait. Preparing local
+request files alone does not require this consent.
 
 If image generation is available (for example, Codex imagegen), inspect each
 input and mask, then generate each variant using its `input.png`, `mask.png` and

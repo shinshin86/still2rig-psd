@@ -137,9 +137,14 @@ sorting on phones is not supported.
 ### 5. Prepare closed-eye and open-mouth artwork
 
 For a generated PSD, **閉じた目と開いた口の絵を作ってもらう** in the preview copies
-a request to paste into Codex. The request asks for approval before sending face
-crops to an image generation service. Claude Code can prepare the files to hand
-to a generator, but cannot generate the images itself.
+a request for the agent you choose. The panel opens automatically when the PSD
+still lacks checked expression art. With **Codex**, the panel shows that face
+crops will be sent to Codex image generation, and copying the request records
+that agreement; Codex then generates, imports, and checks the art. With
+**Claude Code**, which cannot generate images, the request prepares the files,
+tells you what to hand to an image generator and where to save the results,
+and resumes after you report they are saved. PSDs opened from your computer do
+not have the conversion data this needs, so the panel only explains that.
 
 You can also run the commands directly:
 
