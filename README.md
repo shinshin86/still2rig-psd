@@ -1,7 +1,8 @@
 # Still2Rig PSD
 
 Turn one static anime character image into a structured, QA-checked PSD with
-Codex, a user-approved Google Colab GPU session, and a built-in motion preview.
+an AI coding agent, See-through on Google Colab or your own GPU, and a built-in
+motion preview.
 
 [日本語版](README.ja.md)
 
@@ -10,13 +11,15 @@ Codex, a user-approved Google Colab GPU session, and a built-in motion preview.
 Load a generated PSD in the built-in WebUI to check eye and mouth states,
 automatic blinking, hair and full-body motion, positioning, and zoom.
 
-Still2Rig PSD is designed to be used from Codex. Attach an image, ask Codex to
-convert it, and Codex prepares the run, controls the approved Colab notebook,
-verifies the returned files, assembles the PSD, and reports the result. You
-remain in control of Google sign-in, the Chrome profile, GPU selection, and
-Colab connection approval.
-To use another agent such as Claude Code, or a local See-through, see
-"Using another agent or a local See-through" below.
+Still2Rig PSD is designed to be used from an AI coding agent. Attach an image,
+ask the agent to convert it, and the agent prepares the run, runs See-through,
+verifies the returned files, assembles the PSD, and reports the result.
+The quick start below uses Codex with a user-approved Google Colab session. With
+Colab, you remain in control of Google sign-in, the Chrome profile, GPU
+selection, and Colab connection approval.
+It works with Codex, Claude Code, and other AI coding agents, and See-through
+can run on your own GPU instead of Colab. See "Using another agent or a local
+See-through" below.
 
 > **Status: v0.1 alpha.** A single neutral image cannot reliably provide real
 > closed-eye and alternate-mouth artwork. Still2Rig PSD reports missing
@@ -36,8 +39,9 @@ To use another agent such as Claude Code, or a local See-through, see
 
 ## Using another agent or a local See-through
 
-The steps in this README are written for Codex with Google Colab, but you can
-swap either one for something else.
+The steps in this README are written for Codex with Google Colab, but neither is
+required. It works with Codex, Claude Code, and other AI coding agents, and
+See-through can run on your own GPU instead of Colab.
 
 - **Agents other than Codex (Claude Code, for example):** the workflow is
   written in `.agents/skills/still2rig-psd/SKILL.md` and `AGENTS.md`. Ask your

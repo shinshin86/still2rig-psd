@@ -1,8 +1,8 @@
 # Still2Rig PSD
 
-1枚のアニメキャラクター静止画像を、Codexとユーザーが承認したGoogle Colab
-GPUで分解し、構造検証済みPSDへ仕上げ、組み込みWebUIですぐに確認するための
-プロジェクトです。
+1枚のアニメキャラクター静止画像を、AIコーディングエージェントとSee-through
+(Google ColabのGPUまたは手元のGPU)で分解し、構造検証済みPSDへ仕上げ、
+組み込みWebUIですぐに確認するためのプロジェクトです。
 
 [English README](README.md)
 
@@ -11,12 +11,15 @@ GPUで分解し、構造検証済みPSDへ仕上げ、組み込みWebUIですぐ
 生成したPSDを組み込みWebUIで読み込み、目・口の切り替え、自動まばたき、髪・全身の
 動き、表示位置、拡大縮小を確認できます。
 
-Still2Rig PSDは、Codexから使うことを前提にしています。画像を添付して変換を
-依頼すると、Codexが作業の準備、承認済みColab上での処理、ダウンロード結果の
-検証、PSD組み立て、品質確認まで進めます。Googleへのログイン、使用するChrome
+Still2Rig PSDは、AIコーディングエージェントから使います。画像を添付して変換を
+依頼すると、エージェントが作業の準備、See-throughでの分解、結果の検証、
+PSD組み立て、品質確認まで進めます。
+下の「はじめかた」では、Codexと、ユーザーが承認したGoogle Colabを使う手順を
+説明しています。Colabを使う場合、Googleへのログイン、使用するChrome
 プロファイル、GPU、Colab接続の承認はユーザーが管理します。
-Claude CodeなどCodex以外のエージェントや、手元のSee-throughで使う場合は、
-「Codex以外のエージェントや、手元のSee-throughで使う場合」の節を参照してください。
+Codex、Claude CodeをはじめとしたAIエージェントで動き、See-throughはColabの
+代わりに手元のGPUでも動かせます。使い方は「Codex以外のエージェントや、
+手元のSee-throughで使う場合」の節を参照してください。
 
 > **現在はv0.1 alphaです。** ニュートラルな静止画像1枚だけから、正しい閉じ目や
 > 別の口形を常に生成できるわけではありません。不足している表情素材を
@@ -34,7 +37,7 @@ Claude CodeなどCodex以外のエージェントや、手元のSee-throughで�
 
 ## Codex以外のエージェントや、手元のSee-throughで使う場合
 
-このREADMEの手順は、CodexとGoogle Colabの組み合わせで書いていますが、どちらもほかのものに変えられます。
+このREADMEの手順は、CodexとGoogle Colabの組み合わせで書いていますが、どちらも必須ではありません。Codex、Claude CodeをはじめとしたAIエージェントで動き、See-throughはColabの代わりに手元のGPUでも動かせます。
 
 - **Codex以外のエージェント（Claude Codeなど）**：作業の手順は`.agents/skills/still2rig-psd/SKILL.md`と`AGENTS.md`に書いてあります。エージェントにこの2つを読んでもらい、静止画をPSDにするよう依頼してください。Colabを使う場合は、`.codex/config.toml`と同じ内容で`scripts/start-colab-mcp.sh`をMCPサーバーとして登録する必要があります。登録方法はエージェントごとに異なります。
 - **手元のSee-through**：Colabの代わりに自分のPCのGPUでSee-throughを動かす場合は、エージェントに「Colabは使わず、手元のSee-throughでレイヤー分けして」と伝えてください。このリポジトリには手元で実行するためのコマンドを同梱していないため、See-throughの準備と実行はエージェントと相談しながら進めることになります。分離結果をこのプロジェクトの形式に合わせて取り込めば、その後のPSD組み立て、品質確認、WebUIでの確認はColabの場合と同じです。
