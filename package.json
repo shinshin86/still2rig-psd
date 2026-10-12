@@ -1,7 +1,7 @@
 {
   "name": "still2rig-psd",
   "version": "0.1.0",
-  "description": "Codex-guided Google Colab workflow for turning a static anime image into a QA-gated rig-ready PSD.",
+  "description": "Agent-guided workflow for turning a static anime image into a QA-gated rig-ready PSD with See-through on Google Colab or a local GPU.",
   "private": true,
   "type": "module",
   "workspaces": [
