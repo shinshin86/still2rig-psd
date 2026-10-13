@@ -70,10 +70,10 @@ Choose the expression source in this order:
 
 1. Drawn expression files from the user: pass them with `--expressions <dir>`.
 2. An available image generation tool (for example, Codex image generation):
-   generate full-canvas `eye_close.png` and `mouth_open.png` registered to the
-   source, pass them with `--expressions <dir>`, and report them as generated
-   art. Require `expressionRegistration=true` and `expressionArtwork=true`
-   before calling them ready.
+   use the masked request and import flow below, pass the resulting full-canvas
+   files with `--expressions <dir>`, and report them as generated art. Require
+   `expressionRegistration=true` and `expressionArtwork=true`, plus visual
+   review, before calling them checked.
 3. Only when neither is available, as a stopgap: run
    `npm run still2rig-psd -- derive-expressions <job>` and rebuild with
    `repair <job> --preview-expressions <dir>`. The derived layers reuse the
@@ -87,6 +87,85 @@ rectangle into an expression layer. A derived opposite mouth state is preview
 art, not trustworthy production art. Render both mouth states at full-canvas
 scale and as a face crop, then require `expressionArtwork=true` and
 `mouthWithinTolerance=true` in the QA report before reporting the repair.
+
+## Image-generated expressions
+
+Prepare local requests with:
+
+```bash
+npm run still2rig-psd -- expression-requests <job>
+```
+
+This creates `.still2rig-psd/jobs/<job>/expression-requests/` with `input.png`,
+`mask.png` and `prompt.txt` for `eye_close` and `mouth_open`. The inputs are face
+crops of the current PSD layers, including the latest repair. Do not substitute
+`input/source.png`: See-through may resize or pad it to a different canvas.
+Small crops are enlarged toward a 1024-pixel long side, capped at 4x. Keep the
+requested size; `requests.json` records the scale used to restore native pixels.
+Front hair and head accessories above the expressions are intentionally hidden;
+tell the generator not to add them. Each variant's `underlay.png` is the face
+without the source eyes or mouth; keep it local and unchanged for extraction.
+Transparent mask pixels may change; opaque mask pixels must remain identical.
+
+Before generation, get the user's approval. The images leave the machine when
+sent to the generator. A request copied from the preview with **Codex** selected
+says the user already agreed to Codex's built-in image generation; that counts
+as approval for Codex imagegen only, not for other services. Otherwise, explain
+which face crops and service will be used, then ask and wait. Preparing local
+request files alone does not require this consent.
+
+If image generation is available (for example, Codex imagegen), inspect each
+input and mask, then generate each variant using its `input.png`, `mask.png` and
+the exact instructions in `prompt.txt`. Save the returned PNGs as
+`expression-requests/results/eye_close.png` and `mouth_open.png`. If the agent
+cannot generate images (for example, Claude Code), stop at this stage and tell
+the user which three files for each variant to hand to a generator, where to
+save the results, and how to resume. Do not substitute derived preview art.
+
+After results are available:
+
+```bash
+npm run still2rig-psd -- import-expressions <job>
+npm run still2rig-psd -- repair <job> --expressions .still2rig-psd/jobs/<job>/generated-expressions
+```
+
+Repair automatically inherits the preceding layer overrides and expression
+source, including preview status, and reports them in `inheritedOptions`. Verify
+that corrected layers and expressions remain present. Explicit source flags win;
+`--no-layer-overrides` and `--no-expressions` deliberately remove their sources.
+Legacy repairs require every recorded file in its conventional directory. If
+inputs cannot be resolved, restore them or ask whether to remove them. Supplied
+layer overrides retain tiny highlights/ink while still applying the alpha
+threshold. Each repair records its effective options.
+
+Import validates proportions and current layer hashes. Alignment uses an
+8-native-pixel band with input alpha >=240 and subpixel refinement. Meaningful
+drift may be compensated only within a 12-pixel displacement magnitude and 3%
+uniform scale error; the original result is sampled once. Read the applied
+transform as well as the estimate. Shared-white-background RGB comparison avoids
+false differences from near-opaque alpha encoding. Symmetric 2-pixel color
+matching keeps the mean/p99 limits at 6/20; direct errors remain in the report.
+Face-interior 4x4 tiles add local/flat limits of 24/12 to catch missing ink or
+painted patches. Outer hair contours use the global band check. Two character
+samples passed; synthetic removed/moved brows, patches and excessive drift must
+fail. See `docs/quality-gates.md` for metric boundaries and calibration.
+`--read-only` evaluates recorded provenance without changing files; use
+`--request-dir DIR` with it to inspect archived requests.
+
+Import removes matching skin using the same RGB comparison where both result
+and underlay are nearly opaque, and premultiplied RGBA elsewhere. It removes
+tiny components at native scale and restores artwork with soft alpha edges. Read
+`generated-expressions/report.json`, including measured protected-pixel errors.
+If layers changed, regenerate the requests and results. If protected pixels
+changed too much, request a corrected image rather than increasing tolerances
+just to obtain a pass. Requests without the underlay must be regenerated. Color
+drift above the extraction threshold may still leave skin; existing mouth QA
+must still reject unsuitable patches. Inspect face crops and
+both full-canvas expression states for color, alignment and edge seams after
+repair. Import does not set `productionReady`; existing QA remains authoritative.
+Closed-eye registration uses the per-side eyelash/eyewhite alpha union, with iris
+fallback and the same 8-pixel horizontal tolerance. Mouth limits and the mouth
+request mask share face-bbox-relative settings, with separate closed/open limits.
 
 ## Motion QA
 

@@ -138,6 +138,40 @@ with the source, supports detailed mouse-based drag sorting on desktop, and
 downloads a verified copy without overwriting the original PSD. Touch-based layer
 sorting on phones is not supported.
 
+### 5. Prepare closed-eye and open-mouth artwork
+
+For a generated PSD, **閉じた目と開いた口の絵を作ってもらう** in the preview copies
+a request for the agent you choose. The panel opens automatically when the PSD
+still lacks checked expression art. With **Codex**, the panel shows that face
+crops will be sent to Codex image generation, and copying the request records
+that agreement; Codex then generates, imports, and checks the art. With
+**Claude Code**, which cannot generate images, the request prepares the files,
+tells you what to hand to an image generator and where to save the results,
+and resumes after you report they are saved. PSDs opened from your computer do
+not have the conversion data this needs, so the panel only explains that.
+
+You can also run the commands directly:
+
+```bash
+npm run still2rig-psd -- expression-requests demo
+# After approval, generate each variant using its input.png, mask.png and prompt.txt.
+# Save results in .still2rig-psd/jobs/demo/expression-requests/results/.
+npm run still2rig-psd -- import-expressions demo
+npm run still2rig-psd -- repair demo --expressions .still2rig-psd/jobs/demo/generated-expressions
+```
+
+Requests use a face crop of the current PSD layers, including the latest repair,
+with front hair and head accessories hidden. Import removes pixels matching the
+face underlay and restores only the new expression artwork to the PSD canvas. It rejects changed
+layers, wrong proportions, global misalignment, or excessive changes in the
+opaque band around the editable area. Drawn artwork
+remains the first choice. Generated art must pass the existing expression QA and
+visual review; importing it does not establish readiness.
+`repair` automatically reuses layer overrides from the preceding repair and
+reports what it inherited. Use `--no-layer-overrides` to deliberately drop them.
+If a legacy repair's overrides cannot be found, repair stops and asks for an
+explicit directory or removal instead of discarding corrected layers.
+
 ## Automation and consent boundaries
 
 | Codex handles | You control |

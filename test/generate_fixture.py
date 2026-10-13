@@ -25,13 +25,24 @@ def main():
     parser.add_argument("--mouth-shift", type=int, default=0)
     parser.add_argument("--mouth-patch", action="store_true")
     parser.add_argument("--without-expressions", action="store_true")
+    parser.add_argument("--hair-over-eyes", action="store_true")
+    parser.add_argument("--inward-irises", action="store_true")
+    parser.add_argument("--scale", type=int, default=1)
+    parser.add_argument("--without-back-hair", action="store_true")
+    parser.add_argument("--band-features", action="store_true")
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
 
-    save_rect(args.output, "back hair.png", (12, 5, 84, 82), (70, 35, 20, 255))
+    if not args.without_back_hair:
+        save_rect(args.output, "back hair.png", (12, 5, 84, 82), (70, 35, 20, 255))
     save_rect(args.output, "topwear.png", (18, 67, 78, 95), (40, 50, 70, 255))
     save_rect(args.output, "neck.png", (40, 55, 56, 78), (240, 185, 150, 255))
     save_rect(args.output, "face.png", (24, 15, 72, 67), (250, 205, 175, 255))
+    layer().save(args.output / "nose.png")
+    if args.band_features:
+        image = layer()
+        ImageDraw.Draw(image).rectangle((31, 20, 45, 22), fill=(70, 30, 20, 255))
+        image.save(args.output / "eyebrow.png")
     image = layer()
     draw = ImageDraw.Draw(image)
     draw.rectangle((31, 31, 43, 38), fill=(255, 255, 255, 255))
@@ -39,8 +50,8 @@ def main():
     image.save(args.output / "eyewhite.png")
     image = layer()
     draw = ImageDraw.Draw(image)
-    draw.rectangle((34, 30, 40, 38), fill=(30, 120, 150, 255))
-    draw.rectangle((56, 30, 62, 38), fill=(30, 120, 150, 255))
+    draw.rectangle((41, 30, 43, 38) if args.inward_irises else (34, 30, 40, 38), fill=(30, 120, 150, 255))
+    draw.rectangle((53, 30, 55, 38) if args.inward_irises else (56, 30, 62, 38), fill=(30, 120, 150, 255))
     image.save(args.output / "irides.png")
     image = layer()
     draw = ImageDraw.Draw(image)
@@ -56,7 +67,13 @@ def main():
         draw.rectangle((33, 32, 41, 37), fill=(70, 30, 20, 255))
         draw.rectangle((55, 32, 63, 37), fill=(70, 30, 20, 255))
         image.save(args.output / "eye_close.png")
-    save_rect(args.output, "front hair.png", (20, 5, 76, 28), (85, 45, 25, 255))
+    save_rect(args.output, "front hair.png", (20, 5, 76, 38 if args.hair_over_eyes else 28), (85, 45, 25, 255))
+    if args.hair_over_eyes:
+        save_rect(args.output, "headwear.png", (20, 5, 76, 38), (10, 240, 10, 255))
+    if args.scale != 1:
+        for file in args.output.glob("*.png"):
+            image = Image.open(file).convert("RGBA")
+            image.resize((96 * args.scale, 96 * args.scale), Image.Resampling.NEAREST).save(file)
 
 
 if __name__ == "__main__":

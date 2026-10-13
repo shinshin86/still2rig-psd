@@ -16,7 +16,7 @@ import { createRequire } from 'node:module';
 
 import { chromium } from 'playwright';
 
-import { evaluateMotionQa, hairTipMaskFromLayers, loadMotionContract, visibleHairMaskFromLayers } from '../../src/motionQa.mjs';
+import { evaluateMotionQa, hairTipMaskFromLayers, loadMotionContract, motionLayerPreflight, visibleHairMaskFromLayers } from '../../src/motionQa.mjs';
 import { decodePngRgba, inspectPsd } from '../../src/psd.mjs';
 
 const webuiRoot = path.resolve(import.meta.dirname, '..');
@@ -96,6 +96,17 @@ async function main() {
   const framesDir = path.join(outDir, 'frames');
   await fs.rm(outDir, { recursive: true, force: true });
   await fs.mkdir(framesDir, { recursive: true });
+
+  const preflight = motionLayerPreflight(inspectPsd(psdFile).layers);
+  const referencePreflight = motionLayerPreflight(inspectPsd(referencePsd).layers);
+  if (!preflight.pass || !referencePreflight.pass) {
+    const failure = !preflight.pass ? preflight : referencePreflight;
+    const report = { schemaVersion: 1, adapter: 'still2rig-psd built-in preview renderer',
+      psd: path.basename(psdFile), ...failure, captures: {} };
+    await fs.writeFile(path.join(outDir, 'motion-qa.json'), `${JSON.stringify(report, null, 2)}\n`);
+    console.log(JSON.stringify(report));
+    return;
+  }
 
   const contract = loadMotionContract();
   const emptyJobsRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'still2rig-motion-qa-'));

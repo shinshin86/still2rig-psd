@@ -36,6 +36,7 @@ interface GeneratedPsd {
   state: string;
   productionReady: boolean | null;
   bytes: number;
+  jobId: string | null;
 }
 
 interface RigQaApi {
@@ -96,6 +97,19 @@ const generatedPsdSelect = requireElement<HTMLSelectElement>('#generated-psd-sel
 const generatedPsdRefresh = requireElement<HTMLButtonElement>('#generated-psd-refresh');
 const generatedPsdOpenFolder = requireElement<HTMLButtonElement>('#generated-psd-open-folder');
 const generatedPsdNote = requireElement<HTMLElement>('#generated-psd-note');
+const expressionRequestControl = requireElement<HTMLDetailsElement>('#expression-request-control');
+const expressionRequestCopy = requireElement<HTMLButtonElement>('#expression-request-copy');
+const expressionRequestStatus = requireElement<HTMLElement>('#expression-request-status');
+const expressionRequestSummary = requireElement<HTMLElement>('#expression-request-summary');
+const expressionRequestBody = requireElement<HTMLElement>('#expression-request-body');
+const expressionRequestDisclosure = requireElement<HTMLElement>('#expression-request-disclosure');
+const expressionRecipientButtons = [...document.querySelectorAll<HTMLButtonElement>('[data-recipient]')];
+const expressionRecipientSteps = [...document.querySelectorAll<HTMLElement>('[data-recipient-steps]')];
+type ExpressionRecipient = 'codex' | 'claude';
+const EXPRESSION_RECIPIENT_KEY = 'still2rig-psd-expression-recipient';
+let expressionRequestSource: 'none' | 'local' | 'generated' = 'none';
+let expressionRecipient: ExpressionRecipient = readExpressionRecipient();
+
 const psdFileInput = requireElement<HTMLInputElement>('#psd-file-input');
 const dropOverlay = requireElement<HTMLElement>('#drop-overlay');
 const motionTab = requireElement<HTMLButtonElement>('#motion-tab');
@@ -1487,6 +1501,9 @@ async function loadLocalPsd(file: File): Promise<void> {
   generatedPsdSelect.value = '';
   activeGeneratedPsdId = '';
   generatedPsdOpenFolder.disabled = true;
+  expressionRequestSource = 'local';
+  expressionRequestControl.open = false;
+  syncExpressionRequestControl();
   const buffer = await file.arrayBuffer();
   initializeLayerEditor(buffer, file.name);
   setWorkspaceMode('motion');
@@ -1504,6 +1521,9 @@ function generatedPsdLabel(item: GeneratedPsd): string {
 
 async function loadGeneratedPsd(item: GeneratedPsd): Promise<void> {
   const token = ++loadToken;
+  activeGeneratedPsdId = '';
+  expressionRequestSource = 'generated';
+  syncExpressionRequestControl();
   setLoadingState(item.name);
   const response = await fetch(item.url, { cache: 'no-store' });
   if (!response.ok) throw new Error(`生成済みPSDを読み込めませんでした（${response.status}）。`);
@@ -1515,6 +1535,100 @@ async function loadGeneratedPsd(item: GeneratedPsd): Promise<void> {
   generatedPsdSelect.value = item.id;
   activeGeneratedPsdId = item.id;
   generatedPsdOpenFolder.disabled = false;
+  // Open the panel by default only when the PSD still lacks checked expression art.
+  expressionRequestControl.open = Boolean(item.jobId) && item.productionReady !== true;
+  syncExpressionRequestControl();
+}
+
+function readExpressionRecipient(): ExpressionRecipient {
+  try {
+    return localStorage.getItem(EXPRESSION_RECIPIENT_KEY) === 'claude' ? 'claude' : 'codex';
+  } catch {
+    return 'codex';
+  }
+}
+
+function setExpressionRecipient(recipient: ExpressionRecipient): void {
+  expressionRecipient = recipient;
+  try {
+    localStorage.setItem(EXPRESSION_RECIPIENT_KEY, recipient);
+  } catch {
+    // The choice is a convenience; the panel still works without storage.
+  }
+  syncExpressionRequestControl();
+}
+
+function syncExpressionRequestControl(): void {
+  const item = generatedPsds.find((candidate) => candidate.id === activeGeneratedPsdId);
+  const usable = Boolean(item?.jobId);
+  const unavailable = !usable && (expressionRequestSource === 'local' || Boolean(item));
+  expressionRequestControl.hidden = !usable && !unavailable;
+  expressionRequestBody.hidden = !usable;
+  if (usable) {
+    expressionRequestSummary.textContent = item?.productionReady === true
+      ? 'このPSDには閉じた目と開いた口の絵が入っています。絵を描き直したいときに使えます。'
+      : 'このPSDには閉じた目と開いた口の絵がまだないため、まばたきや口パクが不自然になります。画像生成でその絵を描き足し、このPSDに組み込めます。';
+  } else if (unavailable) {
+    expressionRequestSummary.textContent =
+      'この機能は、このツールで変換したPSD（上の一覧から選ぶPSD）で使えます。手元から開いたPSDには、絵を組み込むための変換時のデータがありません。';
+  }
+  for (const button of expressionRecipientButtons) {
+    button.setAttribute('aria-pressed', String(button.dataset.recipient === expressionRecipient));
+  }
+  for (const steps of expressionRecipientSteps) {
+    steps.hidden = steps.dataset.recipientSteps !== expressionRecipient;
+  }
+  expressionRequestDisclosure.hidden = expressionRecipient !== 'codex';
+  expressionRequestStatus.textContent = '';
+}
+
+function expressionRequestMessage(item: GeneratedPsd, id: string): string {
+  const root = `.still2rig-psd/jobs/${id}`;
+  const target = `対象: ${item.name}（変換の識別名: ${id}）。`;
+  const prepare = `まず npm run still2rig-psd -- expression-requests ${id} を実行してください。`;
+  const results = `${root}/expression-requests/results/eye_close.png と mouth_open.png`;
+  const finish = [
+    `npm run still2rig-psd -- import-expressions ${id} を実行し、取り込みが通ったら npm run still2rig-psd -- repair ${id} --expressions ${root}/generated-expressions を実行してください。`,
+    '前回の修復で使った差し替え画像は自動で引き継がれます。引き継いだ内容も実行結果で確認してください。',
+    '既存の品質検査の結果と、閉じた目・開いた口の両方の見た目を確認して報告してください。',
+  ];
+  const common = [
+    '仮の表情（derive-expressions）で置き換えないでください。',
+    '対象は保存済みPSDのレイヤーです。ブラウザ内の未保存の並べ替えは含めません。コミット・pushはしないでください。',
+  ];
+  if (expressionRecipient === 'codex') {
+    return [
+      '$still2rig-psd を使い、このPSDの閉じた目と開いた口の絵を作って組み込んでください。',
+      `${target}リポジトリの AGENTS.md とスキルの「Image-generated expressions」の手順に従ってください。`,
+      prepare,
+      'ユーザーはこの画面で、顔の切り抜き画像を Codex の組み込みの画像生成（imagegen）に送ることに同意済みです。ほかの外部サービスは使わないでください。',
+      `eye_close と mouth_open それぞれの input.png、mask.png、prompt.txt を使って画像を生成し、${results} に保存してください。`,
+      ...finish,
+      ...common,
+    ].join('\n');
+  }
+  return [
+    'リポジトリの AGENTS.md と .agents/skills/still2rig-psd/SKILL.md を読み、このPSDの閉じた目と開いた口の絵を用意する準備をしてください。',
+    target,
+    prepare,
+    'Claude Code は画像を生成できません。画像の生成や外部サービスへの送信はしないでください。',
+    `eye_close と mouth_open それぞれについて、画像生成に渡すファイル（input.png と mask.png の場所、prompt.txt の内容）と、結果を保存するファイル名（${results}）を具体的に案内して、そこで止まってください。`,
+    '私が結果を保存したと伝えたら、続きを進めてください。',
+    ...finish,
+    ...common,
+  ].join('\n');
+}
+
+async function copyExpressionRequest(): Promise<void> {
+  const item = generatedPsds.find((candidate) => candidate.id === activeGeneratedPsdId);
+  if (!item?.jobId) return;
+  const message = expressionRequestMessage(item, item.jobId);
+  try {
+    await navigator.clipboard.writeText(message);
+    expressionRequestStatus.textContent = `依頼文をコピーしました。${expressionRecipient === 'codex' ? 'Codex' : 'Claude Code'}に貼り付けてください。`;
+  } catch {
+    expressionRequestStatus.textContent = 'コピーできませんでした。ブラウザのクリップボード許可を確認してください。';
+  }
 }
 
 async function openGeneratedPsdFolder(): Promise<void> {
@@ -1591,6 +1705,7 @@ async function refreshGeneratedPsdList(autoLoad = false): Promise<void> {
     generatedPsdNote.textContent = error instanceof Error ? error.message : String(error);
   } finally {
     generatedPsdRefresh.disabled = false;
+    syncExpressionRequestControl();
   }
 }
 
@@ -1716,6 +1831,14 @@ function installEventListeners(): void {
   generatedPsdOpenFolder.addEventListener('click', () => {
     void openGeneratedPsdFolder();
   });
+  expressionRequestCopy.addEventListener('click', () => {
+    void copyExpressionRequest();
+  });
+  for (const button of expressionRecipientButtons) {
+    button.addEventListener('click', () => {
+      setExpressionRecipient(button.dataset.recipient === 'claude' ? 'claude' : 'codex');
+    });
+  }
 
   let fileDragDepth = 0;
   const hasFiles = (event: DragEvent): boolean =>

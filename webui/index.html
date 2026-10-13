@@ -172,6 +172,11 @@
       .tuning-item { display: grid; gap: 5px; }
       .tuning-item .field-head { font-size: 11px; }
       .tuning-note { margin: 9px 0 0; color: #8f9ab7; font-size: 11px; line-height: 1.45; }
+      .request-steps { margin: 0; padding-left: 18px; color: #c4cde0; font-size: 11px; line-height: 1.55; }
+      .request-steps li + li { margin-top: 4px; }
+      #expression-request-body { display: grid; gap: 10px; }
+      .request-recipient { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+      .request-disclosure { margin: 0; padding: 8px 10px; color: #ffe1a6; background: rgb(255 210 124 / 10%); border: 1px solid rgb(255 210 124 / 35%); border-radius: 8px; font-size: 11px; line-height: 1.5; }
       .advanced-panel { border: 1px solid #495570; border-radius: 11px; background: rgb(25 31 45 / 72%); }
       .advanced-panel > summary { display: flex; justify-content: space-between; gap: 10px; align-items: center; padding: 12px; color: #dbe3f5; font-size: 12px; font-weight: 750; cursor: pointer; list-style: none; }
       .advanced-panel > summary::-webkit-details-marker { display: none; }
@@ -312,6 +317,34 @@
           </div>
           <section id="motion-panel" role="tabpanel" aria-labelledby="motion-tab">
           <h2 class="panel-title">動作を確認</h2>
+          <details id="expression-request-control" class="advanced-panel" hidden>
+            <summary>閉じた目と開いた口の絵を作ってもらう</summary>
+            <div class="advanced-content">
+              <p id="expression-request-summary" class="tuning-note"></p>
+              <div id="expression-request-body">
+                <div class="field-head"><span>依頼する相手</span></div>
+                <div class="request-recipient" role="group" aria-label="依頼する相手">
+                  <button type="button" data-recipient="codex" aria-pressed="true">Codex</button>
+                  <button type="button" data-recipient="claude" aria-pressed="false">Claude Code</button>
+                </div>
+                <ol class="request-steps" data-recipient-steps="codex">
+                  <li>下のボタンで依頼文をコピーします。</li>
+                  <li>このフォルダで開いたCodexに貼り付けて送ります。Codexが絵を描き、このPSDに組み込みます。</li>
+                  <li>完了の連絡が来たら、上の「一覧を更新」を押してPSDを開き直し、まばたきと口の動きを確認します。</li>
+                </ol>
+                <ol class="request-steps" data-recipient-steps="claude" hidden>
+                  <li>下のボタンで依頼文をコピーします。</li>
+                  <li>このフォルダで開いたClaude Codeに貼り付けて送ります。Claude Codeは絵を描けないため、画像生成に渡すファイルと保存先を案内してくれます。</li>
+                  <li>案内に沿ってCodexなどの画像生成で絵を作り、指定された場所に保存します。</li>
+                  <li>保存したことをClaude Codeに伝えると、絵を取り込んでPSDを作り直します。</li>
+                  <li>終わったら、上の「一覧を更新」を押してPSDを開き直し、まばたきと口の動きを確認します。</li>
+                </ol>
+                <p id="expression-request-disclosure" class="request-disclosure">顔の画像がCodexの画像生成に送られます。依頼文をコピーすると、送信に同意したものとして依頼文に書き込まれます。</p>
+                <button id="expression-request-copy" type="button">依頼文をコピー</button>
+                <p id="expression-request-status" class="source-note" role="status" aria-live="polite"></p>
+              </div>
+            </div>
+          </details>
           <div class="quick-check">
             <div class="field-head"><span>最初にまとめて確認</span></div>
             <p class="quick-check-copy">口・まばたき・髪揺れ・全身モーションを順番に再生します。</p>

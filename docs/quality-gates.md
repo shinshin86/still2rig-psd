@@ -76,6 +76,101 @@ the WebUI controls can be exercised. It does not generate a real open mouth, so
 the two states may look identical and the report remains below expression
 file checked.
 
+## Expression requests for image generation
+
+```bash
+npm run still2rig-psd -- expression-requests demo
+npm run still2rig-psd -- import-expressions demo
+npm run still2rig-psd -- repair demo --expressions .still2rig-psd/jobs/demo/generated-expressions
+```
+
+`expression-requests` writes `input.png`, `mask.png` and `prompt.txt` for each of
+`eye_close` and `mouth_open` under the ignored work directory. The input is a
+face crop of the current neutral PSD layer composite, including the latest
+repair, rather than the original image whose dimensions may differ. Transparent
+mask pixels may change; opaque mask pixels must remain identical.
+Small crops use an integer enlargement toward a long side of 1024 pixels,
+capped at 4. `requests.json` records the factor; masks and underlays share it.
+Layers above the expressions, including front hair and headwear, are hidden in
+both the input and the underlay. The generator must not add hair or accessories.
+Each variant also has a local `underlay.png` containing the face without that
+variant's source eyes or mouth. This reference is used only for extraction;
+do not edit it or send it to the generator.
+
+Ask the image owner before sending these crops to a generation service. Save
+the returned images as `expression-requests/results/eye_close.png` and
+`mouth_open.png`. `import-expressions JOB [DIR]` accepts another results directory
+when supplied. Results must keep aspect-ratio error within 1%. Alignment uses
+an 8-native-pixel band outside the editable area (`--protected-band`), with
+input alpha at least 240. Uniform scale and subpixel shift are estimated there;
+a small preference for shorter transforms avoids unstable fits on smooth skin.
+Meaningful drift is compensated only within a 12-pixel displacement magnitude
+and 3% scale error (`--max-alignment-shift`, `--max-alignment-scale`). The search
+radius is 24 pixels (`--alignment-radius`). The original generator output is
+sampled once with the estimated affine transform before extraction. Distances
+use original PSD pixels, independently of request enlargement.
+
+Comparisons use RGB on a shared white background: alpha 248–249 on almost opaque
+skin must not introduce a dark premultiplication error. Reports retain direct
+channel-wise mean/p99 for diagnosis. The gate uses symmetric nearest-color
+matching within two native pixels, excluding editable and translucent input
+pixels; its outer support extends two pixels beyond the measured band. The
+mean/p99 of these per-pixel RGB errors must be at most 6/20
+(`--max-outside-mean`, `--max-outside-p99`). Older crops from two real characters
+measured 2.66/7.33 and 3.91/5.67, versus 2.33/12.67 and 1.47/12.67 after compensation.
+The numeric global limits remain unchanged; the comparison accounts for opacity
+encoding and small contour rasterization differences instead of widening them.
+
+Local gates test 4x4 native-pixel tiles with at least 8 band pixels in the opaque
+face interior, inset two pixels from its contour. Their maximum mean is 24
+(`--max-band-local-mean`), reduced to 12 for reference tiles with channel ranges
+at most 24 (`--max-band-flat-mean`). Positive samples measured maxima below 8;
+removed/moved brows, painted skin patches and excessive shifts must still fail.
+Outer hair silhouettes retain the global band check, but are excluded from face
+interior tiles. Far context is neither measured nor imported. These checks do
+not cover every drawing defect; visual review remains required.
+
+Reports record direct/matched errors and estimated/applied transforms, including
+failures. `--read-only` validates recorded request layers and hashes without
+changing files; `--request-dir DIR` with that flag can evaluate archived requests.
+Changed layers require new requests and new generated results.
+
+Inside the editable area, import compares against the underlay. Where both
+images have alpha at least 240 it uses the shared-background RGB difference,
+so small alpha encoding changes do not turn matching skin into artwork. Other
+pixels use premultiplied RGBA, preserving new artwork over transparent underlay.
+It keeps pixels whose maximum channel difference exceeds 8 (`--artwork-threshold`),
+with a soft alpha ramp over the next 16 levels. Components smaller than 4 native
+pixels are discarded (`--minimum-component-pixels`). Requests without an underlay
+must be regenerated.
+
+The new artwork is restored onto transparent full-canvas files in
+`generated-expressions/`. Import does not approve it: skin-color drift above the
+threshold and mismatched edges still require visual review. Use `repair --expressions` for the existing
+registration and mouth checks, and visually review both expression states. Only
+those checks determine `productionReady`; image generation alone does not.
+
+Closed eyes are registered against each side's alpha union of `eyelash` and
+`eyewhite`, falling back to `irides` when that side has no outline. The horizontal
+tolerance remains 8 pixels and the vertical plausibility limit remains 32 pixels.
+
+Mouth limits use the face alpha bounding box, so canvas padding does not change
+them. Closed mouths allow 16% of face width, 3% of face height and 0.15% of face box
+area; open mouths allow 18%, 10% and 1.2%. A filled opening needs more height and
+area than a shallow lip line. Floors of 20 pixels width, 12 height and 150 visible
+pixels keep small previews usable. Closed-mouth line and bright-fill checks
+still apply. The mouth request mask uses the same opening limits plus a boundary
+margin and extra space below the lips; its bounds and limits are in `requests.json`.
+
+`repair` records its effective override/expression options and inherits both
+the preceding layer overrides and expression source, including preview status.
+Explicit directories take precedence; `--no-layer-overrides` and
+`--no-expressions` deliberately remove their respective sources.
+`inheritedOptions` identifies the reused sources. Legacy records require all
+recorded inputs in their conventional directories; unresolved inputs stop
+repair. Supplied layer overrides retain tiny components, including highlights
+and short nose lines, while still applying the alpha threshold.
+
 ## Preview expressions derived from the neutral image
 
 This is a stopgap for when no better expression art is available. Use the
@@ -149,3 +244,5 @@ and must FAIL; use it to confirm the checks can still detect a broken layout.
 Limits: the checks cover the built-in renderer only. A gap that opens next to
 visible hair, and whether the motion looks natural, still need visual review.
 Physics frames depend on timing, so borderline results can vary between runs.
+Missing required eye layers or feature anchors produce a failed report with a
+message instead of crashing the eye-region calculation.

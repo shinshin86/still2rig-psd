@@ -27,8 +27,14 @@ Usage:
   still2rig-psd cell JOB CELL_FILE
   still2rig-psd import JOB RESULT.zip
   still2rig-psd finalize JOB [--expressions DIR | --preview-expressions DIR] [--layer-overrides DIR] [--preview-placeholders]
-  still2rig-psd repair JOB [--expressions DIR | --preview-expressions DIR] [--layer-overrides DIR] [--preview-placeholders]
+  still2rig-psd repair JOB [--expressions DIR | --preview-expressions DIR | --no-expressions] [--layer-overrides DIR | --no-layer-overrides] [--preview-placeholders]
   still2rig-psd derive-expressions JOB
+  still2rig-psd expression-requests JOB
+  still2rig-psd import-expressions JOB [DIR] [--max-outside-mean 6] [--max-outside-p99 20]
+    [--max-band-local-mean 24] [--max-band-flat-mean 12]
+    [--protected-band 8] [--alignment-radius 24] [--max-alignment-shift 12] [--max-alignment-scale 0.03]
+    [--artwork-threshold 8] [--minimum-component-pixels 4]
+    [--read-only [--request-dir DIR]]
   still2rig-psd motion-qa JOB [--negative-fixture]
   still2rig-psd status [JOB] [--json]
   still2rig-psd self-test
@@ -153,7 +159,7 @@ function assembleArtifacts({ jobId, root, options, outputPsd, layerDir, reportsR
     '--drop-optional-below', String(defaults.quality.dropOptionalBelowPixels),
   ];
   if (options.expressions && options['preview-expressions']) {
-    throw new Error('Use either --expressions (drawn artwork) or --preview-expressions (derived preview artwork), not both.');
+    throw new Error('Use either --expressions (drawn or image-generated artwork) or --preview-expressions (derived preview artwork), not both.');
   }
   const expressionDir = options.expressions || options['preview-expressions'];
   if (expressionDir) inspectArgs.push('--expressions', path.resolve(expressionDir));
@@ -232,6 +238,65 @@ function copyResultArtifact(value, destination) {
   return destination;
 }
 
+function inheritedLayerOverrides(root, manifest) {
+  const latest = manifest.result?.repairs?.at(-1);
+  if (!latest) return null;
+  const inspectionFile = path.join(root, 'repairs', latest.repairId, 'after', 'reports', 'layer-inspection.json');
+  if (latest.options && latest.options.layerOverrides === null) return null;
+  if (!fs.existsSync(inspectionFile)) {
+    throw new Error('Cannot resolve the previous repair layer overrides. Supply --layer-overrides DIR or explicitly use --no-layer-overrides.');
+  }
+  const inspection = JSON.parse(fs.readFileSync(inspectionFile, 'utf8'));
+  const files = inspection.layerOverrides || [];
+  const directory = latest.options?.layerOverrides
+    ? path.resolve(PROJECT_ROOT, latest.options.layerOverrides)
+    : files.length ? path.join(root, 'overrides') : null;
+  if (!directory) return null;
+  if (!fs.existsSync(directory) || !fs.statSync(directory).isDirectory()
+      || files.some((name) => !fs.existsSync(path.join(directory, name)) || !fs.statSync(path.join(directory, name)).isFile())) {
+    throw new Error('Previous layer overrides are missing. Restore them or supply --layer-overrides DIR; use --no-layer-overrides only to deliberately discard them.');
+  }
+  return { directory, fromRepair: latest.repairId, legacy: !latest.options };
+}
+
+function recordedRepairDirectory(directory, repairRoot, name) {
+  if (!directory) return null;
+  const source = path.resolve(directory);
+  const relative = path.relative(PROJECT_ROOT, source);
+  if (!relative.startsWith('..') && !path.isAbsolute(relative)) return relativeProjectPath(source);
+  // External user-supplied art remains supported without writing private
+  // absolute paths to the manifest. Only the used PNG inputs are copied.
+  const snapshot = path.join(repairRoot, 'inputs', name);
+  fs.mkdirSync(snapshot, { recursive: true });
+  for (const entry of fs.readdirSync(source, { withFileTypes: true })) {
+    if (entry.isFile() && /\.png$/i.test(entry.name)) fs.copyFileSync(path.join(source, entry.name), path.join(snapshot, entry.name));
+  }
+  return relativeProjectPath(snapshot);
+}
+
+function inheritedExpressions(root, manifest) {
+  const latest = manifest.result?.repairs?.at(-1);
+  if (!latest) return null;
+  let key = latest.options?.expressions ? 'expressions'
+    : latest.options?.previewExpressions ? 'preview-expressions' : null;
+  if (latest.options && !key) return null;
+  const inspectionFile = path.join(root, 'repairs', latest.repairId, 'after', 'reports', 'layer-inspection.json');
+  if (!fs.existsSync(inspectionFile)) {
+    throw new Error('Cannot resolve previous expression artwork. Supply --expressions DIR, --preview-expressions DIR or --no-expressions.');
+  }
+  const files = JSON.parse(fs.readFileSync(inspectionFile, 'utf8')).expressionFiles || [];
+  if (!latest.options && !files.length) return null;
+  if (!key) key = latest.after?.previewExpressions?.length ? 'preview-expressions' : 'expressions';
+  const recorded = key === 'expressions' ? latest.options?.expressions : latest.options?.previewExpressions;
+  const directory = recorded ? path.resolve(PROJECT_ROOT, recorded)
+    : path.join(root, key === 'expressions' ? 'generated-expressions' : 'preview-expressions');
+  if (!fs.existsSync(directory) || !fs.statSync(directory).isDirectory()
+      || files.some((name) => !fs.existsSync(path.join(directory, name)) || !fs.statSync(path.join(directory, name)).isFile())) {
+    throw new Error('Previous expression artwork is missing. Restore it or explicitly supply --expressions DIR, --preview-expressions DIR or --no-expressions.');
+  }
+  return { key, directory, fromRepair: latest.repairId, legacy: !latest.options };
+}
+
 function repair(jobId, options) {
   const { root, manifest } = loadJob(jobId);
   if (!manifest.result?.psd) throw new Error('Finalize the job before repairing it.');
@@ -240,10 +305,23 @@ function repair(jobId, options) {
   const repairId = nextRepairId(root);
   const repairRoot = path.join(root, 'repairs', repairId);
   const afterRoot = path.join(repairRoot, 'after');
+  if (options['layer-overrides'] && options['no-layer-overrides']) {
+    throw new Error('Use --layer-overrides DIR or --no-layer-overrides, not both.');
+  }
+  if (options['no-expressions'] && (options.expressions || options['preview-expressions'])) {
+    throw new Error('Use an expression directory or --no-expressions, not both.');
+  }
+  const inherited = !options['layer-overrides'] && !options['no-layer-overrides']
+    ? inheritedLayerOverrides(root, manifest) : null;
+  const effective = { ...options };
+  if (inherited) effective['layer-overrides'] = inherited.directory;
+  const inheritedArt = !options.expressions && !options['preview-expressions'] && !options['no-expressions']
+    ? inheritedExpressions(root, manifest) : null;
+  if (inheritedArt) effective[inheritedArt.key] = inheritedArt.directory;
   const assembled = assembleArtifacts({
     jobId,
     root,
-    options,
+    options: effective,
     outputPsd: path.join(afterRoot, 'output', `${jobId}.psd`),
     layerDir: path.join(afterRoot, 'processed', 'layers'),
     reportsRoot: path.join(afterRoot, 'reports'),
@@ -261,6 +339,20 @@ function repair(jobId, options) {
   assembled.qa.psd = relativeProjectPath(currentPsd);
   writeJson(assembled.buildReportFile, assembled.build);
   writeJson(assembled.qaReportFile, assembled.qa);
+
+  const recordedOptions = {
+    layerOverrides: recordedRepairDirectory(effective['layer-overrides'], repairRoot, 'layer-overrides'),
+    expressions: recordedRepairDirectory(effective.expressions, repairRoot, 'expressions'),
+    previewExpressions: recordedRepairDirectory(effective['preview-expressions'], repairRoot, 'preview-expressions'),
+    previewPlaceholders: Boolean(effective['preview-placeholders']),
+  };
+  const inheritedOptions = inherited ? { layerOverrides: recordedOptions.layerOverrides, fromRepair: inherited.fromRepair, legacy: inherited.legacy } : {};
+  if (inheritedArt) {
+    inheritedOptions[inheritedArt.key === 'expressions' ? 'expressions' : 'previewExpressions'] =
+      inheritedArt.key === 'expressions' ? recordedOptions.expressions : recordedOptions.previewExpressions;
+    inheritedOptions.fromRepair = inheritedArt.fromRepair;
+    inheritedOptions.legacy = Boolean(inheritedOptions.legacy || inheritedArt.legacy);
+  }
 
   const createdAt = new Date().toISOString();
   const before = {
@@ -282,10 +374,10 @@ function repair(jobId, options) {
     result: {
       ...job.result,
       ...after,
-      repairs: [...(job.result.repairs || []), { repairId, createdAt, before, after }],
+      repairs: [...(job.result.repairs || []), { repairId, createdAt, before, after, options: recordedOptions, inheritedOptions }],
     },
   }));
-  return { jobId, repairId, before, build: assembled.build, qa: assembled.qa, result: after };
+  return { jobId, repairId, before, build: assembled.build, qa: assembled.qa, result: after, options: recordedOptions, inheritedOptions };
 }
 
 function currentLayerDir(root, manifest) {
@@ -294,7 +386,7 @@ function currentLayerDir(root, manifest) {
   const dir = latest
     ? path.join(root, 'repairs', latest, 'after', 'processed', 'layers')
     : path.join(root, 'processed', 'layers');
-  if (!fs.existsSync(dir)) throw new Error('Finalize the job before deriving expressions.');
+  if (!fs.existsSync(dir)) throw new Error('Finalize the job before preparing expressions.');
   return dir;
 }
 
@@ -313,6 +405,64 @@ function deriveExpressions(jobId) {
     report: relativeProjectPath(report),
     next: `still2rig-psd repair ${jobId} --preview-expressions ${relativeProjectPath(outputDir)}`,
     note: 'Derived preview art. The PSD stays productionReady=false until drawn expression art is supplied with --expressions.',
+  };
+}
+
+function expressionRequests(jobId) {
+  const { root, manifest } = loadJob(jobId);
+  const outputDir = path.join(root, 'expression-requests');
+  const requests = JSON.parse(runPython('build_expression_requests.py', [
+    '--job-id', jobId,
+    '--layer-dir', currentLayerDir(root, manifest),
+    '--output-dir', outputDir,
+  ]));
+  return {
+    jobId,
+    outputDir: relativeProjectPath(outputDir),
+    requests: relativeProjectPath(path.join(outputDir, 'requests.json')),
+    canvas: requests.canvas,
+    layerDir: requests.layerDir,
+    layerSha256: requests.layerSha256,
+    next: `still2rig-psd import-expressions ${jobId}`,
+    note: 'Local requests only. Ask the image owner before sending these crops to an image generation service.',
+  };
+}
+
+function importExpressions(jobId, directory, options) {
+  const { root, manifest } = loadJob(jobId);
+  const requestDir = options['request-dir'] ? path.resolve(options['request-dir']) : path.join(root, 'expression-requests');
+  if (options['request-dir'] && !options['read-only']) throw new Error('--request-dir is only available with --read-only.');
+  const outputDir = path.join(root, 'generated-expressions');
+  const reportFile = path.join(outputDir, 'report.json');
+  let layerDir = currentLayerDir(root, manifest);
+  if (options['read-only']) {
+    const requests = JSON.parse(fs.readFileSync(path.join(requestDir, 'requests.json'), 'utf8'));
+    layerDir = path.resolve(PROJECT_ROOT, requests.layerDir);
+    if (!layerDir.startsWith(`${root}${path.sep}`)) throw new Error('Recorded expression layers must stay inside this job.');
+  }
+  const args = [
+    '--job-id', jobId, '--layer-dir', layerDir,
+    '--request-dir', requestDir, '--result-dir', directory ? path.resolve(directory) : path.join(requestDir, 'results'),
+    '--output-dir', outputDir, '--report', reportFile,
+  ];
+  if (options['read-only']) args.push('--read-only');
+  for (const key of ['max-outside-mean', 'max-outside-p99', 'max-band-local-mean', 'max-band-flat-mean', 'artwork-threshold', 'minimum-component-pixels', 'protected-band', 'alignment-radius', 'max-alignment-shift', 'max-alignment-scale']) {
+    if (options[key] !== undefined) args.push(`--${key}`, options[key]);
+  }
+  let report;
+  if (options['read-only']) {
+    const result = spawnSync('python3', [path.join(PROJECT_ROOT, 'scripts', 'import_expression_results.py'), ...args], { cwd: PROJECT_ROOT, encoding: 'utf8', maxBuffer: 20 * 1024 * 1024 });
+    report = JSON.parse(result.stdout || '{}');
+    if (!report.schemaVersion) throw new Error((result.stderr || 'Expression evaluation failed.').trim());
+    if (!report.ok) process.exitCode = 1;
+    return report;
+  }
+  report = JSON.parse(runPython('import_expression_results.py', args));
+  return {
+    ...report,
+    outputDir: relativeProjectPath(outputDir),
+    report: relativeProjectPath(reportFile),
+    next: `still2rig-psd repair ${jobId} --expressions ${relativeProjectPath(outputDir)}`,
   };
 }
 
@@ -368,7 +518,7 @@ function motionQa(jobId, options) {
       },
     },
   }));
-  return { jobId, pass: report.pass, checks: report.checks, metrics: report.metrics, report: relativeProjectPath(reportFile) };
+  return { jobId, pass: report.pass, checks: report.checks, metrics: report.metrics, errors: report.errors || [], report: relativeProjectPath(reportFile) };
 }
 
 function selfTest() {
@@ -425,6 +575,10 @@ export async function main(argv = process.argv.slice(2)) {
     if (options['negative-fixture'] ? !result.behavedAsExpected : !result.pass) process.exitCode = 1;
   } else if (command === 'derive-expressions') {
     print(deriveExpressions(positional[0]), true);
+  } else if (command === 'expression-requests') {
+    print(expressionRequests(positional[0]), true);
+  } else if (command === 'import-expressions') {
+    print(importExpressions(positional[0], positional[1], options), true);
   } else if (command === 'status') {
     print(positional[0] ? loadJob(positional[0]).manifest : listJobs(), options.json);
   } else if (command === 'self-test') {

@@ -66,22 +66,30 @@ function mouthArtworkQuality(layerDir, canvasWidth, canvasHeight, quality) {
   const mouthCloseFile = findLayerFile(layerDir, ['mouth_close.png', 'mouth.png']);
   const open = mouthOpenFile ? artworkStats(readPngRgba(mouthOpenFile), quality.alphaThreshold) : null;
   const close = mouthCloseFile ? artworkStats(readPngRgba(mouthCloseFile), quality.alphaThreshold) : null;
-  const maximumVisiblePixels = Math.max(
-    quality.mouthMaxVisiblePixelsFloor,
-    Math.round(canvasWidth * canvasHeight * quality.mouthMaxVisiblePixelRatio),
-  );
-  const maximumWidth = Math.max(20, Math.round(canvasWidth * quality.mouthMaxWidthRatio));
-  const maximumHeight = Math.max(12, Math.round(canvasHeight * quality.mouthMaxHeightRatio));
-  const compact = (stats) => stats && stats.bbox
-    && stats.visiblePixels <= maximumVisiblePixels
-    && stats.bbox[2] - stats.bbox[0] <= maximumWidth
-    && stats.bbox[3] - stats.bbox[1] <= maximumHeight;
+  const faceFile = findLayerFile(layerDir, ['face.png']);
+  const face = faceFile ? artworkStats(readPngRgba(faceFile), quality.alphaThreshold) : null;
+  const faceWidth = face?.bbox ? face.bbox[2] - face.bbox[0] : 0;
+  const faceHeight = face?.bbox ? face.bbox[3] - face.bbox[1] : 0;
+  // A lip line is shallow/sparse (16% x 3%, 0.15% area); an opening can
+  // be taller/filled (18% x 10%, 1.2% area). Canvas padding cannot change
+  // these limits. Floors retain useful checks on tiny synthetic previews.
+  const limits = (state) => ({
+    maximumVisiblePixels: Math.max(quality.mouthMaxVisiblePixelsFloor, Math.round(faceWidth * faceHeight * quality[`mouth${state}MaxFacePixelRatio`])),
+    maximumWidth: Math.max(quality.mouthMaxWidthFloor, Math.round(faceWidth * quality[`mouth${state}MaxFaceWidthRatio`])),
+    maximumHeight: Math.max(quality.mouthMaxHeightFloor, Math.round(faceHeight * quality[`mouth${state}MaxFaceHeightRatio`])),
+  });
+  const closeLimits = limits('Close');
+  const openLimits = limits('Open');
+  const compact = (stats, cap) => face?.bbox && stats?.bbox
+    && stats.visiblePixels <= cap.maximumVisiblePixels
+    && stats.bbox[2] - stats.bbox[0] <= cap.maximumWidth
+    && stats.bbox[3] - stats.bbox[1] <= cap.maximumHeight;
   return {
     close,
     open,
     checks: {
-      compactCloseMouth: Boolean(compact(close)),
-      compactOpenMouth: Boolean(compact(open)),
+      compactCloseMouth: Boolean(compact(close, closeLimits)),
+      compactOpenMouth: Boolean(compact(open, openLimits)),
       closedMouthIsLineArtwork: Boolean(close && close.fillRatio <= quality.mouthCloseMaxFillRatio),
       noBrightMouthFill: Boolean(
         close && open
@@ -90,9 +98,9 @@ function mouthArtworkQuality(layerDir, canvasWidth, canvasHeight, quality) {
       ),
     },
     thresholds: {
-      maximumVisiblePixels,
-      maximumWidth,
-      maximumHeight,
+      faceBox: face?.bbox || null,
+      close: closeLimits,
+      open: openLimits,
       closeMaximumFillRatio: quality.mouthCloseMaxFillRatio,
       maximumBrightPixelRatio: quality.mouthMaxBrightPixelRatio,
     },
@@ -109,9 +117,17 @@ function expressionRegistration(layerDir, canvasWidth, tolerance) {
   const mouthError = distance(mouthOpen, mouthClose);
   const center = canvasWidth / 2;
   const irides = iridesFile ? readPngRgba(iridesFile) : null;
+  const eyeOutline = ['eyelash.png', 'eyewhite.png'].map((name) => findLayerFile(layerDir, [name]))
+    .filter(Boolean).map((file) => readPngRgba(file));
+  const union = eyeOutline.length ? { ...eyeOutline[0], data: new Uint8ClampedArray(eyeOutline[0].data.length) } : null;
+  for (const image of eyeOutline) {
+    for (let offset = 3; offset < image.data.length; offset += 4) union.data[offset] = Math.max(union.data[offset], image.data[offset]);
+  }
   const eyeClose = eyeCloseFile ? readPngRgba(eyeCloseFile) : null;
-  const irisLeft = irides ? centroid(irides, (x) => x < center) : null;
-  const irisRight = irides ? centroid(irides, (x) => x >= center) : null;
+  const outlineLeft = union ? centroid(union, (x) => x < center) : null;
+  const outlineRight = union ? centroid(union, (x) => x >= center) : null;
+  const irisLeft = outlineLeft || (irides ? centroid(irides, (x) => x < center) : null);
+  const irisRight = outlineRight || (irides ? centroid(irides, (x) => x >= center) : null);
   const closeLeft = eyeClose ? centroid(eyeClose, (x) => x < center) : null;
   const closeRight = eyeClose ? centroid(eyeClose, (x) => x >= center) : null;
   const eyeLeftXError = irisLeft && closeLeft ? Math.abs(irisLeft.x - closeLeft.x) : Number.POSITIVE_INFINITY;
@@ -119,6 +135,7 @@ function expressionRegistration(layerDir, canvasWidth, tolerance) {
   const eyeLeftYError = irisLeft && closeLeft ? Math.abs(irisLeft.y - closeLeft.y) : Number.POSITIVE_INFINITY;
   const eyeRightYError = irisRight && closeRight ? Math.abs(irisRight.y - closeRight.y) : Number.POSITIVE_INFINITY;
   return {
+    eyeReference: { left: outlineLeft ? 'eyelash ∪ eyewhite' : 'irides', right: outlineRight ? 'eyelash ∪ eyewhite' : 'irides' },
     present: { mouthOpen: Boolean(mouthOpen), mouthClose: Boolean(mouthClose), eyeCloseLeft: Boolean(closeLeft), eyeCloseRight: Boolean(closeRight) },
     errorsPx: {
       mouth: Number.isFinite(mouthError) ? Number(mouthError.toFixed(3)) : null,
