@@ -4,6 +4,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { afterEach, test } from 'node:test';
 import { readPngRgba } from '../src/psd.mjs';
+import { readPsd, writePsdBuffer } from 'ag-psd';
 import { PROJECT_ROOT, STATE_ROOT } from '../src/utils.mjs';
 
 const roots = [];
@@ -255,4 +256,76 @@ test('imports a single result from DIR and rejects modified request masks and in
   ok('expression-requests', f.id);
   fs.appendFileSync(path.join(f.requestDir, 'eye_close', 'underlay.png'), Buffer.from('changed'));
   assert.match(run('import-expressions', f.id, alternate).stderr, /input, mask or underlay changed/);
+});
+
+test('repair records and inherits overrides, resolves legacy records and supports explicit removal', () => {
+  const f = fixture();
+  const overrides = path.join(f.root, 'overrides');
+  fs.mkdirSync(overrides);
+  const changed = spawnSync('python3', ['-c',
+    'from PIL import Image; import sys; im=Image.open(sys.argv[1]); r,g,b,a=im.split(); Image.merge("RGBA",(b,g,r,a)).save(sys.argv[2])',
+    path.join(f.layers, 'topwear.png'), path.join(overrides, 'topwear.png')]);
+  assert.equal(changed.status, 0);
+  const first = ok('repair', f.id, '--layer-overrides', overrides);
+  assert.match(first.options.layerOverrides, /\/overrides$/);
+  const inherited = ok('repair', f.id, '--expressions', f.layers);
+  assert.equal(inherited.inheritedOptions.fromRepair, first.repairId);
+  assert.equal(inherited.options.expressions, path.relative(PROJECT_ROOT, f.layers));
+  const currentTopwear = path.join(f.root, 'repairs', inherited.repairId, 'after', 'processed', 'layers', 'topwear.png');
+  assert.deepEqual(readPngRgba(currentTopwear).data, readPngRgba(path.join(overrides, 'topwear.png')).data);
+  const manifestFile = path.join(f.root, 'job.json');
+  const manifest = JSON.parse(fs.readFileSync(manifestFile));
+  delete manifest.result.repairs.at(-1).options;
+  fs.writeFileSync(manifestFile, JSON.stringify(manifest));
+  const legacy = ok('repair', f.id);
+  assert.equal(legacy.inheritedOptions.legacy, true);
+  fs.rmSync(path.join(overrides, 'topwear.png'));
+  assert.match(run('repair', f.id).stderr, /Previous layer overrides are missing/);
+  const cleared = ok('repair', f.id, '--no-layer-overrides');
+  assert.equal(cleared.options.layerOverrides, null);
+  assert.deepEqual(cleared.inheritedOptions, {});
+  const rawTopwear = path.join(f.root, 'repairs', cleared.repairId, 'after', 'processed', 'layers', 'topwear.png');
+  assert.deepEqual(readPngRgba(rawTopwear).data, readPngRgba(path.join(f.layers, 'topwear.png')).data);
+});
+
+for (const mode of ['shifted', 'scaled']) {
+  test(`rejects globally ${mode} expression results`, () => {
+    const f = fixture();
+    ok('expression-requests', f.id);
+    python('edit_expression_fixture.py', f.requestDir, f.resultDir, mode);
+    const result = run('import-expressions', f.id);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /global image misalignment/);
+    const report = JSON.parse(fs.readFileSync(path.join(f.root, 'generated-expressions', 'report.json')));
+    assert.equal(report.variants.eye_close.alignment.pass, false);
+  });
+}
+
+test('ignores far context changes and input-transparent pixels outside the editable band', () => {
+  const f = fixture('--without-back-hair');
+  ok('expression-requests', f.id);
+  python('edit_expression_fixture.py', f.requestDir, f.resultDir, 'context');
+  const result = ok('import-expressions', f.id);
+  assert.equal(result.variants.eye_close.meanAbsoluteDiff, 0);
+  assert.equal(result.variants.eye_close.alignment.pass, true);
+  const repaired = ok('repair', f.id, '--expressions', result.outputDir);
+  assert.equal(repaired.qa.productionReady, true);
+  const requests = JSON.parse(fs.readFileSync(path.join(f.requestDir, 'requests.json')));
+  assert.deepEqual(requests.variants.mouth_open.mouthLimits.open, repaired.qa.mouthArtwork.thresholds.open);
+});
+
+test('motion QA writes a failed report instead of crashing when eyewhite is missing', () => {
+  const f = fixture();
+  const file = path.join(f.root, 'output', `${f.id}.psd`);
+  const psd = readPsd(new Uint8Array(fs.readFileSync(file)), { useImageData: true, skipThumbnail: true });
+  psd.children = psd.children.filter((layer) => layer.name !== 'eyewhite');
+  fs.writeFileSync(file, writePsdBuffer(psd));
+  const result = run('motion-qa', f.id);
+  assert.notEqual(result.status, 0);
+  const output = JSON.parse(result.stdout);
+  assert.equal(output.pass, false);
+  assert.equal(output.checks.requiredFeatureLayers, false);
+  assert.match(output.errors.join(' '), /eyewhite/);
+  assert.ok(!result.stderr.includes('x0'));
+  assert.ok(fs.existsSync(path.join(f.root, 'reports', 'motion-qa', 'motion-qa.json')));
 });

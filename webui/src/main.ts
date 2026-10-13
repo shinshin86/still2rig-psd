@@ -1589,6 +1589,7 @@ function expressionRequestMessage(item: GeneratedPsd, id: string): string {
   const results = `${root}/expression-requests/results/eye_close.png と mouth_open.png`;
   const finish = [
     `npm run still2rig-psd -- import-expressions ${id} を実行し、取り込みが通ったら npm run still2rig-psd -- repair ${id} --expressions ${root}/generated-expressions を実行してください。`,
+    '前回の修復で使った差し替え画像は自動で引き継がれます。引き継いだ内容も実行結果で確認してください。',
     '既存の品質検査の結果と、閉じた目・開いた口の両方の見た目を確認して報告してください。',
   ];
   const common = [

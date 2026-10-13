@@ -127,8 +127,19 @@ npm run still2rig-psd -- import-expressions <job>
 npm run still2rig-psd -- repair <job> --expressions .still2rig-psd/jobs/<job>/generated-expressions
 ```
 
-Import validates proportions, changes outside the mask and current layer hashes,
-then compares the editable area against the underlay, removes matching skin and
+Repair automatically inherits the preceding repair's layer overrides and reports
+them in `inheritedOptions`; verify that corrected layers remain present. Do not
+ask the user to remember the old flag. `--no-layer-overrides` deliberately drops
+them. Legacy repairs use the local `overrides/` directory only if every recorded
+file exists. If repair refuses unresolved overrides, locate those files or ask
+whether the user wants to remove them. Each repair records its effective options.
+
+Import validates proportions and current layer hashes. Protected changes are
+measured in an opaque 8-pixel band outside the editable area, ignoring
+input-transparent pixels, with mean RGBA difference <=6 and p99 <=20 by default.
+A separate shift/scale search rejects meaningful global misalignment. Far context
+changes are not imported. Import then compares the editable area against the
+underlay, removes matching skin and
 tiny noise components, and restores only the new artwork to full-canvas
 transparent files with soft alpha edges. Read
 `generated-expressions/report.json`, including measured protected-pixel errors.
@@ -139,6 +150,9 @@ drift above the extraction threshold may still leave skin; existing mouth QA
 must still reject unsuitable patches. Inspect face crops and
 both full-canvas expression states for color, alignment and edge seams after
 repair. Import does not set `productionReady`; existing QA remains authoritative.
+Closed-eye registration uses the per-side eyelash/eyewhite alpha union, with iris
+fallback and the same 8-pixel horizontal tolerance. Mouth limits and the mouth
+request mask share face-bbox-relative settings, with separate closed/open limits.
 
 ## Motion QA
 

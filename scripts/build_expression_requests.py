@@ -9,7 +9,7 @@ from pathlib import Path
 
 from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
-from expression_requests_common import composite_layers, file_hash, layer_hash, neutral_layers
+from expression_requests_common import composite_layers, file_hash, layer_hash, mouth_limits, neutral_layers
 
 
 PROMPTS = {
@@ -29,6 +29,8 @@ def alpha_union(layers, names, size):
 
 def build_requests(job_id: str, layer_dir: Path, layer_map: Path, output_dir: Path):
     composite, layers = neutral_layers(layer_dir, json.loads(layer_map.read_text(encoding="utf-8")))
+    quality = json.loads((Path(__file__).resolve().parent.parent / "configs" / "default.json").read_text(encoding="utf-8"))["quality"]
+    limits = mouth_limits(layers["face"], quality)
     face = alpha_union(layers, ["face", "eyewhite", "irides", "eyelash", "mouth_close"], composite.size)
     box = face.getbbox()
     if not box:
@@ -51,7 +53,19 @@ def build_requests(job_id: str, layer_dir: Path, layer_map: Path, output_dir: Pa
             ImageDraw.Draw(editable).rectangle(
                 (editable_box[0], editable_box[1], editable_box[2] - 1, editable_box[3] - 1), fill=255)
         dilation = max(3, round((editable_box[2] - editable_box[0]) * (0.04 if name == "eye_close" else 0.2)))
-        editable = editable.filter(ImageFilter.MaxFilter(2 * dilation + 1)).crop(crop_box)
+        editable = editable.filter(ImageFilter.MaxFilter(2 * dilation + 1))
+        if name == "mouth_open":
+            # Keep the lip-line position, leaving the full permitted opening
+            # below it plus a boundary margin for soft edges.
+            center_x = (editable_box[0] + editable_box[2]) / 2
+            center_y = (editable_box[1] + editable_box[3]) / 2
+            half_width = limits["open"]["maximumWidth"] / 2 + dilation
+            ImageDraw.Draw(editable).rectangle((
+                round(center_x - half_width), round(center_y - limits["open"]["maximumHeight"] / 2 - dilation),
+                round(center_x + half_width), editable_box[1] + limits["open"]["maximumHeight"] + dilation,
+            ), fill=255)
+        editable_box = editable.getbbox()
+        editable = editable.crop(crop_box)
         variant_dir = output_dir / name
         variant_dir.mkdir(exist_ok=True)
         composite.crop(crop_box).save(variant_dir / "input.png")
@@ -74,6 +88,8 @@ def build_requests(job_id: str, layer_dir: Path, layer_map: Path, output_dir: Pa
             "maskSha256": file_hash(variant_dir / "mask.png"),
             "underlaySha256": file_hash(variant_dir / "underlay.png"),
             "result": f"results/{name}.png", "dilationPx": dilation,
+            "editableBox": list(editable_box),
+            **({"mouthLimits": limits} if name == "mouth_open" else {}),
         }
     report = {
         "schemaVersion": 2, "jobId": job_id, "canvas": list(composite.size),

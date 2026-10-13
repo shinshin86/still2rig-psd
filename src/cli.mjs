@@ -27,10 +27,11 @@ Usage:
   still2rig-psd cell JOB CELL_FILE
   still2rig-psd import JOB RESULT.zip
   still2rig-psd finalize JOB [--expressions DIR | --preview-expressions DIR] [--layer-overrides DIR] [--preview-placeholders]
-  still2rig-psd repair JOB [--expressions DIR | --preview-expressions DIR] [--layer-overrides DIR] [--preview-placeholders]
+  still2rig-psd repair JOB [--expressions DIR | --preview-expressions DIR] [--layer-overrides DIR | --no-layer-overrides] [--preview-placeholders]
   still2rig-psd derive-expressions JOB
   still2rig-psd expression-requests JOB
-  still2rig-psd import-expressions JOB [DIR] [--max-outside-mean 3] [--max-outside-p99 20]
+  still2rig-psd import-expressions JOB [DIR] [--max-outside-mean 6] [--max-outside-p99 20]
+    [--protected-band 8] [--alignment-radius 24]
     [--artwork-threshold 8] [--minimum-component-pixels 4]
   still2rig-psd motion-qa JOB [--negative-fixture]
   still2rig-psd status [JOB] [--json]
@@ -235,6 +236,42 @@ function copyResultArtifact(value, destination) {
   return destination;
 }
 
+function inheritedLayerOverrides(root, manifest) {
+  const latest = manifest.result?.repairs?.at(-1);
+  if (!latest) return null;
+  const inspectionFile = path.join(root, 'repairs', latest.repairId, 'after', 'reports', 'layer-inspection.json');
+  if (latest.options && latest.options.layerOverrides === null) return null;
+  if (!fs.existsSync(inspectionFile)) {
+    throw new Error('Cannot resolve the previous repair layer overrides. Supply --layer-overrides DIR or explicitly use --no-layer-overrides.');
+  }
+  const inspection = JSON.parse(fs.readFileSync(inspectionFile, 'utf8'));
+  const files = inspection.layerOverrides || [];
+  const directory = latest.options?.layerOverrides
+    ? path.resolve(PROJECT_ROOT, latest.options.layerOverrides)
+    : files.length ? path.join(root, 'overrides') : null;
+  if (!directory) return null;
+  if (!fs.existsSync(directory) || !fs.statSync(directory).isDirectory()
+      || files.some((name) => !fs.existsSync(path.join(directory, name)) || !fs.statSync(path.join(directory, name)).isFile())) {
+    throw new Error('Previous layer overrides are missing. Restore them or supply --layer-overrides DIR; use --no-layer-overrides only to deliberately discard them.');
+  }
+  return { directory, fromRepair: latest.repairId, legacy: !latest.options };
+}
+
+function recordedRepairDirectory(directory, repairRoot, name) {
+  if (!directory) return null;
+  const source = path.resolve(directory);
+  const relative = path.relative(PROJECT_ROOT, source);
+  if (!relative.startsWith('..') && !path.isAbsolute(relative)) return relativeProjectPath(source);
+  // External user-supplied art remains supported without writing private
+  // absolute paths to the manifest. Only the used PNG inputs are copied.
+  const snapshot = path.join(repairRoot, 'inputs', name);
+  fs.mkdirSync(snapshot, { recursive: true });
+  for (const entry of fs.readdirSync(source, { withFileTypes: true })) {
+    if (entry.isFile() && /\.png$/i.test(entry.name)) fs.copyFileSync(path.join(source, entry.name), path.join(snapshot, entry.name));
+  }
+  return relativeProjectPath(snapshot);
+}
+
 function repair(jobId, options) {
   const { root, manifest } = loadJob(jobId);
   if (!manifest.result?.psd) throw new Error('Finalize the job before repairing it.');
@@ -243,10 +280,17 @@ function repair(jobId, options) {
   const repairId = nextRepairId(root);
   const repairRoot = path.join(root, 'repairs', repairId);
   const afterRoot = path.join(repairRoot, 'after');
+  if (options['layer-overrides'] && options['no-layer-overrides']) {
+    throw new Error('Use --layer-overrides DIR or --no-layer-overrides, not both.');
+  }
+  const inherited = !options['layer-overrides'] && !options['no-layer-overrides']
+    ? inheritedLayerOverrides(root, manifest) : null;
+  const effective = { ...options };
+  if (inherited) effective['layer-overrides'] = inherited.directory;
   const assembled = assembleArtifacts({
     jobId,
     root,
-    options,
+    options: effective,
     outputPsd: path.join(afterRoot, 'output', `${jobId}.psd`),
     layerDir: path.join(afterRoot, 'processed', 'layers'),
     reportsRoot: path.join(afterRoot, 'reports'),
@@ -264,6 +308,14 @@ function repair(jobId, options) {
   assembled.qa.psd = relativeProjectPath(currentPsd);
   writeJson(assembled.buildReportFile, assembled.build);
   writeJson(assembled.qaReportFile, assembled.qa);
+
+  const recordedOptions = {
+    layerOverrides: recordedRepairDirectory(effective['layer-overrides'], repairRoot, 'layer-overrides'),
+    expressions: recordedRepairDirectory(effective.expressions, repairRoot, 'expressions'),
+    previewExpressions: recordedRepairDirectory(effective['preview-expressions'], repairRoot, 'preview-expressions'),
+    previewPlaceholders: Boolean(effective['preview-placeholders']),
+  };
+  const inheritedOptions = inherited ? { layerOverrides: recordedOptions.layerOverrides, fromRepair: inherited.fromRepair, legacy: inherited.legacy } : {};
 
   const createdAt = new Date().toISOString();
   const before = {
@@ -285,10 +337,10 @@ function repair(jobId, options) {
     result: {
       ...job.result,
       ...after,
-      repairs: [...(job.result.repairs || []), { repairId, createdAt, before, after }],
+      repairs: [...(job.result.repairs || []), { repairId, createdAt, before, after, options: recordedOptions, inheritedOptions }],
     },
   }));
-  return { jobId, repairId, before, build: assembled.build, qa: assembled.qa, result: after };
+  return { jobId, repairId, before, build: assembled.build, qa: assembled.qa, result: after, options: recordedOptions, inheritedOptions };
 }
 
 function currentLayerDir(root, manifest) {
@@ -349,7 +401,7 @@ function importExpressions(jobId, directory, options) {
     '--request-dir', requestDir, '--result-dir', directory ? path.resolve(directory) : path.join(requestDir, 'results'),
     '--output-dir', outputDir, '--report', reportFile,
   ];
-  for (const key of ['max-outside-mean', 'max-outside-p99', 'artwork-threshold', 'minimum-component-pixels']) {
+  for (const key of ['max-outside-mean', 'max-outside-p99', 'artwork-threshold', 'minimum-component-pixels', 'protected-band', 'alignment-radius']) {
     if (options[key] !== undefined) args.push(`--${key}`, options[key]);
   }
   const report = JSON.parse(runPython('import_expression_results.py', args));
@@ -413,7 +465,7 @@ function motionQa(jobId, options) {
       },
     },
   }));
-  return { jobId, pass: report.pass, checks: report.checks, metrics: report.metrics, report: relativeProjectPath(reportFile) };
+  return { jobId, pass: report.pass, checks: report.checks, metrics: report.metrics, errors: report.errors || [], report: relativeProjectPath(reportFile) };
 }
 
 function selfTest() {

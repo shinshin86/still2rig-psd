@@ -8,7 +8,7 @@ import json
 import math
 from pathlib import Path
 
-from PIL import Image, ImageChops
+from PIL import Image, ImageChops, ImageFilter
 
 from expression_requests_common import file_hash, layer_hash
 
@@ -34,6 +34,65 @@ def protected_diff(reference, result, mask):
             percentile = value
             break
     return {"meanAbsoluteDiff": round(mean, 4), "p99AbsoluteDiff": percentile, "protectedPixels": count}
+
+
+def protected_band(reference, editable, width):
+    ring = ImageChops.subtract(editable.filter(ImageFilter.MaxFilter(2 * width + 1)), editable)
+    opaque = reference.getchannel("A").point(lambda value: 255 if value > 16 else 0)
+    ring = ImageChops.multiply(ring, opaque)
+    mask = Image.new("RGBA", reference.size)
+    mask.putalpha(ring)
+    return mask
+
+
+def alignment_check(reference, result, band, radius):
+    width, height = reference.size
+    source = reference.convert("RGB").load()
+    target = result.convert("RGB").load()
+    positions = [(i % width, i // width) for i, value in enumerate(band.getchannel("A").tobytes()) if value]
+    stride = max(1, math.ceil(len(positions) / 1200))
+    points = positions[::stride]
+    if not points:
+        raise ValueError("No opaque protected band is available for alignment.")
+    cx, cy = width / 2, height / 2
+
+    def cost(dx, dy, scale):
+        total = count = 0
+        for x, y in points:
+            tx, ty = round(cx + (x - cx) * scale + dx), round(cy + (y - cy) * scale + dy)
+            if not (0 <= tx < width and 0 <= ty < height):
+                continue
+            a, b = source[x, y], target[tx, ty]
+            # Bound the effect of occasional regenerated line-art pixels.
+            total += sum(min(abs(a[c] - b[c]), 48) for c in range(3)) / 3
+            count += 1
+        return total / count if count >= len(points) * 0.9 else float("inf")
+
+    baseline = cost(0, 0, 1)
+    best = (baseline, 0, 0, 1)
+    step = 3
+    shifts = sorted(set([0, *range(-radius, radius + 1, step)]))
+    for scale in (0.94, 0.97, 1, 1.03, 1.06):
+        for dy in shifts:
+            for dx in shifts:
+                candidate = (cost(dx, dy, scale), dx, dy, scale)
+                if candidate[0] < best[0]:
+                    best = candidate
+    coarse = best
+    for scale in (coarse[3] - 0.01, coarse[3], coarse[3] + 0.01):
+        for dy in range(max(-radius, coarse[2] - 2), min(radius, coarse[2] + 2) + 1):
+            for dx in range(max(-radius, coarse[1] - 2), min(radius, coarse[1] + 2) + 1):
+                candidate = (cost(dx, dy, scale), dx, dy, scale)
+                if candidate[0] < best[0]:
+                    best = candidate
+    gain = baseline - best[0]
+    # Flat or tinted skin can yield an arbitrary best shift. Reject only when
+    # a nontrivial transform materially explains the band better than identity.
+    meaningful = gain > 0.75 and gain > baseline * 0.2
+    shifted = math.hypot(best[1], best[2]) > 2 or abs(best[3] - 1) > 0.015
+    return {"dx": best[1], "dy": best[2], "scale": round(best[3], 4),
+            "identityError": round(baseline, 4), "bestError": round(best[0], 4),
+            "improvement": round(gain, 4), "samples": len(points), "pass": not (meaningful and shifted)}
 
 
 def extract_artwork(result, underlay, editable, noise_threshold, minimum_component_pixels):
@@ -115,11 +174,16 @@ def import_results(args, report):
             raise ValueError(f"{name}: aspect ratio differs ({aspect_error:.4%}); keep the input proportions.")
         if result.size != reference.size:
             result = result.resize(reference.size, Image.Resampling.LANCZOS)
-        details.update(protected_diff(reference, result, mask))
+        editable = ImageChops.invert(mask.getchannel("A"))
+        band = protected_band(reference, editable, args.protected_band)
+        details["alignment"] = alignment_check(reference, result, band, args.alignment_radius)
+        details.update(protected_diff(reference, result, band))
+        if not details["alignment"]["pass"]:
+            alignment = details["alignment"]
+            raise ValueError(f"{name}: global image misalignment: shift=({alignment['dx']}, {alignment['dy']}), scale={alignment['scale']}.")
         if details["meanAbsoluteDiff"] > args.max_outside_mean or details["p99AbsoluteDiff"] > args.max_outside_p99:
             raise ValueError(f"{name}: pixels outside the mask changed: mean={details['meanAbsoluteDiff']}, "
                              f"p99={details['p99AbsoluteDiff']} (limits {args.max_outside_mean}, {args.max_outside_p99}).")
-        editable = ImageChops.invert(mask.getchannel("A"))
         result, extraction = extract_artwork(result, underlay, editable, args.artwork_threshold, args.minimum_component_pixels)
         details.update(extraction)
         box = item["cropBox"]
@@ -158,8 +222,12 @@ def main():
     parser.add_argument("--result-dir", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--report", type=Path, required=True)
-    parser.add_argument("--max-outside-mean", type=float, default=3)
+    # Opaque-band mean 6/255 tolerates small generation/recompression tint;
+    # p99 still limits local damage and a separate gate detects geometry drift.
+    parser.add_argument("--max-outside-mean", type=float, default=6)
     parser.add_argument("--max-outside-p99", type=float, default=20)
+    parser.add_argument("--protected-band", type=int, default=8)
+    parser.add_argument("--alignment-radius", type=int, default=24)
     parser.add_argument("--artwork-threshold", type=float, default=8)
     parser.add_argument("--minimum-component-pixels", type=int, default=4)
     args = parser.parse_args()
@@ -175,6 +243,9 @@ def main():
             raise ValueError("Artwork threshold must be a finite number from 0 up to (but not including) 255.")
         if args.minimum_component_pixels < 1:
             raise ValueError("Minimum component pixels must be at least 1.")
+        if not 1 <= args.protected_band <= 128 or not 1 <= args.alignment_radius <= 64:
+            raise ValueError("Protected band must be 1–128 pixels and alignment radius 1–64 pixels.")
+        report["thresholds"].update({"protectedBand": args.protected_band, "alignmentRadius": args.alignment_radius})
         import_results(args, report)
     except (ValueError, OSError, KeyError, TypeError) as error:
         report["error"] = str(error)

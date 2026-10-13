@@ -159,9 +159,14 @@ npm run still2rig-psd -- repair demo --expressions .still2rig-psd/jobs/demo/gene
 Requests use a face crop of the current PSD layers, including the latest repair,
 with front hair and head accessories hidden. Import removes pixels matching the
 face underlay and restores only the new expression artwork to the PSD canvas. It rejects changed
-layers, wrong proportions, or excessive changes outside the mask. Drawn artwork
+layers, wrong proportions, global misalignment, or excessive changes in the
+opaque band around the editable area. Drawn artwork
 remains the first choice. Generated art must pass the existing expression QA and
 visual review; importing it does not establish readiness.
+`repair` automatically reuses layer overrides from the preceding repair and
+reports what it inherited. Use `--no-layer-overrides` to deliberately drop them.
+If a legacy repair's overrides cannot be found, repair stops and asks for an
+explicit directory or removal instead of discarding corrected layers.
 
 ## Automation and consent boundaries
 

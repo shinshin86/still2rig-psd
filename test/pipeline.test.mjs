@@ -62,6 +62,36 @@ test('rejects the 24px shifted mouth negative fixture', () => {
   assert.equal(result.qa.productionReady, false);
 });
 
+test('closed-eye registration follows the eye outline instead of inward-looking irises', () => {
+  const root = tempRoot('outline');
+  const layerDir = fixture(root, '--inward-irises', '--scale', '4');
+  const result = buildAndQa(root, layerDir);
+  assert.equal(result.qa.registration.eyeReference.left, 'eyelash ∪ eyewhite');
+  assert.equal(result.qa.registration.errorsPx.eyeLeftX, 0);
+  assert.equal(result.qa.registration.errorsPx.eyeRightX, 0);
+  assert.equal(result.qa.registration.checks.eyesHorizontallyRegistered, true);
+  const shifted = spawnSync('python3', ['-c',
+    'from PIL import Image; import sys; p=sys.argv[1]; im=Image.open(p); out=Image.new("RGBA",im.size); out.paste(im,(24,0)); out.save(p)',
+    path.join(layerDir, 'eye_close.png')]);
+  assert.equal(shifted.status, 0);
+  const invalid = buildAndQa(root, layerDir);
+  assert.equal(invalid.qa.registration.checks.eyesHorizontallyRegistered, false);
+  assert.equal(invalid.qa.productionReady, false);
+});
+
+test('mouth limits follow the face bbox with separate closed/open limits, independent of canvas padding', () => {
+  const root = tempRoot('face-limits');
+  const layerDir = fixture(root);
+  const original = buildAndQa(root, layerDir);
+  const padded = spawnSync('python3', ['-c',
+    'from PIL import Image; from pathlib import Path; import sys;\nfor p in Path(sys.argv[1]).glob("*.png"):\n im=Image.open(p); out=Image.new("RGBA",(1280,1280)); out.paste(im,(0,0)); out.save(p)',
+    layerDir]);
+  assert.equal(padded.status, 0);
+  const result = buildAndQa(root, layerDir);
+  assert.deepEqual(result.qa.mouthArtwork.thresholds, original.qa.mouthArtwork.thresholds);
+  assert.equal(result.qa.checks.expressionArtwork, true);
+});
+
 test('rejects a filled face-colored closed-mouth patch', () => {
   const root = tempRoot('mouth-patch');
   const result = buildAndQa(root, fixture(root, '--mouth-patch'));

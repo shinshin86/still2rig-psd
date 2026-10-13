@@ -99,11 +99,16 @@ Ask the image owner before sending these crops to a generation service. Save
 the returned images as `expression-requests/results/eye_close.png` and
 `mouth_open.png`. `import-expressions JOB [DIR]` accepts another results directory
 when supplied. Proportional size changes within 1% aspect-ratio error are resized
-back. The protected-area premultiplied RGBA difference must have mean at most 3
-and 99th percentile at most 20 on the 0–255 scale; `--max-outside-mean` and
-`--max-outside-p99` configure these limits. The import report records the measured
-values, including failed validation. Changed layers require new requests and new
-generated results.
+back. Protected changes are measured in an 8-pixel ring around the editable area
+(`--protected-band`), ignoring input pixels whose alpha is at most 16. The
+premultiplied RGBA difference must have mean at most 6 and 99th percentile at most
+20 on the 0–255 scale; `--max-outside-mean` and `--max-outside-p99` configure these
+limits. The mean allowance covers small generation/recompression color noise.
+A separate shift/scale search over the opaque ring rejects meaningful global
+misalignment; `--alignment-radius` defaults to 24 pixels. Far context changes
+are not imported and do not trigger the protected-pixel gate. Reports include
+the measured differences and alignment estimates, including failed validation.
+Changed layers require new requests and new generated results.
 
 Inside the editable area, import compares the result to the underlay in
 premultiplied RGBA and keeps only pixels whose maximum channel difference exceeds
@@ -118,6 +123,24 @@ The new artwork is restored onto transparent full-canvas files in
 threshold and mismatched edges still require visual review. Use `repair --expressions` for the existing
 registration and mouth checks, and visually review both expression states. Only
 those checks determine `productionReady`; image generation alone does not.
+
+Closed eyes are registered against each side's alpha union of `eyelash` and
+`eyewhite`, falling back to `irides` when that side has no outline. The horizontal
+tolerance remains 8 pixels and the vertical plausibility limit remains 32 pixels.
+
+Mouth limits use the face alpha bounding box, so canvas padding does not change
+them. Closed mouths allow 16% of face width, 3% of face height and 0.15% of face box
+area; open mouths allow 18%, 10% and 1.2%. A filled opening needs more height and
+area than a shallow lip line. Floors of 20 pixels width, 12 height and 150 visible
+pixels keep small previews usable. Closed-mouth line and bright-fill checks
+still apply. The mouth request mask uses the same opening limits plus a boundary
+margin and extra space below the lips; its bounds and limits are in `requests.json`.
+
+`repair` records its effective override/expression options and inherits the
+preceding layer override directory unless another directory or
+`--no-layer-overrides` is given. Legacy repairs inherit `overrides/` only when all
+recorded overrides exist. An unresolved directory stops repair instead of
+silently removing corrected art.
 
 ## Preview expressions derived from the neutral image
 
@@ -192,3 +215,5 @@ and must FAIL; use it to confirm the checks can still detect a broken layout.
 Limits: the checks cover the built-in renderer only. A gap that opens next to
 visible hair, and whether the motion looks natural, still need visual review.
 Physics frames depend on timing, so borderline results can vary between runs.
+Missing required eye layers or feature anchors produce a failed report with a
+message instead of crashing the eye-region calculation.

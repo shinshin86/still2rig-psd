@@ -3,9 +3,11 @@ import { test } from 'node:test';
 import {
   SEAM_COLOR,
   changedPixels,
+  evaluateMotionQa,
   erode,
   featureResiduals,
   loadMotionContract,
+  motionLayerPreflight,
   seamPixels,
   silhouette,
   trackPatch,
@@ -32,6 +34,17 @@ test('tracks a textured patch to its shifted position', () => {
   paint(moved, 53, 39, 59, 43, [200, 60, 60]);
   const result = trackPatch(reference, moved, { x0: 36, y0: 36, x1: 64, y1: 56 }, 20);
   assert.deepEqual([result.dx, result.dy], [7, -5]);
+});
+
+test('missing eye anchors and missing eye layers produce explicit failed checks', () => {
+  const result = evaluateMotionQa({ reference: { frame: frame(20, 20), anchors: {} },
+    captures: {}, hairTipMask: new Uint8Array(400), contract: loadMotionContract() });
+  assert.equal(result.pass, false);
+  assert.equal(result.checks.requiredFeatureAnchors, false);
+  assert.ok(result.errors[0].includes('eyeL'));
+  const missing = motionLayerPreflight([]);
+  assert.equal(missing.pass, false);
+  assert.ok(missing.missingLayers.includes('eyewhite'));
 });
 
 test('feature residuals ignore rigid head motion but catch a shifted mouth', () => {

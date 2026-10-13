@@ -10,7 +10,7 @@ from PIL import Image, ImageDraw
 parser = argparse.ArgumentParser()
 parser.add_argument("request_dir", type=Path)
 parser.add_argument("result_dir", type=Path)
-parser.add_argument("mode", choices=["inside", "outside", "aspect", "resize", "noise", "artwork", "speckle", "soft"])
+parser.add_argument("mode", choices=["inside", "outside", "aspect", "resize", "noise", "artwork", "speckle", "soft", "shifted", "scaled", "context"])
 args = parser.parse_args()
 args.result_dir.mkdir(parents=True, exist_ok=True)
 requests = json.loads((args.request_dir / "requests.json").read_text())
@@ -18,7 +18,7 @@ for name in ("eye_close", "mouth_open"):
     image = Image.open(args.request_dir / name / "input.png").convert("RGBA")
     mask = Image.open(args.request_dir / name / "mask.png").convert("RGBA")
     underlay = Image.open(args.request_dir / name / "underlay.png").convert("RGBA")
-    artwork_mode = args.mode in {"artwork", "speckle", "soft"}
+    artwork_mode = args.mode in {"artwork", "speckle", "soft", "shifted", "scaled", "context"}
     for y in range(image.height):
         for x in range(image.width):
             if mask.getpixel((x, y))[3] == 0:
@@ -28,6 +28,8 @@ for name in ("eye_close", "mouth_open"):
             elif args.mode == "noise":
                 pixel = image.getpixel((x, y))
                 image.putpixel((x, y), tuple(max(0, value - 1) for value in pixel[:3]) + (pixel[3],))
+            elif args.mode == "context" and (image.getpixel((x, y))[3] == 0 or y < 4):
+                image.putpixel((x, y), (0, 255, 0, 255))
     if artwork_mode:
         left, top, _, _ = requests["variants"][name]["cropBox"]
         draw = ImageDraw.Draw(image)
@@ -45,4 +47,12 @@ for name in ("eye_close", "mouth_open"):
         image = image.resize((image.width + 20, image.height))
     elif args.mode == "resize":
         image = image.resize((image.width * 2, image.height * 2), Image.Resampling.NEAREST)
+    elif args.mode == "shifted":
+        shifted = Image.new("RGBA", image.size)
+        shifted.paste(image, (8, 0))
+        image = shifted
+    elif args.mode == "scaled":
+        enlarged = image.resize((round(image.width * 1.12), round(image.height * 1.12)), Image.Resampling.LANCZOS)
+        left, top = (enlarged.width - image.width) // 2, (enlarged.height - image.height) // 2
+        image = enlarged.crop((left, top, left + image.width, top + image.height))
     image.save(args.result_dir / f"{name}.png")

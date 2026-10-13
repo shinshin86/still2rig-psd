@@ -20,6 +20,18 @@ export function loadMotionContract() {
   return JSON.parse(fs.readFileSync(path.join(PROJECT_ROOT, 'configs', 'motion-qa-contract.json'), 'utf8'));
 }
 
+export function motionLayerPreflight(layers) {
+  const missingLayers = ['face', 'eyewhite', 'irides', 'mouth_close']
+    .filter((name) => !layers.some((layer) => layer.name === name && layer.imageData?.data?.some((value, index) => index % 4 === 3 && value > 16)));
+  return {
+    pass: missingLayers.length === 0,
+    missingLayers,
+    checks: { requiredFeatureLayers: missingLayers.length === 0 },
+    errors: missingLayers.length ? [`Motion QA needs visible layers: ${missingLayers.join(', ')}.`] : [],
+    metrics: {},
+  };
+}
+
 export function padBox(box, pad, width, height, extraTop = 0) {
   return {
     x0: Math.max(0, Math.floor(box.x0 - pad)),
@@ -294,6 +306,15 @@ const round = (value, digits = 3) => Number(value.toFixed(digits));
 export function evaluateMotionQa({ reference, captures, hairTipMask, visibleHairMask = null, contract }) {
   const { width, height } = reference.frame;
   const anchors = reference.anchors;
+  const missingFeatures = ['eyeL', 'eyeR', 'mouth'].filter((name) => {
+    const box = anchors?.[name];
+    return !box || !['x0', 'y0', 'x1', 'y1'].every((key) => Number.isFinite(box[key]))
+      || box.x1 <= box.x0 || box.y1 <= box.y0;
+  });
+  if (missingFeatures.length) {
+    return { pass: false, missingFeatures, metrics: {}, checks: { requiredFeatureAnchors: false },
+      errors: [`Motion QA cannot locate features: ${missingFeatures.join(', ')}.`] };
+  }
   const t = contract.thresholds;
   const missingCaptures = contract.requiredCaptures.filter((name) => !captures[name]?.length);
   if (missingCaptures.length) {

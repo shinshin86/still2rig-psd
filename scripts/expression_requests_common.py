@@ -10,6 +10,23 @@ from PIL import Image
 from render_expression_states import selected_layers
 
 
+def mouth_limits(face: Image.Image, quality: dict) -> dict:
+    box = face.getchannel("A").point(lambda value: 255 if value > quality["alphaThreshold"] else 0).getbbox()
+    if not box:
+        raise ValueError("A visible face layer is required for mouth size limits.")
+    width, height = box[2] - box[0], box[3] - box[1]
+    limits = {"faceBox": list(box)}
+    for state in ("Close", "Open"):
+        prefix = f"mouth{state}MaxFace"
+        # These match src/qa.mjs: an opening may be taller and denser than a lip line.
+        limits[state.lower()] = {
+            "maximumWidth": max(quality["mouthMaxWidthFloor"], int(width * quality[prefix + "WidthRatio"] + 0.5)),
+            "maximumHeight": max(quality["mouthMaxHeightFloor"], int(height * quality[prefix + "HeightRatio"] + 0.5)),
+            "maximumVisiblePixels": max(quality["mouthMaxVisiblePixelsFloor"], int(width * height * quality[prefix + "PixelRatio"] + 0.5)),
+        }
+    return limits
+
+
 def file_hash(file: Path) -> str:
     return hashlib.sha256(file.read_bytes()).hexdigest()
 
