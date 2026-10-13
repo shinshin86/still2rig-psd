@@ -157,6 +157,32 @@ try {
   }));
   await page.screenshot({ path: path.join(qaRoot, 'waiting-with-library.png') });
 
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+  const startRequestInitiallyOpen = await page.evaluate(() => document.querySelector('#start-request')?.open);
+  await page.click('#start-request > summary');
+  const copyStartRequest = async (recipient) => {
+    await page.click(`[data-start-recipient="${recipient}"]`);
+    await page.click('#start-request-copy');
+    await page.waitForFunction(() => document.querySelector('#start-request-status')?.textContent?.includes('コピーしました'));
+    return page.evaluate(async () => ({
+      message: await navigator.clipboard.readText(),
+      stepName: document.querySelector('[data-start-recipient-name]')?.textContent,
+      expressionClaudePressed: document.querySelector('[data-recipient="claude"]')?.getAttribute('aria-pressed'),
+    }));
+  };
+  const claudeStartRequest = await copyStartRequest('claude');
+  await page.screenshot({ path: path.join(qaRoot, 'start-request-claude.png') });
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(
+    () => document.querySelectorAll('#generated-psd-select option').length > 1,
+  );
+  const startRecipientAfterReload = await page.evaluate(() =>
+    document.querySelector('[data-start-recipient="claude"]')?.getAttribute('aria-pressed'));
+  await page.click('#start-request > summary');
+  const codexStartRequest = await copyStartRequest('codex');
+  await page.screenshot({ path: path.join(qaRoot, 'start-request-codex.png') });
+  await page.click('#start-request > summary');
+
   const generatedId = await page.locator('#generated-psd-select option').nth(1).getAttribute('value');
   if (!generatedId) throw new Error('Generated PSD option was not available.');
   await page.selectOption('#generated-psd-select', generatedId);
@@ -983,6 +1009,22 @@ try {
   await compactPage.close();
 
   const checks = {
+    startRequestCopiesConversionMessage:
+      startRequestInitiallyOpen === false &&
+      codexStartRequest.message.startsWith('$still2rig-psd') &&
+      codexStartRequest.message.includes('Google Colab') &&
+      codexStartRequest.message.endsWith('画像ファイルの場所: ') &&
+      !codexStartRequest.message.includes('Claude Code') &&
+      !codexStartRequest.message.includes(repositoryRoot) &&
+      codexStartRequest.stepName === 'Codex' &&
+      claudeStartRequest.message.includes('.agents/skills/still2rig-psd/SKILL.md') &&
+      !claudeStartRequest.message.includes('$still2rig-psd') &&
+      claudeStartRequest.message.endsWith('画像ファイルの場所: ') &&
+      claudeStartRequest.stepName === 'Claude Code',
+    startRequestSharesSavedRecipient:
+      claudeStartRequest.expressionClaudePressed === 'true' &&
+      startRecipientAfterReload === 'true' &&
+      codexStartRequest.expressionClaudePressed === 'false',
     expressionRequestCopiesCurrentSavedPsd:
       waitingState.expressionRequestHidden === true &&
       selectedGeneratedState.expressionRequestHidden === false &&
