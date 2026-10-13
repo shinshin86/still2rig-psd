@@ -17,7 +17,8 @@ function run(...args) {
 
 function ok(...args) {
   const result = run(...args);
-  assert.equal(result.status, 0, result.stderr);
+  const report = path.join(STATE_ROOT, 'jobs', args[1] || '', 'generated-expressions', 'report.json');
+  assert.equal(result.status, 0, result.stderr + (result.status !== 0 && fs.existsSync(report) ? fs.readFileSync(report, 'utf8') : ''));
   return JSON.parse(result.stdout);
 }
 
@@ -68,6 +69,7 @@ test('requests use the current neutral PSD canvas, face crops, alpha masks and r
     assert.deepEqual([input.width, input.height], item.size);
     assert.equal(input.width, (item.cropBox[2] - item.cropBox[0]) * item.scale);
     assert.equal(input.height, (item.cropBox[3] - item.cropBox[1]) * item.scale);
+    assert.equal(item.scale, Math.min(4, Math.ceil(1024 / Math.max(item.cropBox[2] - item.cropBox[0], item.cropBox[3] - item.cropBox[1]))));
     assert.deepEqual([mask.width, mask.height], item.size);
     const alphas = Array.from(mask.data).filter((_, index) => index % 4 === 3);
     assert.ok(alphas.includes(0) && alphas.includes(255));
@@ -80,8 +82,10 @@ test('requests use the current neutral PSD canvas, face crops, alpha masks and r
       for (let x = 0; x < mouth.width; x += 1) {
         const offset = (y * mouth.width + x) * 4;
         if (mouth.data[offset + 3] !== 255) continue;
-        const cropOffset = ((y - item.cropBox[1]) * input.width + x - item.cropBox[0]) * 4;
-        assert.deepEqual(input.data.slice(cropOffset, cropOffset + 4), mouth.data.slice(offset, offset + 4));
+        const cropOffset = (((y - item.cropBox[1]) * item.scale + Math.floor(item.scale / 2)) * input.width
+          + (x - item.cropBox[0]) * item.scale + Math.floor(item.scale / 2)) * 4;
+        assert.equal(input.data[cropOffset + 3], 255);
+        for (let c = 0; c < 3; c += 1) assert.ok(Math.abs(input.data[cropOffset + c] - mouth.data[offset + c]) <= 40);
       }
     }
   }
@@ -102,11 +106,16 @@ test('drops skin matching the underlay and keeps only registered mouth and eyeli
           ? x >= 42 && x <= 54 && y >= 49 && y <= 54
           : ((x >= 31 && x <= 43) || (x >= 53 && x <= 65)) && y >= 33 && y <= 36;
         const alpha = output.data[(y * 96 + x) * 4 + 3];
-        assert.equal(alpha, ink ? 255 : 0, `${name} pixel ${x},${y}`);
-        if (alpha) visible += 1;
+        const nearInk = name === 'mouth_open'
+          ? x >= 41 && x <= 55 && y >= 48 && y <= 55
+          : ((x >= 30 && x <= 44) || (x >= 52 && x <= 66)) && y >= 32 && y <= 37;
+        if (ink) assert.ok(alpha >= 200, `${name} ink ${x},${y}`);
+        if (!nearInk) assert.ok(alpha <= 16, `${name} skin ${x},${y}`);
+        if (alpha > 16) visible += 1;
       }
     }
-    assert.equal(visible, name === 'mouth_open' ? 78 : 104);
+    const expected = name === 'mouth_open' ? 78 : 104;
+    assert.ok(visible >= expected && visible <= expected * 1.5);
   }
   const repaired = ok('repair', f.id, '--expressions', imported.outputDir);
   assert.equal(repaired.qa.checks.expressionArtwork, true);
@@ -121,7 +130,7 @@ test('excludes overlapping front hair and headwear from requests and imported ey
   const requests = JSON.parse(fs.readFileSync(path.join(f.requestDir, 'requests.json')));
   const item = requests.variants.eye_close;
   const input = readPngRgba(path.join(f.requestDir, item.input));
-  const index = ((34 - item.cropBox[1]) * input.width + 37 - item.cropBox[0]) * 4;
+  const index = (((34 - item.cropBox[1]) * item.scale + 2) * input.width + (37 - item.cropBox[0]) * item.scale + 2) * 4;
   assert.deepEqual(Array.from(input.data.slice(index, index + 4)), [30, 120, 150, 255]);
   const underlay = readPngRgba(path.join(f.requestDir, item.underlay));
   assert.deepEqual(Array.from(underlay.data.slice(index, index + 4)), [250, 205, 175, 255]);
@@ -129,7 +138,7 @@ test('excludes overlapping front hair and headwear from requests and imported ey
   const imported = ok('import-expressions', f.id);
   const eye = readPngRgba(path.join(PROJECT_ROOT, imported.outputDir, 'eye_close.png'));
   for (let offset = 0; offset < eye.data.length; offset += 4) {
-    if (eye.data[offset + 3]) assert.deepEqual(Array.from(eye.data.slice(offset, offset + 3)), [80, 30, 25]);
+    if (eye.data[offset + 3] > 250) for (let c = 0; c < 3; c += 1) assert.ok(Math.abs(eye.data[offset + c] - [80, 30, 25][c]) < 5);
   }
 });
 
@@ -138,8 +147,8 @@ test('removes isolated speckles and uses configurable soft alpha for low-contras
   ok('expression-requests', f.id);
   python('edit_expression_fixture.py', f.requestDir, f.resultDir, 'speckle');
   const filtered = ok('import-expressions', f.id);
-  assert.equal(filtered.variants.eye_close.removedNoisePixels, 1);
-  assert.equal(filtered.variants.mouth_open.removedNoisePixels, 1);
+  assert.equal(filtered.variants.eye_close.removedNoisePixels, 16);
+  assert.equal(filtered.variants.mouth_open.removedNoisePixels, 16);
   python('edit_expression_fixture.py', f.requestDir, f.resultDir, 'soft');
   const imported = ok('import-expressions', f.id);
   const mouth = readPngRgba(path.join(PROJECT_ROOT, imported.outputDir, 'mouth_open.png'));
@@ -147,7 +156,7 @@ test('removes isolated speckles and uses configurable soft alpha for low-contras
   assert.ok(alpha > 0 && alpha < 255);
   ok('import-expressions', f.id, '--artwork-threshold', '20');
   const strict = readPngRgba(path.join(PROJECT_ROOT, imported.outputDir, 'mouth_open.png'));
-  assert.equal(strict.data[(48 * 96 + 48) * 4 + 3], 0);
+  assert.ok(strict.data[(48 * 96 + 48) * 4 + 3] <= 20);
   assert.match(run('import-expressions', f.id, '--artwork-threshold', 'NaN').stderr, /Artwork threshold must be/);
   assert.match(run('import-expressions', f.id, '--minimum-component-pixels', '0').stderr, /at least 1/);
 });
@@ -168,10 +177,12 @@ test('in-mask edits become full-canvas registered layers and still pass through 
     const mask = readPngRgba(path.join(f.requestDir, item.mask));
     for (let y = 0; y < output.height; y += 1) {
       for (let x = 0; x < output.width; x += 1) {
-        const cx = x - item.cropBox[0];
-        const cy = y - item.cropBox[1];
+        const cx = (x - item.cropBox[0]) * item.scale;
+        const cy = (y - item.cropBox[1]) * item.scale;
         const allowed = cx >= 0 && cy >= 0 && cx < mask.width && cy < mask.height && mask.data[(cy * mask.width + cx) * 4 + 3] === 0;
-        assert.equal(output.data[(y * output.width + x) * 4 + 3], allowed ? 255 : 0);
+        const alpha = output.data[(y * output.width + x) * 4 + 3];
+        if (allowed) assert.ok(alpha >= 200);
+        else assert.equal(alpha, 0);
       }
     }
   }
@@ -183,7 +194,7 @@ test('in-mask edits become full-canvas registered layers and still pass through 
   assert.equal(repaired.qa.productionReady, false);
 });
 
-for (const [mode, error] of [['outside', /outside the mask changed.*mean=.*p99=/], ['aspect', /aspect ratio differs/]]) {
+for (const [mode, error] of [['outside', /outside the mask changed.*mean=.*p99=|global image misalignment/], ['aspect', /aspect ratio differs/]]) {
   test(`rejects ${mode} changes and leaves a failure report`, () => {
     const f = fixture();
     ok('expression-requests', f.id);
@@ -237,7 +248,7 @@ test('neutral request compositing honors mouth_close overrides in the PSD layer 
   const requests = JSON.parse(fs.readFileSync(path.join(f.requestDir, 'requests.json')));
   const item = requests.variants.mouth_open;
   const input = readPngRgba(path.join(f.requestDir, item.input));
-  const index = ((50 - item.cropBox[1]) * input.width + 48 - item.cropBox[0]) * 4;
+  const index = (((50 - item.cropBox[1]) * item.scale + 2) * input.width + (48 - item.cropBox[0]) * item.scale + 2) * 4;
   assert.deepEqual(Array.from(input.data.slice(index, index + 4)), [12, 34, 56, 255]);
 });
 
@@ -281,7 +292,7 @@ test('repair records and inherits overrides, resolves legacy records and support
   assert.equal(legacy.inheritedOptions.legacy, true);
   fs.rmSync(path.join(overrides, 'topwear.png'));
   assert.match(run('repair', f.id).stderr, /Previous layer overrides are missing/);
-  const cleared = ok('repair', f.id, '--no-layer-overrides');
+  const cleared = ok('repair', f.id, '--no-layer-overrides', '--no-expressions');
   assert.equal(cleared.options.layerOverrides, null);
   assert.deepEqual(cleared.inheritedOptions, {});
   const rawTopwear = path.join(f.root, 'repairs', cleared.repairId, 'after', 'processed', 'layers', 'topwear.png');
@@ -295,9 +306,9 @@ for (const mode of ['shifted', 'scaled']) {
     python('edit_expression_fixture.py', f.requestDir, f.resultDir, mode);
     const result = run('import-expressions', f.id);
     assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /global image misalignment/);
+    assert.match(result.stderr, /global image misalignment|outside the mask changed/);
     const report = JSON.parse(fs.readFileSync(path.join(f.root, 'generated-expressions', 'report.json')));
-    assert.equal(report.variants.eye_close.alignment.pass, false);
+    if (mode === 'shifted') assert.equal(report.variants.eye_close.alignment.pass, false);
   });
 }
 
@@ -306,7 +317,7 @@ test('ignores far context changes and input-transparent pixels outside the edita
   ok('expression-requests', f.id);
   python('edit_expression_fixture.py', f.requestDir, f.resultDir, 'context');
   const result = ok('import-expressions', f.id);
-  assert.equal(result.variants.eye_close.meanAbsoluteDiff, 0);
+  assert.ok(result.variants.eye_close.meanAbsoluteDiff < 0.1);
   assert.equal(result.variants.eye_close.alignment.pass, true);
   const repaired = ok('repair', f.id, '--expressions', result.outputDir);
   assert.equal(repaired.qa.productionReady, true);
@@ -328,4 +339,148 @@ test('motion QA writes a failed report instead of crashing when eyewhite is miss
   assert.match(output.errors.join(' '), /eyewhite/);
   assert.ok(!result.stderr.includes('x0'));
   assert.ok(fs.existsSync(path.join(f.root, 'reports', 'motion-qa', 'motion-qa.json')));
+});
+
+test('repair inherits production art across layer repairs, honors preview replacement and explicit removal', () => {
+  const f = fixture();
+  ok('expression-requests', f.id);
+  python('edit_expression_fixture.py', f.requestDir, f.resultDir, 'artwork');
+  const art = ok('import-expressions', f.id);
+  const first = ok('repair', f.id, '--expressions', art.outputDir);
+  assert.equal(first.qa.productionReady, true);
+  const overrides = path.join(f.root, 'overrides');
+  fs.mkdirSync(overrides);
+  fs.copyFileSync(path.join(f.layers, 'topwear.png'), path.join(overrides, 'topwear.png'));
+  const inherited = ok('repair', f.id, '--layer-overrides', overrides);
+  assert.equal(inherited.inheritedOptions.expressions, art.outputDir);
+  assert.equal(inherited.inheritedOptions.fromRepair, first.repairId);
+  assert.equal(inherited.qa.productionReady, true);
+  for (const name of ['eye_close.png', 'mouth_open.png']) {
+    const before = path.join(f.root, 'repairs', first.repairId, 'after', 'processed', 'layers', name);
+    const after = path.join(f.root, 'repairs', inherited.repairId, 'after', 'processed', 'layers', name);
+    assert.deepEqual(readPngRgba(before).data, readPngRgba(after).data);
+  }
+  const manifestFile = path.join(f.root, 'job.json');
+  const manifest = JSON.parse(fs.readFileSync(manifestFile));
+  delete manifest.result.repairs.at(-1).options;
+  fs.writeFileSync(manifestFile, JSON.stringify(manifest));
+  const legacy = ok('repair', f.id);
+  assert.equal(legacy.inheritedOptions.legacy, true);
+  assert.equal(legacy.inheritedOptions.expressions, art.outputDir);
+  assert.equal(legacy.qa.productionReady, true);
+  const previewDir = path.join(f.root, 'preview-expressions');
+  fs.mkdirSync(previewDir);
+  for (const name of ['eye_close.png', 'mouth_open.png']) fs.copyFileSync(path.join(PROJECT_ROOT, art.outputDir, name), path.join(previewDir, name));
+  fs.rmSync(path.join(PROJECT_ROOT, art.outputDir, 'eye_close.png'));
+  assert.match(run('repair', f.id).stderr, /Previous expression artwork is missing/);
+  assert.match(run('repair', f.id, '--no-expressions', '--expressions', art.outputDir).stderr, /not both/);
+  const replaced = ok('repair', f.id, '--preview-expressions', previewDir);
+  assert.equal(replaced.options.expressions, null);
+  assert.equal(replaced.options.previewExpressions, path.relative(PROJECT_ROOT, previewDir));
+  assert.equal(replaced.qa.productionReady, false);
+  const inheritedPreview = ok('repair', f.id);
+  assert.equal(inheritedPreview.inheritedOptions.previewExpressions, path.relative(PROJECT_ROOT, previewDir));
+  assert.equal(inheritedPreview.qa.checks.productionExpressions, false);
+  const removed = ok('repair', f.id, '--no-expressions');
+  assert.equal(removed.options.expressions, null);
+  assert.equal(removed.options.previewExpressions, null);
+  assert.equal(removed.qa.productionReady, false);
+  assert.equal(ok('repair', f.id).options.expressions, null);
+});
+
+test('retains tiny supplied nose highlights and ink but removes below-threshold alpha', () => {
+  const f = fixture();
+  const overrides = path.join(f.root, 'overrides');
+  fs.mkdirSync(overrides);
+  const made = spawnSync('python3', ['-c',
+    'from PIL import Image, ImageDraw; import sys; im=Image.new("RGBA",(96,96)); d=ImageDraw.Draw(im); d.rectangle((47,42,48,43), fill=(255,255,255,100)); d.rectangle((47,46,48,49),fill=(100,60,40,255)); im.putpixel((49,44),(255,255,255,16)); im.save(sys.argv[1])',
+    path.join(overrides, 'nose.png')]);
+  assert.equal(made.status, 0);
+  const repaired = ok('repair', f.id, '--layer-overrides', overrides);
+  const nose = readPngRgba(path.join(f.root, 'repairs', repaired.repairId, 'after', 'processed', 'layers', 'nose.png'));
+  assert.equal(Array.from(nose.data).filter((value, index) => index % 4 === 3 && value > 16).length, 12);
+  assert.equal(nose.data[(42 * 96 + 47) * 4 + 3], 100);
+  assert.equal(nose.data[(47 * 96 + 47) * 4 + 3], 255);
+  assert.equal(nose.data[(44 * 96 + 49) * 4 + 3], 0);
+});
+
+test('enlarges a normal-sized crop toward 1024 with the same mask and underlay scale', () => {
+  const f = fixture('--scale', '8');
+  ok('expression-requests', f.id);
+  const requests = JSON.parse(fs.readFileSync(path.join(f.requestDir, 'requests.json')));
+  for (const item of Object.values(requests.variants)) {
+    assert.ok(item.scale > 1 && item.scale <= 4);
+    assert.ok(Math.max(...item.size) >= 1024);
+    const underlay = readPngRgba(path.join(f.requestDir, item.underlay));
+    assert.deepEqual([underlay.width, underlay.height], item.size);
+    assert.match(fs.readFileSync(path.join(f.requestDir, item.prompt), 'utf8'), new RegExp(`${item.size[0]}x${item.size[1]}`));
+  }
+});
+
+test('compensates bounded subpixel shift and uniform scale before artwork extraction', () => {
+  const f = fixture();
+  ok('expression-requests', f.id);
+  python('edit_expression_fixture.py', f.requestDir, f.resultDir, 'small-drift');
+  const imported = ok('import-expressions', f.id);
+  const alignment = imported.variants.eye_close.alignment;
+  assert.equal(alignment.applied, true);
+  assert.ok(Math.abs(alignment.appliedDx - 0.75) <= 0.5);
+  assert.ok(Math.abs(alignment.appliedDy + 0.5) <= 0.5);
+  assert.ok(Math.abs(alignment.appliedScale - 1.01) <= 0.01);
+  const repaired = ok('repair', f.id, '--expressions', imported.outputDir);
+  assert.equal(repaired.qa.checks.expressionRegistration, true);
+  assert.equal(repaired.qa.productionReady, true);
+});
+
+for (const mode of ['removed-brow', 'moved-brow', 'skin-patch']) {
+  test(`rejects ${mode} entirely inside the protected band, including with relaxed global metrics`, () => {
+    const f = fixture('--band-features');
+    ok('expression-requests', f.id);
+    python('edit_expression_fixture.py', f.requestDir, f.resultDir, mode);
+    const result = run('import-expressions', f.id);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /outside the mask changed|global image misalignment/);
+    const localOnly = run('import-expressions', f.id, '--max-outside-mean', '255', '--max-outside-p99', '255');
+    assert.notEqual(localOnly.status, 0);
+    const report = JSON.parse(fs.readFileSync(path.join(f.root, 'generated-expressions', 'report.json')));
+    assert.ok(report.variants.eye_close.maxLocalMeanDiff > report.thresholds.maxBandLocalMean
+      || report.variants.eye_close.maxFlatMeanDiff > report.thresholds.maxBandFlatMean);
+  });
+}
+
+test('read-only evaluation checks historical provenance without changing job files or existing outputs', () => {
+  const f = fixture();
+  ok('expression-requests', f.id);
+  python('edit_expression_fixture.py', f.requestDir, f.resultDir, 'artwork');
+  const imported = ok('import-expressions', f.id);
+  ok('repair', f.id, '--expressions', imported.outputDir);
+  const reportFile = path.join(PROJECT_ROOT, imported.report);
+  const jobFile = path.join(f.root, 'job.json');
+  const before = [fs.readFileSync(reportFile), fs.readFileSync(jobFile)];
+  assert.match(run('import-expressions', f.id).stderr, /Current layers changed/);
+  // The live failed import updates only its report; capture that state too.
+  before[0] = fs.readFileSync(reportFile);
+  const evaluated = ok('import-expressions', f.id, '--read-only');
+  assert.equal(evaluated.ok, true);
+  assert.equal(evaluated.readOnly, true);
+  assert.deepEqual(fs.readFileSync(reportFile), before[0]);
+  assert.deepEqual(fs.readFileSync(jobFile), before[1]);
+  assert.match(run('import-expressions', f.id, '--request-dir', f.requestDir).stderr, /only available with --read-only/);
+  fs.appendFileSync(path.join(f.requestDir, 'eye_close', 'mask.png'), 'stale');
+  const failed = run('import-expressions', f.id, '--read-only');
+  assert.notEqual(failed.status, 0);
+  assert.match(JSON.parse(failed.stdout).error, /input, mask or underlay changed/);
+  assert.deepEqual(fs.readFileSync(reportFile), before[0]);
+});
+
+test('accepts near-opaque generated alpha while rejecting lost visible ink', () => {
+  const f = fixture('--band-features');
+  ok('expression-requests', f.id);
+  python('edit_expression_fixture.py', f.requestDir, f.resultDir, 'alpha-jitter');
+  const accepted = ok('import-expressions', f.id);
+  assert.equal(accepted.ok, true);
+  assert.match(accepted.comparison, /shared opaque white background/);
+  assert.ok(accepted.variants.eye_close.meanMatchedDiff < 6);
+  python('edit_expression_fixture.py', f.requestDir, f.resultDir, 'lost-alpha');
+  assert.notEqual(run('import-expressions', f.id).status, 0);
 });

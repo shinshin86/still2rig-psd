@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from pathlib import Path
 
 from PIL import Image, ImageChops, ImageDraw, ImageFilter
@@ -41,6 +42,9 @@ def build_requests(job_id: str, layer_dir: Path, layer_map: Path, output_dir: Pa
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "results").mkdir(exist_ok=True)
     variants = {}
+    crop_size = (crop_box[2] - crop_box[0], crop_box[3] - crop_box[1])
+    scale = min(4, max(1, math.ceil(1024 / max(crop_size))))
+    request_size = (crop_size[0] * scale, crop_size[1] * scale)
     for name, targets in [("eye_close", ["eyewhite", "irides", "eyelash"]),
                           ("mouth_open", ["mouth_close"])]:
         editable = alpha_union(layers, targets, composite.size)
@@ -65,23 +69,23 @@ def build_requests(job_id: str, layer_dir: Path, layer_map: Path, output_dir: Pa
                 round(center_x + half_width), editable_box[1] + limits["open"]["maximumHeight"] + dilation,
             ), fill=255)
         editable_box = editable.getbbox()
-        editable = editable.crop(crop_box)
+        editable = editable.crop(crop_box).resize(request_size, Image.Resampling.NEAREST)
         variant_dir = output_dir / name
         variant_dir.mkdir(exist_ok=True)
-        composite.crop(crop_box).save(variant_dir / "input.png")
-        composite_layers(layers, targets).crop(crop_box).save(variant_dir / "underlay.png")
+        composite.crop(crop_box).resize(request_size, Image.Resampling.LANCZOS).save(variant_dir / "input.png")
+        composite_layers(layers, targets).crop(crop_box).resize(request_size, Image.Resampling.LANCZOS).save(variant_dir / "underlay.png")
         mask = Image.new("RGBA", editable.size, (255, 255, 255, 255))
         mask.putalpha(ImageChops.invert(editable))
         mask.save(variant_dir / "mask.png")
         prompt = (PROMPTS[name] + " Use input.png as the reference and mask.png as the edit mask: "
                   "transparent mask pixels may change; opaque mask pixels must stay identical. "
-                  "Return a PNG of exactly the input dimensions, with no crop, shift or added border. "
+                  f"Return a PNG of exactly {request_size[0]}x{request_size[1]} pixels, with no crop, shift or added border. "
                   "Do not change any pixels outside the editable mask. "
                   "Front hair and head accessories are intentionally hidden to keep expression layers separate. "
                   "Do not add hair or accessories.\n")
         (variant_dir / "prompt.txt").write_text(prompt, encoding="utf-8")
         variants[name] = {
-            "cropBox": crop_box, "scale": 1, "size": list(editable.size),
+            "cropBox": crop_box, "scale": scale, "size": list(editable.size),
             "input": f"{name}/input.png", "mask": f"{name}/mask.png", "prompt": f"{name}/prompt.txt",
             "underlay": f"{name}/underlay.png",
             "inputSha256": file_hash(variant_dir / "input.png"),
@@ -104,6 +108,8 @@ def build_requests(job_id: str, layer_dir: Path, layer_map: Path, output_dir: Pa
         "For each variant, give the generator input.png, mask.png and the instructions in prompt.txt. "
         "The mask is transparent where editing is allowed and opaque where pixels must stay identical. "
         "These crops use the current PSD canvas, not the original source image. "
+        "Small crops are enlarged by an integer factor (at most 4) toward a long side of at least 1024 pixels. "
+        "Keep the enlarged input dimensions; import restores the original canvas scale automatically. "
         "Front hair and head accessories above the expression layers are intentionally hidden; do not add them. "
         "underlay.png is a local background reference for extracting only new artwork; do not edit it or send it.\n\n"
         "Save the returned PNGs as results/eye_close.png and results/mouth_open.png in this directory. "

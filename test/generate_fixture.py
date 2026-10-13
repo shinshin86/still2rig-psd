@@ -29,6 +29,7 @@ def main():
     parser.add_argument("--inward-irises", action="store_true")
     parser.add_argument("--scale", type=int, default=1)
     parser.add_argument("--without-back-hair", action="store_true")
+    parser.add_argument("--band-features", action="store_true")
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
 
@@ -37,6 +38,11 @@ def main():
     save_rect(args.output, "topwear.png", (18, 67, 78, 95), (40, 50, 70, 255))
     save_rect(args.output, "neck.png", (40, 55, 56, 78), (240, 185, 150, 255))
     save_rect(args.output, "face.png", (24, 15, 72, 67), (250, 205, 175, 255))
+    layer().save(args.output / "nose.png")
+    if args.band_features:
+        image = layer()
+        ImageDraw.Draw(image).rectangle((31, 20, 45, 22), fill=(70, 30, 20, 255))
+        image.save(args.output / "eyebrow.png")
     image = layer()
     draw = ImageDraw.Draw(image)
     draw.rectangle((31, 31, 43, 38), fill=(255, 255, 255, 255))

@@ -100,6 +100,8 @@ This creates `.still2rig-psd/jobs/<job>/expression-requests/` with `input.png`,
 `mask.png` and `prompt.txt` for `eye_close` and `mouth_open`. The inputs are face
 crops of the current PSD layers, including the latest repair. Do not substitute
 `input/source.png`: See-through may resize or pad it to a different canvas.
+Small crops are enlarged toward a 1024-pixel long side, capped at 4x. Keep the
+requested size; `requests.json` records the scale used to restore native pixels.
 Front hair and head accessories above the expressions are intentionally hidden;
 tell the generator not to add them. Each variant's `underlay.png` is the face
 without the source eyes or mouth; keep it local and unchanged for extraction.
@@ -127,21 +129,32 @@ npm run still2rig-psd -- import-expressions <job>
 npm run still2rig-psd -- repair <job> --expressions .still2rig-psd/jobs/<job>/generated-expressions
 ```
 
-Repair automatically inherits the preceding repair's layer overrides and reports
-them in `inheritedOptions`; verify that corrected layers remain present. Do not
-ask the user to remember the old flag. `--no-layer-overrides` deliberately drops
-them. Legacy repairs use the local `overrides/` directory only if every recorded
-file exists. If repair refuses unresolved overrides, locate those files or ask
-whether the user wants to remove them. Each repair records its effective options.
+Repair automatically inherits the preceding layer overrides and expression
+source, including preview status, and reports them in `inheritedOptions`. Verify
+that corrected layers and expressions remain present. Explicit source flags win;
+`--no-layer-overrides` and `--no-expressions` deliberately remove their sources.
+Legacy repairs require every recorded file in its conventional directory. If
+inputs cannot be resolved, restore them or ask whether to remove them. Supplied
+layer overrides retain tiny highlights/ink while still applying the alpha
+threshold. Each repair records its effective options.
 
-Import validates proportions and current layer hashes. Protected changes are
-measured in an opaque 8-pixel band outside the editable area, ignoring
-input-transparent pixels, with mean RGBA difference <=6 and p99 <=20 by default.
-A separate shift/scale search rejects meaningful global misalignment. Far context
-changes are not imported. Import then compares the editable area against the
-underlay, removes matching skin and
-tiny noise components, and restores only the new artwork to full-canvas
-transparent files with soft alpha edges. Read
+Import validates proportions and current layer hashes. Alignment uses an
+8-native-pixel band with input alpha >=240 and subpixel refinement. Meaningful
+drift may be compensated only within a 12-pixel displacement magnitude and 3%
+uniform scale error; the original result is sampled once. Read the applied
+transform as well as the estimate. Shared-white-background RGB comparison avoids
+false differences from near-opaque alpha encoding. Symmetric 2-pixel color
+matching keeps the mean/p99 limits at 6/20; direct errors remain in the report.
+Face-interior 4x4 tiles add local/flat limits of 24/12 to catch missing ink or
+painted patches. Outer hair contours use the global band check. Two character
+samples passed; synthetic removed/moved brows, patches and excessive drift must
+fail. See `docs/quality-gates.md` for metric boundaries and calibration.
+`--read-only` evaluates recorded provenance without changing files; use
+`--request-dir DIR` with it to inspect archived requests.
+
+Import removes matching skin using the same RGB comparison where both result
+and underlay are nearly opaque, and premultiplied RGBA elsewhere. It removes
+tiny components at native scale and restores artwork with soft alpha edges. Read
 `generated-expressions/report.json`, including measured protected-pixel errors.
 If layers changed, regenerate the requests and results. If protected pixels
 changed too much, request a corrected image rather than increasing tolerances

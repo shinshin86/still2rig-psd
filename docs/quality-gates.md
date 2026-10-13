@@ -89,6 +89,8 @@ npm run still2rig-psd -- repair demo --expressions .still2rig-psd/jobs/demo/gene
 face crop of the current neutral PSD layer composite, including the latest
 repair, rather than the original image whose dimensions may differ. Transparent
 mask pixels may change; opaque mask pixels must remain identical.
+Small crops use an integer enlargement toward a long side of 1024 pixels,
+capped at 4. `requests.json` records the factor; masks and underlays share it.
 Layers above the expressions, including front hair and headwear, are hidden in
 both the input and the underlay. The generator must not add hair or accessories.
 Each variant also has a local `underlay.png` containing the face without that
@@ -98,25 +100,49 @@ do not edit it or send it to the generator.
 Ask the image owner before sending these crops to a generation service. Save
 the returned images as `expression-requests/results/eye_close.png` and
 `mouth_open.png`. `import-expressions JOB [DIR]` accepts another results directory
-when supplied. Proportional size changes within 1% aspect-ratio error are resized
-back. Protected changes are measured in an 8-pixel ring around the editable area
-(`--protected-band`), ignoring input pixels whose alpha is at most 16. The
-premultiplied RGBA difference must have mean at most 6 and 99th percentile at most
-20 on the 0–255 scale; `--max-outside-mean` and `--max-outside-p99` configure these
-limits. The mean allowance covers small generation/recompression color noise.
-A separate shift/scale search over the opaque ring rejects meaningful global
-misalignment; `--alignment-radius` defaults to 24 pixels. Far context changes
-are not imported and do not trigger the protected-pixel gate. Reports include
-the measured differences and alignment estimates, including failed validation.
+when supplied. Results must keep aspect-ratio error within 1%. Alignment uses
+an 8-native-pixel band outside the editable area (`--protected-band`), with
+input alpha at least 240. Uniform scale and subpixel shift are estimated there;
+a small preference for shorter transforms avoids unstable fits on smooth skin.
+Meaningful drift is compensated only within a 12-pixel displacement magnitude
+and 3% scale error (`--max-alignment-shift`, `--max-alignment-scale`). The search
+radius is 24 pixels (`--alignment-radius`). The original generator output is
+sampled once with the estimated affine transform before extraction. Distances
+use original PSD pixels, independently of request enlargement.
+
+Comparisons use RGB on a shared white background: alpha 248–249 on almost opaque
+skin must not introduce a dark premultiplication error. Reports retain direct
+channel-wise mean/p99 for diagnosis. The gate uses symmetric nearest-color
+matching within two native pixels, excluding editable and translucent input
+pixels; its outer support extends two pixels beyond the measured band. The
+mean/p99 of these per-pixel RGB errors must be at most 6/20
+(`--max-outside-mean`, `--max-outside-p99`). Older crops from two real characters
+measured 2.66/7.33 and 3.91/5.67, versus 2.33/12.67 and 1.47/12.67 after compensation.
+The numeric global limits remain unchanged; the comparison accounts for opacity
+encoding and small contour rasterization differences instead of widening them.
+
+Local gates test 4x4 native-pixel tiles with at least 8 band pixels in the opaque
+face interior, inset two pixels from its contour. Their maximum mean is 24
+(`--max-band-local-mean`), reduced to 12 for reference tiles with channel ranges
+at most 24 (`--max-band-flat-mean`). Positive samples measured maxima below 8;
+removed/moved brows, painted skin patches and excessive shifts must still fail.
+Outer hair silhouettes retain the global band check, but are excluded from face
+interior tiles. Far context is neither measured nor imported. These checks do
+not cover every drawing defect; visual review remains required.
+
+Reports record direct/matched errors and estimated/applied transforms, including
+failures. `--read-only` validates recorded request layers and hashes without
+changing files; `--request-dir DIR` with that flag can evaluate archived requests.
 Changed layers require new requests and new generated results.
 
-Inside the editable area, import compares the result to the underlay in
-premultiplied RGBA and keeps only pixels whose maximum channel difference exceeds
-8 (`--artwork-threshold`). Alpha rises smoothly from zero to full opacity over
-the next 16 intensity levels. Components smaller than 4 pixels are discarded
-(`--minimum-component-pixels`). This removes matching skin and small noise while
-preserving the new mouth or eyelid drawing. Differences over transparent underlay
-are retained. Older requests without an underlay must be regenerated.
+Inside the editable area, import compares against the underlay. Where both
+images have alpha at least 240 it uses the shared-background RGB difference,
+so small alpha encoding changes do not turn matching skin into artwork. Other
+pixels use premultiplied RGBA, preserving new artwork over transparent underlay.
+It keeps pixels whose maximum channel difference exceeds 8 (`--artwork-threshold`),
+with a soft alpha ramp over the next 16 levels. Components smaller than 4 native
+pixels are discarded (`--minimum-component-pixels`). Requests without an underlay
+must be regenerated.
 
 The new artwork is restored onto transparent full-canvas files in
 `generated-expressions/`. Import does not approve it: skin-color drift above the
@@ -136,11 +162,14 @@ pixels keep small previews usable. Closed-mouth line and bright-fill checks
 still apply. The mouth request mask uses the same opening limits plus a boundary
 margin and extra space below the lips; its bounds and limits are in `requests.json`.
 
-`repair` records its effective override/expression options and inherits the
-preceding layer override directory unless another directory or
-`--no-layer-overrides` is given. Legacy repairs inherit `overrides/` only when all
-recorded overrides exist. An unresolved directory stops repair instead of
-silently removing corrected art.
+`repair` records its effective override/expression options and inherits both
+the preceding layer overrides and expression source, including preview status.
+Explicit directories take precedence; `--no-layer-overrides` and
+`--no-expressions` deliberately remove their respective sources.
+`inheritedOptions` identifies the reused sources. Legacy records require all
+recorded inputs in their conventional directories; unresolved inputs stop
+repair. Supplied layer overrides retain tiny components, including highlights
+and short nose lines, while still applying the alpha threshold.
 
 ## Preview expressions derived from the neutral image
 

@@ -159,8 +159,14 @@ def main() -> None:
             canvas = image.size
         if image.size != canvas:
             raise ValueError(f"layer dimensions differ: {name}={image.size}, expected={canvas}")
-        cleaned, meaningful = clean_alpha(image, args.alpha_threshold, args.minimum_component_pixels)
-        dropped = name in OPTIONAL_DROP and meaningful < args.drop_optional_below
+        if name in override_names:
+            # Supplied artwork can intentionally contain tiny highlights/ink.
+            cleaned = image.copy()
+            cleaned.putalpha(image.getchannel("A").point(lambda value: value if value > args.alpha_threshold else 0))
+            meaningful = sum(value > args.alpha_threshold for value in cleaned.getchannel("A").tobytes())
+        else:
+            cleaned, meaningful = clean_alpha(image, args.alpha_threshold, args.minimum_component_pixels)
+        dropped = name not in override_names and name in OPTIONAL_DROP and meaningful < args.drop_optional_below
         target = args.output_dir / name
         if not dropped:
             cleaned.save(target, optimize=True)
