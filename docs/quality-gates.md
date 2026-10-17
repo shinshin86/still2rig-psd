@@ -54,6 +54,17 @@ front of the shirt. That artwork must be split into back and front pieces, or
 the PSD contract must be extended. A layer override can replace an existing
 layer image, but it cannot add that missing depth split.
 
+A shirt collar is the common case of this problem. See-through draws the whole
+neck down into the collar, and `topwear` also holds the inside of the collar
+behind the neck. Layer cleanup therefore hides the inferred neck wherever the
+source image clearly shows the clothing in front of it. Each overlap pixel goes
+to the layer whose colour matches the source better by more than
+`neckTuckColorMargin` (sum of RGB differences, default 48). Unclear pixels keep
+the neck. Pixels under `face`, `ears`, `front hair`, or `headwear` are skipped,
+because there the source shows those layers instead. A supplied `neck.png`
+override is never changed. `layer-inspection.json` records the result as
+`neckTuck`.
+
 ## Images needed for real mouth and eye movement
 
 A neutral source image usually contains open eyes and only one mouth shape. It

@@ -19,6 +19,7 @@
     "alphaThreshold": 16,
     "minimumComponentPixels": 40,
     "dropOptionalBelowPixels": 1000,
+    "neckTuckColorMargin": 48,
     "registrationTolerancePixels": 8,
     "mouthMaxVisiblePixelsFloor": 150,
     "mouthMaxWidthFloor": 20,

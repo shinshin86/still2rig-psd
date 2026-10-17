@@ -30,6 +30,8 @@ def main():
     parser.add_argument("--scale", type=int, default=1)
     parser.add_argument("--without-back-hair", action="store_true")
     parser.add_argument("--band-features", action="store_true")
+    parser.add_argument("--collar-source", action="store_true", help="write src_img.png showing the collar over the lower neck")
+    parser.add_argument("--hair-over-collar", action="store_true", help="front hair in a clothing-like colour covers the collar area")
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
 
@@ -67,9 +69,24 @@ def main():
         draw.rectangle((33, 32, 41, 37), fill=(70, 30, 20, 255))
         draw.rectangle((55, 32, 63, 37), fill=(70, 30, 20, 255))
         image.save(args.output / "eye_close.png")
-    save_rect(args.output, "front hair.png", (20, 5, 76, 38 if args.hair_over_eyes else 28), (85, 45, 25, 255))
+    image = layer()
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((20, 5, 76, 38 if args.hair_over_eyes else 28), fill=(85, 45, 25, 255))
+    if args.hair_over_collar:
+        draw.rectangle((40, 72, 47, 78), fill=(45, 52, 68, 255))
+    image.save(args.output / "front hair.png")
     if args.hair_over_eyes:
         save_rect(args.output, "headwear.png", (20, 5, 76, 38), (10, 240, 10, 255))
+    if args.collar_source:
+        # The neck layer reaches y=78, but the source shows the collar from y=72 down.
+        source = layer()
+        for name in ("back hair.png", "topwear.png", "neck.png"):
+            if (args.output / name).is_file():
+                source.alpha_composite(Image.open(args.output / name).convert("RGBA"))
+        ImageDraw.Draw(source).rectangle((40, 72, 56, 78), fill=(40, 50, 70, 255))
+        for name in ("face.png", "eyewhite.png", "irides.png", "mouth.png", "front hair.png"):
+            source.alpha_composite(Image.open(args.output / name).convert("RGBA"))
+        source.save(args.output / "src_img.png")
     if args.scale != 1:
         for file in args.output.glob("*.png"):
             image = Image.open(file).convert("RGBA")
