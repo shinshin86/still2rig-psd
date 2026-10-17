@@ -78,6 +78,10 @@
       .empty-state strong { font-size: 20px; }
       .empty-state span { color: #aeb8d1; font-size: 12px; line-height: 1.55; }
       .empty-action { justify-self: center; min-height: 42px; }
+      .empty-state { max-height: calc(100% - 96px); overflow-y: auto; }
+      .start-request { text-align: left; border-top: 1px solid #3c4559; padding-top: 10px; }
+      .start-request > summary { color: #71dfff; font-size: 12px; font-weight: 700; text-align: center; cursor: pointer; }
+      .start-request-body { display: grid; gap: 10px; padding-top: 10px; }
       body[data-avatar-ready='true'] .empty-state,
       body[data-file-load-state='loading'] .empty-state { opacity: 0; pointer-events: none; }
       .control-panel { min-height: 0; padding: 22px 22px 42px; border-left: 1px solid #3c4355; background: rgb(17 21 31 / 91%); overflow-y: auto; }
@@ -301,6 +305,24 @@
             <strong>PSDを読み込んでください</strong>
             <span>上の一覧から選ぶか、手元のPSDを開いて動きを確認できます。</span>
             <label class="file-button empty-action" for="psd-file-input">手元のPSDを開く</label>
+            <details id="start-request" class="start-request">
+              <summary>画像から新しくPSDを作る</summary>
+              <div class="start-request-body">
+                <div class="request-recipient" role="group" aria-label="依頼する相手">
+                  <button type="button" data-start-recipient="codex" aria-pressed="true">Codex</button>
+                  <button type="button" data-start-recipient="claude" aria-pressed="false">Claude Code</button>
+                </div>
+                <ol class="request-steps">
+                  <li>下のボタンで依頼文をコピーします。</li>
+                  <li>このツールのフォルダで開いた<span data-start-recipient-name>Codex</span>に貼り付け、最後の行に画像ファイルの場所を書き足して送ります。</li>
+                  <li>途中でGoogle Colabのページを開くよう案内されます。ログインとGPUの選択はご自身で行います。</li>
+                  <li>完成したら、上の「一覧を更新」を押して新しいPSDを選びます。</li>
+                </ol>
+                <p class="request-disclosure">変換のため、画像がGoogle Colabに送られます。</p>
+                <button id="start-request-copy" type="button">依頼文をコピー</button>
+                <p id="start-request-status" class="source-note" role="status" aria-live="polite"></p>
+              </div>
+            </details>
           </div>
           <div id="drop-overlay" class="drop-overlay" aria-hidden="true">
             <div class="drop-message">

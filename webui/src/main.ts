@@ -105,7 +105,12 @@ const expressionRequestBody = requireElement<HTMLElement>('#expression-request-b
 const expressionRequestDisclosure = requireElement<HTMLElement>('#expression-request-disclosure');
 const expressionRecipientButtons = [...document.querySelectorAll<HTMLButtonElement>('[data-recipient]')];
 const expressionRecipientSteps = [...document.querySelectorAll<HTMLElement>('[data-recipient-steps]')];
+const startRequestCopy = requireElement<HTMLButtonElement>('#start-request-copy');
+const startRequestStatus = requireElement<HTMLElement>('#start-request-status');
+const startRecipientButtons = [...document.querySelectorAll<HTMLButtonElement>('[data-start-recipient]')];
+const startRecipientNames = [...document.querySelectorAll<HTMLElement>('[data-start-recipient-name]')];
 type ExpressionRecipient = 'codex' | 'claude';
+// One saved choice serves both the new-conversion request and the expression request.
 const EXPRESSION_RECIPIENT_KEY = 'still2rig-psd-expression-recipient';
 let expressionRequestSource: 'none' | 'local' | 'generated' = 'none';
 let expressionRecipient: ExpressionRecipient = readExpressionRecipient();
@@ -1580,6 +1585,48 @@ function syncExpressionRequestControl(): void {
   }
   expressionRequestDisclosure.hidden = expressionRecipient !== 'codex';
   expressionRequestStatus.textContent = '';
+  for (const button of startRecipientButtons) {
+    button.setAttribute('aria-pressed', String(button.dataset.startRecipient === expressionRecipient));
+  }
+  for (const name of startRecipientNames) {
+    name.textContent = recipientLabel(expressionRecipient);
+  }
+  startRequestStatus.textContent = '';
+}
+
+function recipientLabel(recipient: ExpressionRecipient): string {
+  return recipient === 'codex' ? 'Codex' : 'Claude Code';
+}
+
+function startRequestMessage(): string {
+  const common = [
+    'Google Colab のページを開く・ログインする・GPU（L4）を選ぶのは私が行います。必要になったら、開くページを案内して待ってください。',
+    '完成したら、プレビュー画面の一覧に新しいPSDが出ることを確かめ、品質検査の結果を報告してください。',
+    '閉じた目と開いた口の絵の画像生成は、私が別に依頼するまで行わないでください。',
+    'コミット・pushはしないでください。',
+    'チャットに貼り付けた画像は画質が落ちることがあるため、変換には次の場所にある元の画像ファイルを使ってください。',
+    '画像ファイルの場所: ',
+  ];
+  if (expressionRecipient === 'codex') {
+    return [
+      '$still2rig-psd を使い、私が渡すキャラクター画像から、まばたきと口パクを確認できるPSDを作ってください。',
+      'リポジトリの AGENTS.md とスキルの手順に従ってください。',
+      ...common,
+    ].join('\n');
+  }
+  return [
+    'リポジトリの AGENTS.md と .agents/skills/still2rig-psd/SKILL.md を読み、その手順で、私が渡すキャラクター画像から、まばたきと口パクを確認できるPSDを作ってください。',
+    ...common,
+  ].join('\n');
+}
+
+async function copyStartRequest(): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(startRequestMessage());
+    startRequestStatus.textContent = `依頼文をコピーしました。${recipientLabel(expressionRecipient)}に貼り付け、最後の行に画像ファイルの場所を書き足してください。`;
+  } catch {
+    startRequestStatus.textContent = 'コピーできませんでした。ブラウザのクリップボード許可を確認してください。';
+  }
 }
 
 function expressionRequestMessage(item: GeneratedPsd, id: string): string {
@@ -1625,7 +1672,7 @@ async function copyExpressionRequest(): Promise<void> {
   const message = expressionRequestMessage(item, item.jobId);
   try {
     await navigator.clipboard.writeText(message);
-    expressionRequestStatus.textContent = `依頼文をコピーしました。${expressionRecipient === 'codex' ? 'Codex' : 'Claude Code'}に貼り付けてください。`;
+    expressionRequestStatus.textContent = `依頼文をコピーしました。${recipientLabel(expressionRecipient)}に貼り付けてください。`;
   } catch {
     expressionRequestStatus.textContent = 'コピーできませんでした。ブラウザのクリップボード許可を確認してください。';
   }
@@ -1837,6 +1884,14 @@ function installEventListeners(): void {
   for (const button of expressionRecipientButtons) {
     button.addEventListener('click', () => {
       setExpressionRecipient(button.dataset.recipient === 'claude' ? 'claude' : 'codex');
+    });
+  }
+  startRequestCopy.addEventListener('click', () => {
+    void copyStartRequest();
+  });
+  for (const button of startRecipientButtons) {
+    button.addEventListener('click', () => {
+      setExpressionRecipient(button.dataset.startRecipient === 'claude' ? 'claude' : 'codex');
     });
   }
 
