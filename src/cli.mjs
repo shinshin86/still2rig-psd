@@ -157,6 +157,7 @@ function assembleArtifacts({ jobId, root, options, outputPsd, layerDir, reportsR
     '--alpha-threshold', String(defaults.quality.alphaThreshold),
     '--minimum-component-pixels', String(defaults.quality.minimumComponentPixels),
     '--drop-optional-below', String(defaults.quality.dropOptionalBelowPixels),
+    '--neck-tuck-margin', String(defaults.quality.neckTuckColorMargin),
   ];
   if (options.expressions && options['preview-expressions']) {
     throw new Error('Use either --expressions (drawn or image-generated artwork) or --preview-expressions (derived preview artwork), not both.');

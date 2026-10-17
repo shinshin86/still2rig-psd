@@ -137,6 +137,10 @@ Legacy repairs require every recorded file in its conventional directory. If
 inputs cannot be resolved, restore them or ask whether to remove them. Supplied
 layer overrides retain tiny highlights/ink while still applying the alpha
 threshold. Each repair records its effective options.
+Layer cleanup hides the inferred neck where the source shows the collar or
+clothing in front of it, and reports it as `neckTuck` in
+`layer-inspection.json`. Do not draw a neck override only to tuck the neck into
+a collar; check `neckTuck` first.
 
 Import validates proportions and current layer hashes. Alignment uses an
 8-native-pixel band with input alpha >=240 and subpixel refinement. Meaningful

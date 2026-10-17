@@ -15,6 +15,8 @@ from PIL import Image, ImageDraw, ImageFilter
 
 OPTIONAL_DROP = {"bottomwear.png", "handwear.png", "earwear.png", "headwear.png"}
 EXPRESSION_FILES = {"mouth_open.png", "mouth_close.png", "eye_close.png"}
+# Layers drawn above the neck in the PSD; where they cover the source, it says nothing about the collar.
+NECK_ABOVE_LAYERS = ("ears.png", "face.png", "front hair.png", "headwear.png")
 
 
 def locate_layer_dir(root: Path) -> Path:
@@ -88,6 +90,58 @@ def geometry(image: Image.Image, threshold: int) -> dict:
     }
 
 
+def tuck_neck_under_clothing(output_dir: Path, source_image: Path | None, threshold: int, margin: int) -> dict:
+    """Hide the inferred neck where the source image shows the clothing in front of it.
+
+    See-through draws the whole neck down into the collar, and the topwear layer also holds the
+    inside of the collar behind the neck. With topwear behind the neck in the PSD, the lower neck
+    then covers the front of the collar. Each overlap pixel is assigned to whichever layer matches
+    the source colour clearly better; unclear pixels keep the neck.
+    """
+    neck_path = output_dir / "neck.png"
+    clothing_path = output_dir / "topwear.png"
+    if not neck_path.is_file() or not clothing_path.is_file():
+        return {"applied": False, "reason": "neck or topwear layer is missing"}
+    if source_image is None or not source_image.is_file():
+        return {"applied": False, "reason": "source image is missing"}
+    neck = Image.open(neck_path).convert("RGBA")
+    clothing = Image.open(clothing_path).convert("RGBA")
+    source = Image.open(source_image).convert("RGBA")
+    if source.size != neck.size or clothing.size != neck.size:
+        return {"applied": False, "reason": "source image size differs from the layers"}
+    bbox = neck.getchannel("A").point(lambda value: 255 if value > threshold else 0).getbbox()
+    if bbox is None:
+        return {"applied": False, "reason": "neck layer is empty"}
+    above = [Image.open(output_dir / name).getchannel("A").load() for name in NECK_ABOVE_LAYERS if (output_dir / name).is_file()]
+    neck_px, clothing_px, source_px = neck.load(), clothing.load(), source.load()
+    hide = Image.new("L", neck.size, 0)
+    hide_px = hide.load()
+    overlap = 0
+    for y in range(bbox[1], bbox[3]):
+        for x in range(bbox[0], bbox[2]):
+            n = neck_px[x, y]
+            c = clothing_px[x, y]
+            if n[3] <= threshold or c[3] <= threshold or any(layer[x, y] > threshold for layer in above):
+                continue
+            overlap += 1
+            s = source_px[x, y]
+            neck_distance = abs(s[0] - n[0]) + abs(s[1] - n[1]) + abs(s[2] - n[2])
+            clothing_distance = abs(s[0] - c[0]) + abs(s[1] - c[1]) + abs(s[2] - c[2])
+            if neck_distance - clothing_distance > margin:
+                hide_px[x, y] = 255
+    if not hide.getbbox():
+        return {"applied": False, "reason": "the source shows no clothing over the neck", "overlapPixels": overlap}
+    # Close pinholes so no skin specks stay inside the collar. Widening further would expose the
+    # inside of the collar as a grey rim above the collar line.
+    hide = hide.filter(ImageFilter.MaxFilter(3)).filter(ImageFilter.MinFilter(3))
+    allowed = clothing.getchannel("A").point(lambda value: 255 if value > threshold else 0)
+    hide = Image.composite(hide, Image.new("L", neck.size, 0), allowed)
+    hidden = sum(1 for a, h in zip(neck.getchannel("A").tobytes(), hide.tobytes()) if a > threshold and h)
+    neck.putalpha(Image.composite(Image.new("L", neck.size, 0), neck.getchannel("A"), hide))
+    neck.save(neck_path, optimize=True)
+    return {"applied": True, "overlapPixels": overlap, "hiddenPixels": hidden, "colorMargin": margin}
+
+
 def make_contact_sheet(files: list[Path], destination: Path) -> None:
     cell = 220
     label = 30
@@ -125,6 +179,7 @@ def main() -> None:
     parser.add_argument("--alpha-threshold", type=int, default=16)
     parser.add_argument("--minimum-component-pixels", type=int, default=40)
     parser.add_argument("--drop-optional-below", type=int, default=1000)
+    parser.add_argument("--neck-tuck-margin", type=int, default=48)
     args = parser.parse_args()
 
     layer_dir = locate_layer_dir(args.raw_root)
@@ -173,6 +228,15 @@ def main() -> None:
         row = {"name": name, **geometry(cleaned, args.alpha_threshold), "dropped": dropped}
         rows.append(row)
 
+    if "neck.png" in override_names:
+        neck_tuck = {"applied": False, "reason": "neck layer is supplied artwork"}
+    else:
+        neck_tuck = tuck_neck_under_clothing(args.output_dir, sources.get("src_img.png"), args.alpha_threshold, args.neck_tuck_margin)
+    if neck_tuck["applied"]:
+        for row in rows:
+            if row["name"] == "neck.png":
+                row.update(geometry(Image.open(args.output_dir / "neck.png"), args.alpha_threshold))
+
     written = sorted(path for path in args.output_dir.glob("*.png") if path.is_file())
     make_contact_sheet(written, args.contact_sheet)
     report = {
@@ -181,6 +245,7 @@ def main() -> None:
         "layers": rows,
         "expressionFiles": expression_names,
         "layerOverrides": override_names,
+        "neckTuck": neck_tuck,
         "counts": {"source": len(sources), "written": len(written), "dropped": sum(row["dropped"] for row in rows)},
     }
     args.report.parent.mkdir(parents=True, exist_ok=True)
