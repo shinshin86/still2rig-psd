@@ -132,3 +132,36 @@ PSDの組み直し、変更前との切り替え、保存準備に時間がか�
 レイヤー並べ替え、大容量PSDのメモリ使用量は対応対象外です。
 
 PSD、合成QA素材、スクリーンショットはすべてGit管理外に保存されます。
+
+## Camera motion
+
+Open **カメラで動かす** in the motion panel. On first use, press the preparation
+button to download the approximately 4 MB face model, or prepare it from the
+repository root with `npm run still2rig-psd -- face-model`. Nothing downloads
+automatically. The CLI and preview share the same hash-verified local model.
+
+Load a PSD, start the camera, face forward, and register your neutral face.
+Mirror motion is enabled by default. Adjust motion size and smoothing as needed;
+the optional camera image starts hidden. Controls for face and body direction, gaze, eye and mouth opening, mouth shape,
+and brow height, along with the automatic demo, are disabled while the camera
+controls the character. Hair, body shape, and eye/mouth position and size remain
+adjustable. Stop
+the camera to restore the existing settings. Switching to layer editing also
+stops it. Camera frames remain in the browser and no microphone is requested.
+
+Face tracking runs in a worker at up to 30 frames per second, preferring GPU
+with CPU fallback. When a face is lost for about half a second, the character
+returns gradually to its normal motion. Angles are conservatively limited for
+flat PSD layers; results still depend on the source artwork. This does not
+create missing expression artwork or certify motion quality.
+
+Use the local Vite development or preview server for camera tracking. The
+model and pinned installed JavaScript/WASM are served locally in both modes.
+A standalone static copy of `dist/` does not provide these local API endpoints.
+
+`npm run preview:qa` checks synthetic camera start/stop, permission and device
+errors, cancellation during startup, direct tracking-input pixel changes,
+375 px layout, and network isolation. Camera inference is explicitly marked
+skipped if the verified model is missing; QA never downloads it. To run the
+same suite against a production build, first run `npm run preview:build`, then
+`WEBUI_QA_SERVER=preview npm run preview:qa` (set `WEBUI_QA_PORT` if needed).

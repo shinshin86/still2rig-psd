@@ -15,6 +15,7 @@
     "node": ">=20.19.0"
   },
   "dependencies": {
+    "@mediapipe/tasks-vision": "0.10.21",
     "ag-psd": "31.0.2"
   },
   "devDependencies": {

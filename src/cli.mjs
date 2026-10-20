@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { readPsd, writePsdBuffer } from 'ag-psd';
+import { ensureFaceModel } from './face-model.mjs';
 import { buildPsd } from './psd.mjs';
 import { colabBridgePaths, colabConnectionInfo } from './colab.mjs';
 import { listJobs, loadJob, prepareJob, updateJob } from './job.mjs';
@@ -22,6 +23,7 @@ function usage() {
 
 Usage:
   still2rig-psd doctor [--json]
+  still2rig-psd face-model
   still2rig-psd prepare IMAGE [--name JOB]
   still2rig-psd colab-url [--json]
   still2rig-psd cell JOB CELL_FILE
@@ -554,6 +556,9 @@ export async function main(argv = process.argv.slice(2)) {
     const result = doctor();
     print(result, options.json);
     if (!result.ok) process.exitCode = 1;
+  } else if (command === 'face-model') {
+    const result = await ensureFaceModel();
+    console.log(result.downloaded ? '顔の動きを読み取る準備ができました。' : '取得済みです。');
   } else if (command === 'prepare') {
     print(prepareJob(positional[0], options.name), true);
   } else if (command === 'colab-url') {

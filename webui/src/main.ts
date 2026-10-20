@@ -1,3 +1,5 @@
+import { installCameraControls } from './tracking/controls';
+import type { TrackingInput } from './tracking/pose.mjs';
 import { detectAnime25RigFromBuffer } from './rig/anime25Rig';
 import {
   createAnime25RigAvatar,
@@ -40,6 +42,8 @@ interface GeneratedPsd {
 }
 
 interface RigQaApi {
+  setTrackingInput: (input: Partial<TrackingInput> | null, weight: number) => void;
+  getCameraState: () => { state: string; active: boolean; liveTracks: number };
   ready: boolean;
   error: string | null;
   summary: unknown;
@@ -191,6 +195,8 @@ if (presetButtons.length !== 3) {
 }
 
 let avatar: Anime25RigAvatar | null = null;
+let cameraControls: ReturnType<typeof installCameraControls> | null = null;
+let cameraActive = false;
 let generatedPsds: GeneratedPsd[] = [];
 let eyeOpen = 1;
 let mouthOpen = 0;
@@ -1164,6 +1170,7 @@ function setWorkspaceMode(mode: WorkspaceMode): void {
   selectedPartBadge.hidden = mode !== 'layers' || !selectedEditableLayer();
   demoToken += 1;
   if (mode === 'layers') {
+    cameraControls?.stop();
     avatar?.setMotionEnabled(false);
     avatar?.setEyeOpen(1);
     avatar?.setMouthOpen(0);
@@ -1335,6 +1342,8 @@ async function runDemo(): Promise<void> {
 }
 
 const api: RigQaApi = {
+  setTrackingInput(input, weight) { avatar?.setTrackingInput(input, weight); },
+  getCameraState() { return cameraControls?.getState() ?? { state: 'off', active: false, liveTracks: 0 }; },
   ready: false,
   error: null,
   summary: null,
@@ -1459,6 +1468,7 @@ async function activatePsd(
   }
   const previousAvatar = avatar;
   clearLayerFocus();
+  cameraControls?.stop();
   avatar = nextAvatar;
   previousAvatar?.dispose();
 
@@ -1772,10 +1782,36 @@ function setAvatarControlsDisabled(disabled: boolean): void {
     demoStop,
   ];
   for (const control of controls) control.disabled = disabled;
+  cameraControls?.setAvatarReady(!disabled);
+  if (!disabled && cameraActive) setCameraConflicts(true);
+}
+
+function setCameraConflicts(active: boolean): void {
+  cameraActive = active;
+  eyeControl.disabled = active || !avatar;
+  mouthControl.disabled = active || !avatar;
+  blinkToggle.disabled = active || !avatar;
+  demoStart.disabled = active || !avatar;
+  demoStop.disabled = active || !avatar;
+  advancedReset.disabled = active || !avatar;
+  const trackedParameters = new Set<PsdMotionParameterName>([
+    'angleX', 'angleY', 'angleZ', 'body', 'eyeOpenL', 'eyeOpenR',
+    'eyeX', 'eyeY', 'mouthOpen', 'mouthForm', 'brow',
+  ]);
+  for (const [name, control] of advancedControls) {
+    const disabled = !avatar || (active && trackedParameters.has(name));
+    control.range.disabled = disabled;
+    control.number.disabled = disabled;
+  }
+  if (active) demoToken += 1;
 }
 
 function installEventListeners(): void {
   createAdvancedParameterControls();
+  cameraControls = installCameraControls({
+    input(input, weight) { avatar?.setTrackingInput(input, weight); },
+    active(active) { setCameraConflicts(active); },
+  });
   canvas.getContext('webgl', {
     alpha: true,
     stencil: true,

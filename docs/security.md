@@ -16,6 +16,36 @@ output directories. It does not follow output-directory symlinks or expose
 arbitrary filesystem paths. PSDs selected with the file picker or drag-and-drop
 remain in the browser.
 
+## Optional camera preview
+
+Camera frames are processed only inside the browser, in a dedicated worker.
+They are neither saved nor transmitted. Audio is not requested. Stopping the
+camera or leaving the page stops all camera tracks and terminates the worker.
+Only pose angles and expression scores return to the page from the worker.
+
+The first preparation, explicitly requested through the preview button or
+`npm run still2rig-psd -- face-model`, downloads one model from the fixed URL
+https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task.
+The server checks its size (3,758,596 bytes) and SHA-256
+`64184e229b263107bc2b804c6625db1341ff2bb731874b0bcc2fe6544e0bc9ff`
+before atomically installing it under `.still2rig-psd/models/mediapipe/`.
+`STILL2RIG_PSD_MODELS_ROOT` can override the local model root. An existing model
+must pass the same checks. Verification results are cached while file size,
+modification time, and identity metadata remain unchanged; installing a downloaded
+model invalidates the cache. The download endpoint shares origin validation with
+the folder-opening endpoint,
+but requires its own `X-Still2Rig-Action: prepare-face-model` header. The
+folder-opening endpoint accepts only `open-generated-folder`. Only the fixed
+model file and
+allowlisted installed JavaScript/WASM files can be served. Both Vite development
+and preview servers serve these assets locally; static hosting alone is not
+supported for camera tracking. Tracking requires no external requests once the
+model is prepared.
+
+`@mediapipe/tasks-vision` is pinned exactly to 0.10.21 because newer releases
+(including 1.0.1) introduce external metrics reporting. Review telemetry and
+asset loading before any upgrade, and rerun network-isolation QA. No CDN is used.
+
 ## Colab connection
 
 The MCP bridge binds to an automatically selected localhost port. The selected

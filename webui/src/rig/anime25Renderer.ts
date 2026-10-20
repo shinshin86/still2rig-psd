@@ -2,6 +2,7 @@
  * Based on Anime2.5DRig (https://github.com/852wa/Anime2.5DRig)
  * by 852wa (hakoniwa), MIT License.
  */
+import type { TrackingInput } from '../tracking/pose.mjs';
 import type { Anime25RigLayer, Anime25RigResult } from './anime25Rig';
 import {
   createPsdMotionProfileRuntime,
@@ -91,6 +92,7 @@ interface MotionParams extends PsdMotionParameters {
 }
 
 export interface Anime25RigAvatar {
+  setTrackingInput: (input: Partial<TrackingInput> | null, weight: number) => void;
   setMouthOpen: (value: number) => void;
   setEyeOpen: (value: number | null) => void;
   setIntensity: (value: number) => void;
@@ -512,6 +514,8 @@ export function createAnime25RigAvatar(
   let motionEnabled = true;
   let mouthInput = 0;
   let eyeOpenOverride: number | null = null;
+  let trackingInput: Partial<TrackingInput> | null = null;
+  let trackingWeight = 0;
   let viewOffsetX = 0;
   let viewOffsetY = 0;
   let viewScale = 1;
@@ -899,8 +903,18 @@ export function createAnime25RigAvatar(
       target.eyeOpenR = eyeOpenOverride;
     }
 
+    if (trackingInput && trackingWeight > 0) {
+      for (const key of Object.keys(trackingInput) as (keyof TrackingInput)[]) {
+        const value = trackingInput[key];
+        if (value !== undefined) target[key] += (value - target[key]) * trackingWeight;
+      }
+    }
     for (const key of Object.keys(current) as (keyof MotionParams)[]) {
-      current[key] += (target[key] - current[key]) * Math.min(1, dt * 14);
+      const tracked = trackingInput?.[key as keyof TrackingInput] !== undefined && trackingWeight > 0;
+      const alpha = tracked
+        ? (key === 'eyeOpenL' || key === 'eyeOpenR' ? 1 : 1 - Math.exp(-dt / 0.025))
+        : Math.min(1, dt * 14);
+      current[key] += (target[key] - current[key]) * alpha;
     }
 
     const dragStiffness = dragInertia.active ? 90 : 34;
@@ -1034,6 +1048,15 @@ export function createAnime25RigAvatar(
   animationFrame = requestAnimationFrame(tick);
 
   return {
+    setTrackingInput(input, weight) {
+      trackingInput = input === null ? null : {};
+      const keys: (keyof TrackingInput)[] = ['angleX', 'angleY', 'angleZ', 'body', 'eyeOpenL', 'eyeOpenR', 'eyeX', 'eyeY', 'mouthOpen', 'mouthForm', 'brow'];
+      if (input && trackingInput) for (const key of keys) {
+        const value = input[key];
+        if (value !== undefined && Number.isFinite(value)) trackingInput[key] = clamp(value, key === 'eyeOpenL' || key === 'eyeOpenR' || key === 'mouthOpen' ? 0 : -1, 1);
+      }
+      trackingWeight = input && Number.isFinite(weight) ? clamp(weight, 0, 1) : 0;
+    },
     setMouthOpen(value: number) {
       mouthInput = clamp(value, 0, 1);
     },

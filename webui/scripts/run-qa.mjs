@@ -5,6 +5,7 @@ import { createRequire } from 'node:module';
 
 import { readPsd } from 'ag-psd';
 import { chromium } from 'playwright';
+import { mapFace } from '../src/tracking/pose.mjs';
 
 const webuiRoot = path.resolve(import.meta.dirname, '..');
 const repositoryRoot = path.resolve(webuiRoot, '..');
@@ -13,7 +14,8 @@ const jobsRoot = path.join(outputRoot, 'jobs');
 const fixtureJobId = 'qa-generated-preview';
 const fixtureJobRoot = path.join(jobsRoot, fixtureJobId);
 const fixtureFile = path.join(fixtureJobRoot, 'output', `${fixtureJobId}.psd`);
-const qaRoot = path.join(outputRoot, 'qa');
+const previewBuild = process.env.WEBUI_QA_SERVER === 'preview';
+const qaRoot = path.join(outputRoot, previewBuild ? 'qa-preview' : 'qa');
 const port = Number(process.env.WEBUI_QA_PORT || 4183);
 const baseUrl = `http://127.0.0.1:${port}`;
 const require = createRequire(import.meta.url);
@@ -52,6 +54,7 @@ await fs.writeFile(path.join(fixtureJobRoot, 'job.json'), `${JSON.stringify({
 
 const server = spawn(process.execPath, [
   viteBin,
+  ...(previewBuild ? ['preview'] : []),
   '--host',
   '127.0.0.1',
   '--port',
@@ -132,7 +135,7 @@ try {
   })).status;
   browser = await chromium.launch({
     headless: true,
-    args: ['--use-angle=metal', '--enable-webgl', '--ignore-gpu-blocklist'],
+    args: ['--use-angle=metal', '--enable-webgl', '--ignore-gpu-blocklist', '--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'],
   });
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   const consoleErrors = [];
@@ -1008,7 +1011,266 @@ try {
   await compactPage.screenshot({ path: path.join(qaRoot, 'layer-editor-1280x720-save.png') });
   await compactPage.close();
 
+  const cameraPage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  const externalRequests = [];
+  const cameraErrors = [];
+  const cameraDiagnostics = [];
+  cameraPage.on('console', message => {
+    // Emscripten writes this successful CPU initialization notice to stderr.
+    if (message.text() === 'INFO: Created TensorFlow Lite XNNPACK delegate for CPU.') cameraDiagnostics.push(message.text());
+    else if (message.type() === 'error') cameraErrors.push(message.text());
+  });
+  cameraPage.on('pageerror', error => cameraErrors.push(error.message));
+  await cameraPage.context().route('**/*', route => {
+    const host = new URL(route.request().url()).hostname;
+    if (host !== 'localhost' && host !== '127.0.0.1') {
+      externalRequests.push(route.request().url());
+      return route.abort();
+    }
+    return route.continue();
+  });
+  let modelPosts = 0;
+  cameraPage.on('request', request => {
+    if (request.url().endsWith('/api/face-model') && request.method() === 'POST') modelPosts++;
+  });
+  const modelStatus = await (await fetch(`${baseUrl}/api/face-model/status`)).json();
+  const rejectedModelPost = (await fetch(`${baseUrl}/api/face-model`, {
+    method: 'POST', headers: { ...openFolderHeaders, 'X-Still2Rig-Action': 'prepare-face-model', Origin: 'https://example.com' },
+  })).status;
+  const rejectedModelAsset = (await fetch(`${baseUrl}/api/face-assets/not-allowed.js`)).status;
+  const wrongModelAction = (await fetch(`${baseUrl}/api/face-model`, {
+    method: 'POST', headers: openFolderHeaders,
+  })).status;
+  const wrongFolderAction = (await fetch(`${baseUrl}/api/generated-psds/open-folder`, {
+    method: 'POST', headers: { ...openFolderHeaders, 'X-Still2Rig-Action': 'prepare-face-model' },
+    body: JSON.stringify({ id: apiGeneratedId }),
+  })).status;
+  const preparedModelStatus = modelStatus.ready ? (await fetch(`${baseUrl}/api/face-model`, {
+    method: 'POST', headers: { ...openFolderHeaders, 'X-Still2Rig-Action': 'prepare-face-model' },
+  })).status : null;
+
+  // Exercise first-use UI without downloading or changing the real cached model.
+  let preparedByButton = false;
+  let prepareAction;
+  await cameraPage.route('**/api/face-model/status', route => route.fulfill({ json: { ready: preparedByButton } }));
+  await cameraPage.route('**/api/face-model', route => {
+    if (route.request().method() !== 'POST') return route.continue();
+    prepareAction = route.request().headers()['x-still2rig-action'];
+    preparedByButton = true;
+    return route.fulfill({ json: { ready: true, downloaded: true } });
+  });
+  await cameraPage.goto(`${baseUrl}?autoload=0`);
+  await cameraPage.waitForFunction(() => document.querySelector('#camera-state').textContent.includes('最初に'));
+  const automaticModelPosts = modelPosts;
+  await cameraPage.locator('#camera-controls').screenshot({ path: path.join(qaRoot, 'camera-first-use.png') });
+  await cameraPage.click('#camera-prepare');
+  await cameraPage.waitForFunction(() => document.querySelector('#camera-prepare').hidden);
+  const explicitModelPosts = modelPosts;
+  await cameraPage.unroute('**/api/face-model/status');
+  await cameraPage.unroute('**/api/face-model');
+  await cameraPage.goto(baseUrl);
+  await cameraPage.waitForFunction(() => window.rigQa?.ready === true);
+  const cameraInitiallyLoadedMessage = await cameraPage.locator('#camera-state').textContent();
+  await cameraPage.evaluate(() => {
+    window.rigQa.setMode('static'); window.rigQa.setAutoBlink(false); window.rigQa.setState(1, 0);
+  });
+  const trackingNeutral = { angleX: 0, angleY: 0, angleZ: 0, body: 0, eyeOpenL: 1, eyeOpenR: 1, eyeX: 0, eyeY: 0, mouthOpen: 0, mouthForm: 0, brow: 0 };
+  const captureTrackingPixels = async () => cameraPage.evaluate(() => {
+    const canvas = document.querySelector('#rig-canvas');
+    const gl = canvas.getContext('webgl');
+    const pixels = new Uint8Array(canvas.width * canvas.height * 4);
+    gl.readPixels(0, 0, canvas.width, canvas.height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+    window.__cameraPixels = pixels;
+  });
+  const compareTrackingPixels = async () => cameraPage.evaluate(() => {
+    const canvas = document.querySelector('#rig-canvas');
+    const gl = canvas.getContext('webgl');
+    const pixels = new Uint8Array(canvas.width * canvas.height * 4);
+    gl.readPixels(0, 0, canvas.width, canvas.height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+    let changed = 0;
+    for (let i = 0; i < pixels.length; i += 4) {
+      if (Math.abs(pixels[i] - window.__cameraPixels[i]) + Math.abs(pixels[i+1] - window.__cameraPixels[i+1]) + Math.abs(pixels[i+2] - window.__cameraPixels[i+2]) > 12) changed++;
+    }
+    return changed;
+  });
+  await cameraPage.waitForTimeout(800);
+  await captureTrackingPixels();
+  await cameraPage.evaluate(input => window.rigQa.setTrackingInput(input, 0), { ...trackingNeutral, angleX: 1, eyeOpenL: 0, mouthOpen: 1 });
+  await cameraPage.waitForTimeout(300);
+  const trackingZeroDifference = await compareTrackingPixels();
+  const cameraSensitivity = await cameraPage.locator('#camera-sensitivity').evaluate(input => ({ value: Number(input.value), max: Number(input.max) }));
+  const faceInput = (pitch, shapes = {}) => mapFace({ yaw: 0, pitch, roll: 0, shapes }, null, { mirror: true, sensitivity: 1.5, smoothing: 0 });
+  const measureIris = () => cameraPage.evaluate(() => {
+    const canvas = document.querySelector('#rig-canvas');
+    const gl = canvas.getContext('webgl');
+    const pixels = new Uint8Array(canvas.width * canvas.height * 4);
+    gl.readPixels(0, 0, canvas.width, canvas.height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+    let count = 0, sumY = 0;
+    for (let y = 0; y < canvas.height; y++) for (let x = 0; x < canvas.width; x++) {
+      const i = (y * canvas.width + x) * 4;
+      if (pixels[i+1] > pixels[i] + 20 && pixels[i+2] > pixels[i] + 20 && pixels[i+1] > 80 && pixels[i] < 130) {
+        count++; sumY += canvas.height - 1 - y;
+      }
+    }
+    return { count, y: count ? sumY / count : null };
+  });
+  await cameraPage.evaluate(input => window.rigQa.setTrackingInput(input, 1), trackingNeutral);
+  await cameraPage.waitForTimeout(400);
+  const directionNeutral = await measureIris();
+  await cameraPage.locator('#rig-canvas').screenshot({ path: path.join(qaRoot, 'camera-direction-neutral.png') });
+  const trackingDirections = {};
+  for (const [name, input] of Object.entries({
+    'head-up': faceInput(-18), 'head-down': faceInput(18),
+    'gaze-up': faceInput(0, { eyeLookUpLeft: 0.8, eyeLookUpRight: 0.8 }),
+    'gaze-down': faceInput(0, { eyeLookDownLeft: 0.8, eyeLookDownRight: 0.8 }),
+  })) {
+    await cameraPage.evaluate(value => window.rigQa.setTrackingInput(value, 1), input);
+    await cameraPage.waitForTimeout(400);
+    trackingDirections[name] = await measureIris();
+    await cameraPage.locator('#rig-canvas').screenshot({ path: path.join(qaRoot, `camera-direction-${name}.png`) });
+  }
+  const trackingDifferences = {};
+  for (const [name, values] of Object.entries({ head: { angleX: 0.6, angleZ: 0.4 }, blink: { eyeOpenL: 0, eyeOpenR: 0 }, mouth: { mouthOpen: 1 } })) {
+    await cameraPage.evaluate(input => window.rigQa.setTrackingInput(input, 1), trackingNeutral);
+    await cameraPage.waitForTimeout(400);
+    await captureTrackingPixels();
+    await cameraPage.evaluate(input => window.rigQa.setTrackingInput(input, 1), { ...trackingNeutral, ...values });
+    await cameraPage.waitForTimeout(400);
+    trackingDifferences[name] = await compareTrackingPixels();
+    await cameraPage.locator('#rig-canvas').screenshot({ path: path.join(qaRoot, `camera-input-${name}.png`) });
+  }
+  await cameraPage.evaluate(() => window.rigQa.setTrackingInput(null, 0));
+  await cameraPage.waitForTimeout(800);
+  await captureTrackingPixels();
+  await cameraPage.waitForTimeout(250);
+  const trackingStoppedDifference = await compareTrackingPixels();
+  let cameraFailureStates = [];
+  let cancelledStart;
+  let fakeCamera = { skipped: !modelStatus.ready, reason: modelStatus.ready ? null : 'Place the verified model locally with the face-model CLI before running camera inference QA.' };
+  if (modelStatus.ready) {
+    await cameraPage.evaluate(() => { window.__originalGetUserMedia = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices); });
+    for (const [error, expected] of [['NotAllowedError', 'denied'], ['NotFoundError', 'unavailable']]) {
+      await cameraPage.evaluate(name => {
+        navigator.mediaDevices.getUserMedia = () => Promise.reject(new DOMException('QA camera error', name));
+      }, error);
+      await cameraPage.click('#camera-start');
+      await cameraPage.waitForFunction(value => window.rigQa.getCameraState().state === value, expected);
+      cameraFailureStates.push(await cameraPage.evaluate(() => window.rigQa.getCameraState()));
+    }
+    // A delayed permission reply must not reopen a camera after Stop was pressed.
+    await cameraPage.evaluate(() => {
+      navigator.mediaDevices.getUserMedia = async constraints => {
+        await new Promise(resolve => setTimeout(resolve, 200));
+        const stream = await window.__originalGetUserMedia(constraints);
+        window.__cancelledCameraStream = stream;
+        return stream;
+      };
+    });
+    await cameraPage.click('#camera-start');
+    await cameraPage.click('#camera-stop');
+    await cameraPage.waitForFunction(() => window.__cancelledCameraStream?.getTracks().every(track => track.readyState === 'ended'));
+    cancelledStart = await cameraPage.evaluate(() => window.rigQa.getCameraState());
+    await cameraPage.evaluate(() => { navigator.mediaDevices.getUserMedia = window.__originalGetUserMedia; });
+    await cameraPage.click('#camera-start');
+    await cameraPage.waitForFunction(() => ['missing', 'tracking', 'model-error', 'camera-error', 'denied', 'unavailable'].includes(window.rigQa.getCameraState().state), null, { timeout: 45000 });
+    const running = await cameraPage.evaluate(() => ({
+      ...window.rigQa.getCameraState(),
+      message: document.querySelector('#camera-state').textContent,
+      eyeDisabled: document.querySelector('#eye-control').disabled,
+      mouthDisabled: document.querySelector('#mouth-control').disabled,
+      previewHidden: document.querySelector('#camera-video').hidden,
+      advancedDisabled: [...document.querySelectorAll('#advanced-parameters input[type="range"]')]
+        .filter(input => input.disabled).map(input => input.id.replace('parameter-', '')),
+      advancedEditable: [...document.querySelectorAll('#advanced-parameters input[type="range"]')]
+        .filter(input => !input.disabled).map(input => input.id.replace('parameter-', '')),
+    }));
+    await cameraPage.locator('#camera-controls').screenshot({ path: path.join(qaRoot, 'camera-running.png') });
+    await cameraPage.evaluate(() => {
+      document.querySelector('#advanced-parameters').open = true;
+      for (const details of document.querySelectorAll('.parameter-group')) details.open = true;
+    });
+    for (const [name, value] of [['physAmp', '1.5'], ['eyeCY', '0.2'], ['mouthScale', '1.1'], ['bust', '2']]) {
+      await cameraPage.locator(`#parameter-${name}-number`).fill(value);
+      await cameraPage.locator(`#parameter-${name}-number`).press('Tab');
+    }
+    running.adjustedParameters = await cameraPage.evaluate(() => window.rigQa.getProfileParameters());
+    for (const group of ['eyes', 'mouth', 'physics']) {
+      await cameraPage.locator(`[data-parameter-group="${group}"]`).screenshot({ path: path.join(qaRoot, `camera-editable-${group}.png`) });
+    }
+    await cameraPage.evaluate(() => { document.querySelector('#advanced-parameters').open = false; });
+
+    await cameraPage.click('#camera-stop');
+    const stopped = await cameraPage.evaluate(() => ({
+      ...window.rigQa.getCameraState(),
+      videoCleared: document.querySelector('#camera-video').srcObject === null,
+      eyeDisabled: document.querySelector('#eye-control').disabled,
+    }));
+    await cameraPage.click('#camera-start');
+    await cameraPage.waitForFunction(() => window.rigQa.getCameraState().state !== 'starting');
+    await cameraPage.evaluate(() => window.dispatchEvent(new Event('pagehide')));
+    const pagehide = await cameraPage.evaluate(() => window.rigQa.getCameraState());
+    fakeCamera = { skipped: false, running, stopped, pagehide };
+  } else console.log('SKIP camera inference: verified local model is not available.');
+  // Exercise the multiple-camera selector without requiring physical devices.
+  const cameraDeviceStyle = await cameraPage.evaluate(() => {
+    document.querySelector('#camera-device-field').hidden = false;
+    const device = document.querySelector('#camera-device');
+    device.replaceChildren(new Option('内蔵カメラ', 'qa-internal'), new Option('外付けカメラ', 'qa-external'));
+    device.disabled = false;
+    const cameraStyle = getComputedStyle(device);
+    const sourceStyle = getComputedStyle(document.querySelector('#generated-psd-select'));
+    const properties = ['color', 'backgroundColor', 'borderColor', 'borderRadius', 'padding', 'fontFamily', 'fontSize'];
+    return {
+      matches: properties.every(property => cameraStyle[property] === sourceStyle[property]),
+      height: device.getBoundingClientRect().height,
+    };
+  });
+  await cameraPage.locator('#camera-controls').screenshot({ path: path.join(qaRoot, 'camera-device-desktop.png') });
+  await cameraPage.setViewportSize({ width: 375, height: 812 });
+  await cameraPage.locator('#camera-controls').scrollIntoViewIfNeeded();
+  const cameraMobile = await cameraPage.evaluate(() => {
+    const rect = document.querySelector('#camera-controls').getBoundingClientRect();
+    return { scrollWidth: document.documentElement.scrollWidth, viewport: innerWidth, left: rect.left, right: rect.right };
+  });
+  await cameraPage.locator('#camera-controls').screenshot({ path: path.join(qaRoot, 'camera-mobile.png') });
+  await cameraPage.locator('#camera-controls').screenshot({ path: path.join(qaRoot, 'camera-device-mobile.png') });
+
+  const cameraLoadedMessage = await cameraPage.locator('#camera-state').textContent();
+  const cameraSectionOrder = await cameraPage.evaluate(() => {
+    const quick = document.querySelector('.quick-check');
+    const camera = document.querySelector('#camera-controls');
+    return !!(quick.compareDocumentPosition(camera) & Node.DOCUMENT_POSITION_FOLLOWING);
+  });
   const checks = {
+    cameraDeviceSharesSelectStyle: cameraDeviceStyle.matches && cameraDeviceStyle.height >= 44,
+    cameraSensitivityStartsStronger: cameraSensitivity.value === 1.5 && cameraSensitivity.max === 3,
+    trackingVerticalDirectionsMatchCanvas: directionNeutral.count > 0 &&
+      Object.values(trackingDirections).every(value => value.count > 0) &&
+      trackingDirections['head-up'].y < directionNeutral.y && trackingDirections['head-down'].y > directionNeutral.y &&
+      trackingDirections['gaze-up'].y < directionNeutral.y && trackingDirections['gaze-down'].y > directionNeutral.y,
+    cameraOnlyDisablesTrackedControls: fakeCamera.skipped || (
+      ['angleX', 'angleY', 'angleZ', 'body', 'eyeX', 'eyeY', 'mouthForm', 'brow'].every(name => fakeCamera.running.advancedDisabled.includes(name)) &&
+      fakeCamera.running.advancedDisabled.length === 8 &&
+      ['physAmp', 'soft', 'bust', 'eyeCY', 'eyeScaleL', 'mouthCY', 'mouthScale'].every(name => fakeCamera.running.advancedEditable.includes(name)) &&
+      fakeCamera.running.adjustedParameters.physAmp === 1.5 && fakeCamera.running.adjustedParameters.eyeCY === 0.2 &&
+      fakeCamera.running.adjustedParameters.mouthScale === 1.1 && fakeCamera.running.adjustedParameters.bust === 2),
+    cameraFollowsFirstQuickCheck: cameraSectionOrder,
+    cameraLoadedMessageMatchesState: !modelStatus.ready || (cameraLoadedMessage === 'カメラは停止しています。' && cameraInitiallyLoadedMessage === 'カメラは停止しています。'),
+    cameraActionsAreEndpointSpecific: wrongModelAction === 403 && wrongFolderAction === 403 && prepareAction === 'prepare-face-model' && (preparedModelStatus === null || preparedModelStatus === 200),
+    cameraPreparationRequiresClick: automaticModelPosts === 0 && explicitModelPosts === 1 && preparedByButton,
+    cameraEndpointsAreRestricted: rejectedModelPost === 403 && rejectedModelAsset === 404,
+    trackingInputMovesHeadEyesAndMouth: Object.values(trackingDifferences).every(value => value > 10),
+    trackingOffKeepsStaticPixels: trackingZeroDifference === 0 && trackingStoppedDifference === 0,
+    cameraStartStopAndPagehide: fakeCamera.skipped || (
+      fakeCamera.running.state === 'missing' && fakeCamera.running.liveTracks === 1 &&
+      fakeCamera.running.eyeDisabled && fakeCamera.running.mouthDisabled && fakeCamera.running.previewHidden &&
+      fakeCamera.stopped.state === 'off' && fakeCamera.stopped.liveTracks === 0 && fakeCamera.stopped.videoCleared && !fakeCamera.stopped.eyeDisabled &&
+      fakeCamera.pagehide.state === 'off' && fakeCamera.pagehide.liveTracks === 0),
+    cameraNeverRequestsExternalAssets: externalRequests.length === 0,
+    cameraMobileFits: cameraMobile.scrollWidth === 375 && cameraMobile.left >= 0 && cameraMobile.right <= 375,
+    cameraHasNoErrors: cameraErrors.length === 0,
+    cameraDistinguishesPermissionAndMissingDevice: fakeCamera.skipped || (cameraFailureStates[0]?.state === 'denied' && cameraFailureStates[1]?.state === 'unavailable'),
+    cameraStopCancelsPendingStart: fakeCamera.skipped || (cancelledStart?.state === 'off' && cancelledStart?.liveTracks === 0),
     startRequestCopiesConversionMessage:
       startRequestInitiallyOpen === false &&
       codexStartRequest.message.startsWith('$still2rig-psd') &&
@@ -1327,6 +1589,7 @@ try {
     noCompactConsoleErrors: compactConsoleErrors.length === 0,
   };
   const report = {
+    camera: { cameraDeviceStyle, cameraSensitivity, directionNeutral, trackingDirections, cameraInitiallyLoadedMessage, cameraLoadedMessage, cameraSectionOrder, wrongModelAction, wrongFolderAction, prepareAction, preparedModelStatus, fakeCamera, cameraFailureStates, cancelledStart, trackingDifferences, trackingZeroDifference, trackingStoppedDifference, cameraMobile, cameraErrors, cameraDiagnostics, externalRequests },
     pass: Object.values(checks).every(Boolean),
     checks,
     waitingState,
