@@ -3,6 +3,9 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 
 import { defineConfig } from 'vite';
+import { liveRelayPlugin } from './server/live-relay.mjs';
+import { createRequire } from 'node:module';
+import { ensureFaceModel, faceModelFile, faceModelReady } from '../src/face-model.mjs';
 
 const repositoryRoot = path.resolve(import.meta.dirname, '..');
 const configuredJobsRoot = process.env.STILL2RIG_PSD_JOBS_ROOT;
@@ -89,8 +92,8 @@ function readJsonBody(request) {
   });
 }
 
-function isTrustedOpenFolderRequest(request) {
-  if (request.headers['x-still2rig-action'] !== 'open-generated-folder') return false;
+function isTrustedActionRequest(request, action) {
+  if (action !== null && request.headers['x-still2rig-action'] !== action) return false;
   const origin = request.headers.origin;
   if (!origin) {
     const fetchSite = request.headers['sec-fetch-site'];
@@ -128,7 +131,7 @@ function openDirectory(directory) {
 }
 
 async function openGeneratedPsdFolder(request, response) {
-  if (!isTrustedOpenFolderRequest(request)) {
+  if (!isTrustedActionRequest(request, 'open-generated-folder')) {
     sendJson(response, { error: 'この操作を受け付けられませんでした。' }, 403);
     return;
   }
@@ -203,6 +206,48 @@ function generatedPsdPlugin() {
   };
 }
 
+function faceAssetsPlugin() {
+  const require = createRequire(import.meta.url);
+  const assetsRoot = path.dirname(require.resolve('@mediapipe/tasks-vision'));
+  const assets = new Map([
+    ['vision_bundle.js', path.join(assetsRoot, 'vision_bundle.cjs')],
+    ...fs.readdirSync(path.join(assetsRoot, 'wasm')).filter(name => /\.(wasm|js)$/.test(name))
+      .map(name => [name, path.join(assetsRoot, 'wasm', name)]),
+  ]);
+  const middleware = async (request, response, next) => {
+    const url = new URL(request.url ?? '/', 'http://127.0.0.1');
+    try {
+      if (url.pathname === '/api/face-model' && request.method === 'POST') {
+        if (!isTrustedActionRequest(request, 'prepare-face-model')) return sendJson(response, { error: 'この操作を受け付けられませんでした。' }, 403);
+        return sendJson(response, await ensureFaceModel());
+      }
+      if (request.method !== 'GET' && request.method !== 'HEAD') return next();
+      if (url.pathname === '/api/face-model/status') return sendJson(response, { ready: await faceModelReady() });
+      let file;
+      if (url.pathname === '/api/face-model') {
+        if (!await faceModelReady()) return sendJson(response, { error: '先に顔の動きを読み取る準備をしてください。' }, 404);
+        file = faceModelFile;
+      } else if (url.pathname.startsWith('/api/face-assets/')) {
+        file = assets.get(url.pathname.slice('/api/face-assets/'.length));
+        if (!file) return sendJson(response, { error: 'File not found.' }, 404);
+      } else return next();
+      response.setHeader('Content-Type', file.endsWith('.wasm') ? 'application/wasm' : file.endsWith('.task') ? 'application/octet-stream' : 'text/javascript');
+      response.setHeader('Cache-Control', 'no-store');
+      response.setHeader('Content-Length', String(fs.statSync(file).size));
+      if (request.method === 'HEAD') return response.end();
+      fs.createReadStream(file).pipe(response);
+    } catch {
+      sendJson(response, { error: '準備できませんでした。接続を確認して、もう一度お試しください。' }, 500);
+    }
+  };
+  return {
+    name: 'still2rig-face-assets',
+    configureServer(server) { server.middlewares.use((...args) => { void middleware(...args); }); },
+    configurePreviewServer(server) { server.middlewares.use((...args) => { void middleware(...args); }); },
+  };
+}
+
 export default defineConfig({
-  plugins: [generatedPsdPlugin()],
+  plugins: [generatedPsdPlugin(), faceAssetsPlugin(), liveRelayPlugin({ listPsds: listGeneratedPsds, trusted: isTrustedActionRequest, sendJson })],
+  build: { rolldownOptions: { input: { main: path.join(import.meta.dirname, 'index.html'), stream: path.join(import.meta.dirname, 'stream.html') } } },
 });

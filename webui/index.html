@@ -29,7 +29,7 @@
       #progress { width: 0; height: 100%; background: linear-gradient(90deg, #58d5ff, #a878ff); transition: width 160ms linear; }
       .header-source { min-width: 0; }
       .source-actions { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; gap: 8px; align-items: stretch; }
-      #generated-psd-select { width: 100%; min-width: 0; padding: 9px 10px; color: #edf4ff; background: #151b28; border: 1px solid #4a5671; border-radius: 8px; font: 12px/1.3 inherit; }
+      #generated-psd-select, #camera-device, #stream-background { width: 100%; min-width: 0; padding: 9px 10px; color: #edf4ff; background: #151b28; border: 1px solid #4a5671; border-radius: 8px; font: 12px/1.3 inherit; }
       #generated-psd-refresh, #generated-psd-open-folder { white-space: nowrap; }
       .source-note { margin: 6px 0 0; color: #8f9ab7; font-size: 11px; line-height: 1.4; }
       .file-button { display: inline-grid; place-items: center; min-height: 40px; padding: 8px 13px; color: #101a23; background: #72d9ff; border-radius: 8px; font: 700 12px/1.2 inherit; cursor: pointer; white-space: nowrap; }
@@ -86,8 +86,9 @@
       body[data-file-load-state='loading'] .empty-state { opacity: 0; pointer-events: none; }
       .control-panel { min-height: 0; padding: 22px 22px 42px; border-left: 1px solid #3c4355; background: rgb(17 21 31 / 91%); overflow-y: auto; }
       .panel-title { margin: 0 0 14px; font-size: 14px; font-weight: 750; }
-      .workspace-mode-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 18px; padding: 5px; border: 1px solid #414c63; border-radius: 12px; background: #111722; }
-      .workspace-mode-tabs button { min-height: 44px; border: 0; background: transparent; }
+      .workspace-mode-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-bottom: 18px; padding: 5px; border: 1px solid #414c63; border-radius: 12px; background: #111722; }
+      .workspace-mode-tabs button { min-height: 44px; min-width: 0; padding: 6px 4px; font-size: 11px; line-height: 1.35; border: 0; background: transparent; }
+      .camera-active-indicator { display: inline-block; width: 6px; height: 6px; margin-left: 4px; border-radius: 50%; background: #71efb3; }
       .workspace-mode-tabs button[aria-selected='true'] { color: #0d1922; background: #7bdfff; box-shadow: 0 5px 18px rgb(71 200 245 / 18%); }
       .layer-edit-intro { margin: -4px 0 14px; color: #aeb8d1; font-size: 12px; line-height: 1.55; }
       .layer-selection-step { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; color: #dff7ff; font-size: 12px; font-weight: 750; }
@@ -242,6 +243,15 @@
         body[data-layer-processing='true'] .layer-processing-overlay { animation-duration: 1ms; }
         .layer-processing-spinner { animation-duration: 1.4s; }
       }
+      #motion-camera-conflict { margin: 14px 0 18px; }
+      .camera-controls { display: grid; gap: 10px; margin: 0 0 18px; padding: 14px; border: 1px solid var(--border, #d4d4da); border-radius: 12px; min-width: 0; }
+      .camera-controls h3, .camera-controls p { margin: 0; }
+      .camera-controls button { white-space: normal; overflow-wrap: anywhere; min-height: 44px; }
+      .camera-controls .field { margin: 0; }
+      #camera-device { min-height: 44px; }
+      .camera-check { display: flex; align-items: center; gap: 8px; font-size: 13px; min-height: 32px; }
+      .camera-controls video { width: 100%; max-width: 240px; border-radius: 8px; justify-self: center; }
+      .camera-controls [hidden] { display: none; }
     </style>
   </head>
   <body data-avatar-ready="false" data-file-load-state="waiting">
@@ -336,6 +346,7 @@
           <div class="workspace-mode-tabs" role="tablist" aria-label="作業を選択">
             <button id="motion-tab" type="button" role="tab" aria-selected="true" aria-controls="motion-panel">動きを確認</button>
             <button id="layer-edit-tab" type="button" role="tab" aria-selected="false" aria-controls="layer-edit-panel" disabled>重なりを直す</button>
+            <button id="camera-tab" type="button" role="tab" aria-selected="false" aria-controls="camera-panel" disabled>カメラで動かす<span id="camera-active-indicator" class="camera-active-indicator" aria-hidden="true" hidden></span></button>
           </div>
           <section id="motion-panel" role="tabpanel" aria-labelledby="motion-tab">
           <h2 class="panel-title">動作を確認</h2>
@@ -375,6 +386,7 @@
               <button id="demo-stop" type="button">停止</button>
             </div>
           </div>
+          <p id="motion-camera-conflict" class="tuning-note" role="status" hidden></p>
           <div class="controls" aria-label="リグ操作パネル">
           <div class="field">
             <label class="field-head" for="eye-control"><span>目の開閉</span><output id="eye-value">100%</output></label>
@@ -461,6 +473,40 @@
           </details>
           </div>
           <pre id="report"></pre>
+          </section>
+
+          <section id="camera-panel" role="tabpanel" aria-labelledby="camera-tab" hidden>
+          <section id="camera-controls" class="camera-controls" aria-labelledby="camera-title">
+            <h3 id="camera-title">カメラで動かす</h3>
+            <p class="tuning-note">カメラの映像はこのパソコンの中だけで使い、保存や送信はしません。</p>
+            <button id="camera-prepare" type="button">顔の動きを読み取る準備をする（初回だけ約4MBをダウンロード）</button>
+            <div class="demo-row">
+              <button id="camera-start" type="button" disabled>カメラを開始</button>
+              <button id="camera-stop" type="button" disabled>カメラを停止</button>
+            </div>
+            <label id="camera-device-field" class="field" hidden>使うカメラ<select id="camera-device" aria-label="使うカメラ"></select></label>
+            <button id="camera-calibrate" type="button" disabled>いまの顔を正面として登録</button>
+            <label class="camera-check"><input id="camera-mirror" type="checkbox" checked />左右反転（鏡と同じ動き）</label>
+            <label class="field" for="camera-sensitivity">動きの大きさ<input id="camera-sensitivity" type="range" min="0.25" max="3" step="0.05" value="1.5" /></label>
+            <label class="field" for="camera-smoothing">なめらかさ<input id="camera-smoothing" type="range" min="0" max="1" step="0.05" value="0.3" /></label>
+            <label class="camera-check"><input id="camera-preview" type="checkbox" />カメラ映像を確認する</label>
+            <video id="camera-video" autoplay muted playsinline hidden aria-label="カメラ映像の確認"></video>
+            <p id="camera-background-note" class="tuning-note" role="status" hidden>このページが隠れているため、動きが遅くなっています。ページを前に戻してお試しください。</p>
+            <p id="camera-state" class="tuning-note" role="status" aria-live="polite">準備の状況を確認しています…</p>
+            <p id="camera-conflict" class="tuning-note" hidden>カメラで動かしている間は、顔と体の向き・視線・目と口の開閉・口の形・眉の高さと自動チェックを使えません。髪の揺れや、目と口の位置・大きさは調整できます。カメラを停止すると元の設定に戻ります。</p>
+          </section>
+          <section class="camera-controls" aria-labelledby="stream-title">
+            <h3 id="stream-title">配信ソフトに映す</h3>
+            <label for="stream-background">背景</label>
+            <select id="stream-background"><option value="transparent">透明</option><option value="green">グリーン</option><option value="blue">ブルー</option><option value="custom">好きな色</option></select>
+            <input id="stream-color" type="color" value="#284060" aria-label="背景の色" hidden />
+            <div class="demo-row">
+              <button id="stream-copy" type="button" disabled>配信用のURLをコピー</button>
+              <button id="stream-open" type="button" disabled>配信画面を開く</button>
+            </div>
+            <p id="stream-note" class="tuning-note"></p>
+            <p id="stream-status" class="tuning-note" role="status" aria-live="polite"></p>
+          </section>
           </section>
 
           <section id="layer-edit-panel" role="tabpanel" aria-labelledby="layer-edit-tab" hidden>

@@ -57,7 +57,7 @@ browsing. Symlinks in output directories are not served.
   slider, exact numeric input, displayed default, and one-click reset
 - Canvas drag, wheel zoom, zoom slider, and view reset
 - PSD drag-and-drop and file-picker input
-- Separate **Check motion** and **Fix overlaps** work modes
+- Separate **Check motion**, **Fix overlaps**, and **Camera motion** tabs
 - Plain-language front/back fixes for arms, clothing, face, and front hair
 - Alpha-aware canvas click selection with overlap candidates and visible selection feedback
 - One-step front/back movement, desktop drag sorting with a visible insertion target,
@@ -132,3 +132,76 @@ PSDの組み直し、変更前との切り替え、保存準備に時間がか�
 レイヤー並べ替え、大容量PSDのメモリ使用量は対応対象外です。
 
 PSD、合成QA素材、スクリーンショットはすべてGit管理外に保存されます。
+
+## Camera motion
+
+Load a PSD, then open the **カメラで動かす** tab. On first use, press the preparation
+button to download the approximately 4 MB face model, or prepare it from the
+repository root with `npm run still2rig-psd -- face-model`. Nothing downloads
+automatically. The CLI and preview share the same hash-verified local model.
+
+Load a PSD, start the camera, face forward, and register your neutral face.
+Mirror motion is enabled by default. Adjust motion size and smoothing as needed;
+the optional camera image starts hidden. Controls for face and body direction, gaze, eye and mouth opening, mouth shape,
+and brow height, along with the automatic demo, are disabled while the camera
+controls the character. Hair, body shape, and eye/mouth position and size remain
+adjustable in the **動きを確認** tab without stopping the camera. A small dot
+on the camera tab indicates that it is running. Stop the camera to restore the
+existing settings. Switching to **重なりを直す** stops it. Camera frames remain in the browser and no microphone is requested.
+
+Face tracking runs in a worker at up to 30 frames per second, preferring GPU
+with CPU fallback. When a face is lost for about half a second, the character
+returns gradually to its normal motion. Angles are conservatively limited for
+flat PSD layers; results still depend on the source artwork. This does not
+create missing expression artwork or certify motion quality.
+
+Use the local Vite development or preview server for camera tracking. The
+model and pinned installed JavaScript/WASM are served locally in both modes.
+A standalone static copy of `dist/` does not provide these local API endpoints.
+
+`npm run preview:qa` checks synthetic camera start/stop, permission and device
+errors, cancellation during startup, direct tracking-input pixel changes,
+375 px layout, and network isolation. Camera inference is explicitly marked
+skipped if the verified model is missing; QA never downloads it. To run the
+same suite against a production build, first run `npm run preview:build`, then
+`WEBUI_QA_SERVER=preview npm run preview:qa` (set `WEBUI_QA_PORT` if needed).
+
+## Show the character in OBS
+
+In **カメラで動かす**, choose a background under **配信ソフトに映す**, then
+copy the stream URL. In OBS, add a **Browser** source, paste the URL, and set
+both width and height to **1080**. Use **配信画面を開く** to check it in a
+separate browser window. Only generated PSDs selected from the saved-file list
+are available; files opened directly in the browser cannot be used for streaming.
+
+The stream page shows only the character, with transparency by default. Green,
+blue, and a custom color are also available. The URL uses a stable opaque PSD
+identifier; restarting the server preserves it while that generated file stays
+in the same output location. Removing or renaming the PSD invalidates its URL.
+The optional `fit=cover` crops to fill the frame; `contain` is the default.
+
+Changes made with **重なりを直す** also appear in the stream view, including
+while the preview temporarily shows the original for comparison. The server
+keeps the edited order until it stops. After a server restart, reopen the PSD
+and reapply the changes, or use a saved corrected PSD.
+
+Camera motion and motion settings are sent to the stream page through the local
+server. Camera images are never sent. If updates stop for one second, the
+character fades back to its normal idle movement and blinking. Multiple source
+pages use a short exclusive lease to avoid alternating poses; close the previous
+source page before controlling the same PSD from another page. The connection
+count counts open stream pages, including browser previews and OBS sources.
+
+Both `npm run preview` (the development server) and the built preview server
+support streaming without development hot reload. Port changes also change the
+URL. For a fixed development URL use
+`npm run dev --workspace @still2rig-psd/webui -- --port 5173 --strictPort`.
+For a built preview run `npm run preview:build` followed by
+`npm run preview --workspace @still2rig-psd/webui -- --port 4173 --strictPort`.
+Keep the server running while OBS uses its URL.
+
+A worker clock keeps capture and sending independent of page animation frames.
+Track processing is used when the browser provides it, with a local video-frame
+fallback. Some browsers or operating systems can still slow down minimized
+pages; the camera tab displays a notice when background capture falls below
+approximately 15 frames per second. Bringing the page forward can restore it.

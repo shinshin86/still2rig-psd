@@ -1,3 +1,7 @@
+import { createLivePublisher } from './live/publisher';
+import { installStreamControls } from './live/controls';
+import { installCameraControls } from './tracking/controls';
+import type { TrackingInput } from './tracking/pose.mjs';
 import { detectAnime25RigFromBuffer } from './rig/anime25Rig';
 import {
   createAnime25RigAvatar,
@@ -25,7 +29,7 @@ import {
 
 type QaMode = 'static' | 'physics' | 'idle-physics';
 type MotionPreset = 'calm' | 'standard' | 'active' | 'custom';
-type WorkspaceMode = 'motion' | 'layers';
+type WorkspaceMode = 'motion' | 'layers' | 'camera';
 type UiMotionTuning = Anime25MotionTuning & { intensity: number };
 
 interface GeneratedPsd {
@@ -40,6 +44,9 @@ interface GeneratedPsd {
 }
 
 interface RigQaApi {
+  setLiveEnabled: (enabled: boolean) => void;
+  setTrackingInput: (input: Partial<TrackingInput> | null, weight: number) => void;
+  getCameraState: () => { state: string; active: boolean; liveTracks: number };
   ready: boolean;
   error: string | null;
   summary: unknown;
@@ -119,6 +126,10 @@ const psdFileInput = requireElement<HTMLInputElement>('#psd-file-input');
 const dropOverlay = requireElement<HTMLElement>('#drop-overlay');
 const motionTab = requireElement<HTMLButtonElement>('#motion-tab');
 const layerEditTab = requireElement<HTMLButtonElement>('#layer-edit-tab');
+const cameraTab = requireElement<HTMLButtonElement>('#camera-tab');
+const cameraPanel = requireElement<HTMLElement>('#camera-panel');
+const cameraActiveIndicator = requireElement<HTMLElement>('#camera-active-indicator');
+const motionCameraConflict = requireElement<HTMLElement>('#motion-camera-conflict');
 const motionPanel = requireElement<HTMLElement>('#motion-panel');
 const layerEditPanel = requireElement<HTMLElement>('#layer-edit-panel');
 const layerEditorUnavailable = requireElement<HTMLElement>('#layer-editor-unavailable');
@@ -191,6 +202,12 @@ if (presetButtons.length !== 3) {
 }
 
 let avatar: Anime25RigAvatar | null = null;
+let cameraControls: ReturnType<typeof installCameraControls> | null = null;
+let cameraActive = false;
+let liveInput: Partial<TrackingInput> | null = null;
+let liveWeight = 0;
+let livePublisher: ReturnType<typeof createLivePublisher> | null = null;
+let streamControls: ReturnType<typeof installStreamControls> | null = null;
 let generatedPsds: GeneratedPsd[] = [];
 let eyeOpen = 1;
 let mouthOpen = 0;
@@ -998,6 +1015,7 @@ async function refreshEditedPreview(message: string): Promise<void> {
     phaseNode.textContent = '未保存の変更があります';
     detailNode.textContent = message;
     announceLayerEdit(message);
+    livePublisher?.orderChanged();
   } finally {
     await finishLayerProcessing();
     layerEditBusy = false;
@@ -1153,17 +1171,20 @@ function confirmDiscardLayerChanges(): boolean {
 }
 
 function setWorkspaceMode(mode: WorkspaceMode): void {
-  if (mode === 'layers' && layerEditTab.disabled) return;
+  if ((mode === 'layers' && layerEditTab.disabled) || (mode === 'camera' && cameraTab.disabled)) return;
   workspaceMode = mode;
   document.body.dataset.workspaceMode = mode;
   motionTab.setAttribute('aria-selected', String(mode === 'motion'));
   layerEditTab.setAttribute('aria-selected', String(mode === 'layers'));
+  cameraTab.setAttribute('aria-selected', String(mode === 'camera'));
+  cameraPanel.hidden = mode !== 'camera';
   motionPanel.hidden = mode !== 'motion';
   layerEditPanel.hidden = mode !== 'layers';
   previewModeBadge.hidden = mode !== 'layers';
   selectedPartBadge.hidden = mode !== 'layers' || !selectedEditableLayer();
   demoToken += 1;
   if (mode === 'layers') {
+    cameraControls?.stop();
     avatar?.setMotionEnabled(false);
     avatar?.setEyeOpen(1);
     avatar?.setMouthOpen(0);
@@ -1179,7 +1200,9 @@ function setWorkspaceMode(mode: WorkspaceMode): void {
     applyAvatarMotionMode(currentMode);
     statusNode.textContent = '準備完了';
     phaseNode.textContent = 'PSD読み込み完了';
-    detailNode.textContent = '「動きを自動チェック」または個別の操作を試せます。';
+    detailNode.textContent = mode === 'camera'
+      ? 'カメラを開始すると、顔の動きに合わせて動かせます。'
+      : '「動きを自動チェック」または個別の操作を試せます。';
   }
   renderLayerEditor();
 }
@@ -1335,6 +1358,13 @@ async function runDemo(): Promise<void> {
 }
 
 const api: RigQaApi = {
+  setLiveEnabled(enabled) { livePublisher?.enable(enabled); },
+  setTrackingInput(input, weight) {
+    liveInput = input; liveWeight = weight;
+    if (input) livePublisher?.enable();
+    avatar?.setTrackingInput(input, weight);
+  },
+  getCameraState() { return cameraControls?.getState() ?? { state: 'off', active: false, liveTracks: 0 }; },
   ready: false,
   error: null,
   summary: null,
@@ -1459,6 +1489,7 @@ async function activatePsd(
   }
   const previousAvatar = avatar;
   clearLayerFocus();
+  cameraControls?.stop();
   avatar = nextAvatar;
   previousAvatar?.dispose();
 
@@ -1564,6 +1595,7 @@ function setExpressionRecipient(recipient: ExpressionRecipient): void {
 }
 
 function syncExpressionRequestControl(): void {
+  streamControls?.sync();
   const item = generatedPsds.find((candidate) => candidate.id === activeGeneratedPsdId);
   const usable = Boolean(item?.jobId);
   const unavailable = !usable && (expressionRequestSource === 'local' || Boolean(item));
@@ -1772,10 +1804,48 @@ function setAvatarControlsDisabled(disabled: boolean): void {
     demoStop,
   ];
   for (const control of controls) control.disabled = disabled;
+  cameraTab.disabled = disabled;
+  cameraControls?.setAvatarReady(!disabled);
+  if (!disabled && cameraActive) setCameraConflicts(true);
+}
+
+function setCameraConflicts(active: boolean): void {
+  cameraActive = active;
+  cameraActiveIndicator.hidden = !active;
+  cameraTab.setAttribute('aria-label', active ? 'カメラで動かす（動作中）' : 'カメラで動かす');
+  motionCameraConflict.hidden = !active;
+  motionCameraConflict.textContent = requireElement<HTMLElement>('#camera-conflict').textContent;
+  eyeControl.disabled = active || !avatar;
+  mouthControl.disabled = active || !avatar;
+  blinkToggle.disabled = active || !avatar;
+  demoStart.disabled = active || !avatar;
+  demoStop.disabled = active || !avatar;
+  advancedReset.disabled = active || !avatar;
+  const trackedParameters = new Set<PsdMotionParameterName>([
+    'angleX', 'angleY', 'angleZ', 'body', 'eyeOpenL', 'eyeOpenR',
+    'eyeX', 'eyeY', 'mouthOpen', 'mouthForm', 'brow',
+  ]);
+  for (const [name, control] of advancedControls) {
+    const disabled = !avatar || (active && trackedParameters.has(name));
+    control.range.disabled = disabled;
+    control.number.disabled = disabled;
+  }
+  if (active) demoToken += 1;
 }
 
 function installEventListeners(): void {
   createAdvancedParameterControls();
+  cameraControls = installCameraControls({
+    input(input, weight) { api.setTrackingInput(input, weight); },
+    active(active) { setCameraConflicts(active); if (active) livePublisher?.enable(); },
+  });
+  streamControls = installStreamControls(() => activeGeneratedPsdId, () => livePublisher?.enable());
+  livePublisher = createLivePublisher(() => activeGeneratedPsdId && avatar ? {
+    psd: activeGeneratedPsdId, input: liveInput, weight: liveWeight,
+    layerOrder: layerOrderSignature(currentLayerOrder) === layerOrderSignature(originalLayerOrder) ? null : [...currentLayerOrder],
+    settings: { mode: currentMode, autoBlink: autoBlinkEnabled, eyeOpen, mouthOpen,
+      parameters: { ...profileParameters }, tuning: { ...motionTuning } },
+  } : null, message => streamControls?.status(message));
   canvas.getContext('webgl', {
     alpha: true,
     stencil: true,
@@ -1786,6 +1856,7 @@ function installEventListeners(): void {
 
   motionTab.addEventListener('click', () => setWorkspaceMode('motion'));
   layerEditTab.addEventListener('click', () => setWorkspaceMode('layers'));
+  cameraTab.addEventListener('click', () => setWorkspaceMode('camera'));
   moveLayerFront.addEventListener('click', () => {
     hideCanvasPickMenu();
     void moveSelectedLayer('front');

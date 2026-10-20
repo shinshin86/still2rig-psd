@@ -3,6 +3,7 @@
  * by 852wa (hakoniwa), MIT License.
  */
 import { readPsd } from 'ag-psd';
+import { applyPsdLayerOrder } from '../psdLayerEditor';
 
 export interface Anime25RigLayer {
   name: string;
@@ -124,6 +125,7 @@ export function isAnime25RigUsable(summary: Anime25RigSummary): boolean {
 
 export async function detectAnime25RigFromBuffer(
   buffer: ArrayBuffer,
+  layerOrder?: readonly string[] | null,
 ): Promise<Anime25RigDetection> {
   const rigger = getRigger();
   if (!rigger) {
@@ -141,6 +143,7 @@ export async function detectAnime25RigFromBuffer(
       useImageData: true,
       skipThumbnail: true,
     });
+    if (layerOrder) applyPsdLayerOrder(psd, layerOrder);
     const preprocessed = rigger.cleanPsdLayers(psd);
     const rig = rigger.buildRig(psd);
     const summary = summarizeAnime25Rig(rig, rigger, preprocessed);

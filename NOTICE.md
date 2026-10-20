@@ -14,6 +14,16 @@ Still2Rig PSD orchestrates, but does not redistribute, these projects:
   license text is retained at
   `webui/third-party/Anime2.5DRig-LICENSE.txt`.
 
+The optional camera preview uses [MediaPipe](https://github.com/google-ai-edge/mediapipe),
+Copyright The MediaPipe Authors, licensed under the Apache License, Version 2.0.
+`@mediapipe/tasks-vision` is pinned to 0.10.21. Its JavaScript and WASM are
+served from the local npm installation. The unmodified Face Landmarker float16
+model, version 1, is downloaded separately into the ignored local data directory;
+it is not included in the repository. Source:
+https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task
+SHA-256: `64184e229b263107bc2b804c6625db1341ff2bb731874b0bcc2fe6544e0bc9ff`.
+See the [Apache-2.0 license](https://www.apache.org/licenses/LICENSE-2.0).
+
 Model weights downloaded by See-through may have their own terms. Review the
 upstream model cards before commercial use. Google Colab usage is subject to
 Google's terms and account limits.
