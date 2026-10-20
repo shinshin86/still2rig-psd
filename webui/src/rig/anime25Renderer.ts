@@ -99,6 +99,7 @@ interface AnimationState {
 }
 
 export interface Anime25RigAvatar {
+  setVoiceMouth: (value: number | null) => void;
   setTrackingInput: (input: Partial<TrackingInput> | null, weight: number) => void;
   setMouthOpen: (value: number) => void;
   setEyeOpen: (value: number | null) => void;
@@ -525,6 +526,7 @@ export function createAnime25RigAvatar(
   let eyeOpenOverride: number | null = null;
   let trackingInput: Partial<TrackingInput> | null = null;
   let trackingWeight = 0;
+  let voiceMouth: number | null = null;
   let viewOffsetX = 0;
   let viewOffsetY = 0;
   let viewScale = 1;
@@ -918,8 +920,10 @@ export function createAnime25RigAvatar(
         if (value !== undefined) target[key] += (value - target[key]) * trackingWeight;
       }
     }
+    if (voiceMouth !== null) target.mouthOpen = Math.max(target.mouthOpen, voiceMouth);
     for (const key of Object.keys(current) as (keyof MotionParams)[]) {
-      const tracked = trackingInput?.[key as keyof TrackingInput] !== undefined && trackingWeight > 0;
+      const tracked = (trackingInput?.[key as keyof TrackingInput] !== undefined && trackingWeight > 0) ||
+        (key === 'mouthOpen' && voiceMouth !== null);
       const alpha = tracked
         ? (key === 'eyeOpenL' || key === 'eyeOpenR' ? 1 : 1 - Math.exp(-dt / 0.025))
         : Math.min(1, dt * 14);
@@ -1057,6 +1061,9 @@ export function createAnime25RigAvatar(
   animationFrame = requestAnimationFrame(tick);
 
   return {
+    setVoiceMouth(value) {
+      voiceMouth = value !== null && Number.isFinite(value) ? clamp(value, 0, 1) : null;
+    },
     setTrackingInput(input, weight) {
       trackingInput = input === null ? null : {};
       const keys: (keyof TrackingInput)[] = ['angleX', 'angleY', 'angleZ', 'body', 'eyeOpenL', 'eyeOpenR', 'eyeX', 'eyeY', 'mouthOpen', 'mouthForm', 'brow'];

@@ -18,6 +18,7 @@ let source: EventSource | null = null;
 let frame = 0;
 let active = false;
 let currentWeight = 0;
+let voiceMouth: number | null = null;
 let ready = false;
 let failure: string | null = null;
 let originalBuffer: ArrayBuffer;
@@ -44,6 +45,7 @@ async function rebuild() {
       next.setViewTransform(0, 0, 0.9);
       applySettings(latest?.settings, !active, next);
       next.setTrackingInput(currentWeight > 0.005 ? latest?.input ?? null : null, currentWeight);
+      next.setVoiceMouth(voiceMouth);
       next.setAnimationState(previous.getAnimationState());
       canvas.replaceWith(nextCanvas); canvas = nextCanvas; avatar = next;
       previous.dispose();
@@ -59,9 +61,9 @@ function receiveOrder(value: unknown) {
 }
 
 declare global {
-  interface Window { streamQa: { state: () => { ready: boolean; active: boolean; weight: number; settings: LiveSettings | null; error: string | null; layerOrder: string[] | null } }; }
+  interface Window { streamQa: { state: () => { ready: boolean; active: boolean; weight: number; voiceMouth: number | null; settings: LiveSettings | null; error: string | null; layerOrder: string[] | null } }; }
 }
-window.streamQa = { state: () => ({ ready, active, weight: currentWeight, settings: latest?.settings ?? null, error: failure, layerOrder: layerOrder ? [...layerOrder] : null }) };
+window.streamQa = { state: () => ({ ready, active, weight: currentWeight, voiceMouth, settings: latest?.settings ?? null, error: failure, layerOrder: layerOrder ? [...layerOrder] : null }) };
 
 function applySettings(settings: LiveSettings | undefined, waiting: boolean, target = avatar) {
   if (!target) return;
@@ -84,6 +86,11 @@ function sample() {
   if (applied !== key) { applySettings(latest?.settings, !active); applied = key; }
   currentWeight = latest ? latest.weight * Math.exp(-Math.max(0, age - 1000) / 180) : 0;
   avatar?.setTrackingInput(currentWeight > 0.005 ? latest!.input : null, currentWeight);
+  const voice = latest?.voiceMouth;
+  const decay = Math.exp(-Math.max(0, age - 1000) / 180);
+  voiceMouth = voice == null ? null : voice * decay;
+  if (!active && voiceMouth !== null && voiceMouth < 0.005) voiceMouth = null;
+  avatar?.setVoiceMouth(voiceMouth);
   canvas.dataset.live = active ? 'active' : 'idle';
   frame = requestAnimationFrame(sample);
 }

@@ -6,6 +6,7 @@ export interface LiveSettings {
   parameters: Partial<PsdMotionParameters>; tuning: Partial<Anime25MotionTuning & { intensity: number }>;
 }
 export interface LiveState {
+  voiceMouth?: number | null;
   layerOrder?: string[] | null; source: string; psd: string; input: Partial<TrackingInput> | null; weight: number; settings: LiveSettings;
 }
 export const trackingRanges: Record<string, [number, number]>;

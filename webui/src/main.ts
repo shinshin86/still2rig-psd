@@ -1,3 +1,4 @@
+import { installVoiceControls } from './voice/controls';
 import { createLivePublisher } from './live/publisher';
 import { installStreamControls } from './live/controls';
 import { installCameraControls } from './tracking/controls';
@@ -44,6 +45,8 @@ interface GeneratedPsd {
 }
 
 interface RigQaApi {
+  setVoiceMouth: (value: number | null) => void;
+  getVoiceState: () => { state: string; active: boolean; liveTracks: number };
   setLiveEnabled: (enabled: boolean) => void;
   setTrackingInput: (input: Partial<TrackingInput> | null, weight: number) => void;
   getCameraState: () => { state: string; active: boolean; liveTracks: number };
@@ -204,6 +207,9 @@ if (presetButtons.length !== 3) {
 let avatar: Anime25RigAvatar | null = null;
 let cameraControls: ReturnType<typeof installCameraControls> | null = null;
 let cameraActive = false;
+let voiceControls: ReturnType<typeof installVoiceControls> | null = null;
+let voiceActive = false;
+let voiceMouth: number | null = null;
 let liveInput: Partial<TrackingInput> | null = null;
 let liveWeight = 0;
 let livePublisher: ReturnType<typeof createLivePublisher> | null = null;
@@ -1185,6 +1191,7 @@ function setWorkspaceMode(mode: WorkspaceMode): void {
   demoToken += 1;
   if (mode === 'layers') {
     cameraControls?.stop();
+    voiceControls?.stop();
     avatar?.setMotionEnabled(false);
     avatar?.setEyeOpen(1);
     avatar?.setMouthOpen(0);
@@ -1357,7 +1364,15 @@ async function runDemo(): Promise<void> {
   selectMode('static'); api.setLabel('自動チェック完了', '続けて個別の操作を試せます。', 1);
 }
 
+function setVoiceMouth(value: number | null): void {
+  voiceMouth = value === null || !Number.isFinite(value) ? null : Math.max(0, Math.min(1, value));
+  avatar?.setVoiceMouth(voiceMouth);
+  if (voiceMouth !== null) livePublisher?.enable();
+}
+
 const api: RigQaApi = {
+  setVoiceMouth,
+  getVoiceState() { return voiceControls?.getState() ?? { state: 'off', active: false, liveTracks: 0 }; },
   setLiveEnabled(enabled) { livePublisher?.enable(enabled); },
   setTrackingInput(input, weight) {
     liveInput = input; liveWeight = weight;
@@ -1490,6 +1505,7 @@ async function activatePsd(
   const previousAvatar = avatar;
   clearLayerFocus();
   cameraControls?.stop();
+  voiceControls?.stop();
   avatar = nextAvatar;
   previousAvatar?.dispose();
 
@@ -1534,6 +1550,7 @@ async function loadLocalPsd(file: File): Promise<void> {
     throw new Error('PSDファイル（.psd）を選択してください。');
   }
   if (!confirmDiscardLayerChanges()) return;
+  voiceControls?.stop();
   generatedPsdSelect.value = '';
   activeGeneratedPsdId = '';
   generatedPsdOpenFolder.disabled = true;
@@ -1556,6 +1573,7 @@ function generatedPsdLabel(item: GeneratedPsd): string {
 }
 
 async function loadGeneratedPsd(item: GeneratedPsd): Promise<void> {
+  voiceControls?.stop();
   const token = ++loadToken;
   activeGeneratedPsdId = '';
   expressionRequestSource = 'generated';
@@ -1806,31 +1824,33 @@ function setAvatarControlsDisabled(disabled: boolean): void {
   for (const control of controls) control.disabled = disabled;
   cameraTab.disabled = disabled;
   cameraControls?.setAvatarReady(!disabled);
-  if (!disabled && cameraActive) setCameraConflicts(true);
+  voiceControls?.setAvatarReady(!disabled);
+  if (!disabled) setCameraConflicts(cameraActive);
 }
 
 function setCameraConflicts(active: boolean): void {
   cameraActive = active;
-  cameraActiveIndicator.hidden = !active;
-  cameraTab.setAttribute('aria-label', active ? 'カメラで動かす（動作中）' : 'カメラで動かす');
-  motionCameraConflict.hidden = !active;
-  motionCameraConflict.textContent = requireElement<HTMLElement>('#camera-conflict').textContent;
+  const anyActive = active || voiceActive;
+  cameraActiveIndicator.hidden = !anyActive;
+  cameraTab.setAttribute('aria-label', anyActive ? 'カメラで動かす（動作中）' : 'カメラで動かす');
+  motionCameraConflict.hidden = !anyActive;
+  motionCameraConflict.textContent = [active ? requireElement<HTMLElement>('#camera-conflict').textContent : '', voiceActive ? requireElement<HTMLElement>('#voice-conflict').textContent : ''].filter(Boolean).join(' ');
   eyeControl.disabled = active || !avatar;
-  mouthControl.disabled = active || !avatar;
+  mouthControl.disabled = anyActive || !avatar;
   blinkToggle.disabled = active || !avatar;
-  demoStart.disabled = active || !avatar;
-  demoStop.disabled = active || !avatar;
-  advancedReset.disabled = active || !avatar;
+  demoStart.disabled = anyActive || !avatar;
+  demoStop.disabled = anyActive || !avatar;
+  advancedReset.disabled = anyActive || !avatar;
   const trackedParameters = new Set<PsdMotionParameterName>([
     'angleX', 'angleY', 'angleZ', 'body', 'eyeOpenL', 'eyeOpenR',
     'eyeX', 'eyeY', 'mouthOpen', 'mouthForm', 'brow',
   ]);
   for (const [name, control] of advancedControls) {
-    const disabled = !avatar || (active && trackedParameters.has(name));
+    const disabled = !avatar || (active && trackedParameters.has(name)) || (voiceActive && name === 'mouthOpen');
     control.range.disabled = disabled;
     control.number.disabled = disabled;
   }
-  if (active) demoToken += 1;
+  if (anyActive) demoToken += 1;
 }
 
 function installEventListeners(): void {
@@ -1839,9 +1859,13 @@ function installEventListeners(): void {
     input(input, weight) { api.setTrackingInput(input, weight); },
     active(active) { setCameraConflicts(active); if (active) livePublisher?.enable(); },
   });
+  voiceControls = installVoiceControls({
+    level: setVoiceMouth,
+    active(active) { voiceActive = active; setCameraConflicts(cameraActive); if (active) livePublisher?.enable(); },
+  });
   streamControls = installStreamControls(() => activeGeneratedPsdId, () => livePublisher?.enable());
   livePublisher = createLivePublisher(() => activeGeneratedPsdId && avatar ? {
-    psd: activeGeneratedPsdId, input: liveInput, weight: liveWeight,
+    psd: activeGeneratedPsdId, input: liveInput, weight: liveWeight, voiceMouth,
     layerOrder: layerOrderSignature(currentLayerOrder) === layerOrderSignature(originalLayerOrder) ? null : [...currentLayerOrder],
     settings: { mode: currentMode, autoBlink: autoBlinkEnabled, eyeOpen, mouthOpen,
       parameters: { ...profileParameters }, tuning: { ...motionTuning } },

@@ -20,11 +20,19 @@ export async function runLiveQa({ browser, baseUrl, psd, fixtureFile, qaRoot, re
   });
   const model = await (await fetch(`${baseUrl}/api/face-model/status`)).json();
   let backgroundCapture = { skipped: !model.ready };
+  let simultaneousCapture = { skipped: !model.ready };
   if (model.ready) {
     await sender.click('#camera-start');
     await sender.waitForFunction(() => window.rigQa.getCameraState().state === 'missing', null, { timeout: 45000 });
     backgroundCapture = { skipped: false, ...await sender.evaluate(() => window.rigQa.getCameraState()) };
+    await sender.click('#voice-start');
+    await sender.waitForFunction(() => window.rigQa.getVoiceState().state === 'listening');
+    await sender.waitForFunction(() => document.querySelector('#voice-meter').value > 0.05);
+    const both = await sender.evaluate(() => ({ camera: window.rigQa.getCameraState(), voice: window.rigQa.getVoiceState() }));
     await sender.click('#camera-stop');
+    const voiceAfterCameraStop = await sender.evaluate(() => window.rigQa.getVoiceState());
+    await sender.click('#voice-stop');
+    simultaneousCapture = { skipped: false, both, voiceAfterCameraStop };
   }
   await sender.evaluate(() => { window.rigQa.setLiveEnabled(false); window.requestAnimationFrame = window.__liveRaf; delete document.hidden; });
   await sender.waitForTimeout(1650);
@@ -75,6 +83,18 @@ export async function runLiveQa({ browser, baseUrl, psd, fixtureFile, qaRoot, re
   });
   await receiver.waitForFunction(() => window.streamQa.state().settings?.tuning.hairAmplitudeScale === 0.65);
   const settings = await receiver.evaluate(() => window.streamQa.state().settings);
+  // Voice alone must enable publishing, preserving a zero camera weight.
+  await sender.evaluate(() => { window.rigQa.setLiveEnabled(false); window.rigQa.setTrackingInput(null, 0); window.rigQa.setVoiceMouth(0.8); });
+  await receiver.waitForFunction(() => window.streamQa.state().voiceMouth === 0.8 && window.streamQa.state().weight === 0);
+  const voiceAlone = await receiver.evaluate(() => window.streamQa.state());
+  await sender.evaluate(() => { window.rigQa.setTrackingInput({ mouthOpen: 0.2, angleX: 0.5 }, 0.35); });
+  await receiver.waitForFunction(() => window.streamQa.state().voiceMouth === 0.8 && window.streamQa.state().weight === 0.35);
+  const voiceWithCamera = await receiver.evaluate(() => window.streamQa.state());
+  await sender.evaluate(() => window.rigQa.setLiveEnabled(false));
+  await receiver.waitForFunction(() => !window.streamQa.state().active && window.streamQa.state().voiceMouth > 0 && window.streamQa.state().voiceMouth < 0.7);
+  const fadingVoice = await receiver.evaluate(() => window.streamQa.state().voiceMouth);
+  await receiver.waitForFunction(() => window.streamQa.state().voiceMouth === null);
+  await sender.evaluate(() => window.rigQa.setVoiceMouth(null));
   const neutral = { angleX: 0, angleY: 0, angleZ: 0, body: 0, eyeOpenL: 1, eyeOpenR: 1, eyeX: 0, eyeY: 0, mouthOpen: 0, mouthForm: 0, brow: 0 };
   await sender.evaluate(input => window.rigQa.setTrackingInput(input, 1), neutral);
   await receiver.waitForTimeout(600);
@@ -194,6 +214,10 @@ export async function runLiveQa({ browser, baseUrl, psd, fixtureFile, qaRoot, re
   await reopened.close();
   return {
     checks: {
+      microphoneAndCameraCaptureIndependently: simultaneousCapture.skipped || (simultaneousCapture.both.camera.liveTracks === 1 && simultaneousCapture.both.voice.liveTracks === 1 && simultaneousCapture.voiceAfterCameraStop.active),
+      streamReceivesVoiceWithoutCamera: voiceAlone.voiceMouth === 0.8 && voiceAlone.weight === 0,
+      streamKeepsCameraWeightWithVoice: voiceWithCamera.weight === 0.35 && voiceWithCamera.voiceMouth === 0.8,
+      streamFadesVoiceAfterSilence: fadingVoice > 0 && fadingVoice < 0.7,
       streamReflectsLayerEdits: orderChangedPixels > 100 && comparisonKeepsEdited,
       streamRestoresOriginalOrder: resetChangedBytes === 0,
       streamRetainsOrderWithoutCamera: !persistedOrder.active && JSON.stringify(persistedOrder.layerOrder) === JSON.stringify(editedOrder),
