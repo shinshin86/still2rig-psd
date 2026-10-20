@@ -30,22 +30,22 @@ export function mapFace(face, neutral, options) {
   const pair = prefix => (change(`${prefix}Left`) + change(`${prefix}Right`)) / 2;
   const direction = options.mirror ? -1 : 1;
   const gain = clamp(options.sensitivity, 0.25, 3);
-  // Full travel represents 28 degrees; cap pose travel to protect flat-layer seams.
-  const angleX = clamp(delta(face.yaw, neutral?.yaw ?? 0) / 28 * gain * direction) * 0.7;
+  // Full travel represents 20 degrees at unit sensitivity.
+  const angleX = clamp(delta(face.yaw, neutral?.yaw ?? 0) / 20 * gain * direction);
   // Upward pitch is negative; positive renderer angleY lifts the face.
-  const angleY = clamp(-delta(face.pitch, neutral?.pitch ?? 0) / 28 * gain) * 0.7;
-  const angleZ = clamp(delta(face.roll, neutral?.roll ?? 0) / 28 * gain * direction) * 0.7;
+  const angleY = clamp(-delta(face.pitch, neutral?.pitch ?? 0) / 20 * gain);
+  const angleZ = clamp(delta(face.roll, neutral?.roll ?? 0) / 20 * gain * direction);
   const eye = side => {
     const blink = sample(`eyeBlink${side}`);
     return blink >= 0.8 ? 0 : clamp((1 - blink) / Math.max(0.2, 1 - base(`eyeBlink${side}`)), 0, 1);
   };
   return {
-    angleX, angleY, angleZ, body: (angleX + angleZ) * 0.15,
+    angleX, angleY, angleZ, body: (angleX + angleZ) * 0.25,
     eyeOpenL: eye(options.mirror ? 'Right' : 'Left'),
     eyeOpenR: eye(options.mirror ? 'Left' : 'Right'),
-    eyeX: clamp((change('eyeLookOutRight') - change('eyeLookInRight') + change('eyeLookInLeft') - change('eyeLookOutLeft')) * direction),
+    eyeX: clamp((change('eyeLookOutRight') - change('eyeLookInRight') + change('eyeLookInLeft') - change('eyeLookOutLeft')) * direction * 2),
     // Canvas Y grows downward, so looking up needs negative eyeY.
-    eyeY: clamp(pair('eyeLookDown') - pair('eyeLookUp')),
+    eyeY: clamp((pair('eyeLookDown') - pair('eyeLookUp')) * 2),
     mouthOpen: clamp((change('jawOpen') - Math.max(0, change('mouthClose'))) * gain / Math.max(0.2, 1 - base('jawOpen')), 0, 1),
     mouthForm: clamp((change('mouthPucker') + change('mouthFunnel') - pair('mouthSmile') - pair('mouthStretch')) * gain),
     brow: clamp((change('browInnerUp') + pair('browOuterUp') - pair('browDown')) * gain),

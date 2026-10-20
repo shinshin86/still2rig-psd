@@ -12,12 +12,12 @@ test('face rotation removes column scale and rejects invalid matrices', () => {
   assert.equal(readFace(Array(16).fill(0), []), null);
   assert.equal(readFace(Array(16).fill(NaN), []), null);
 });
-test('neutral calibration, angular wrap, conservative bounds and mirror', () => {
+test('neutral calibration, angular wrap, angle bounds and mirror', () => {
   const current = face({}, { yaw: -179, pitch: 90, roll: 90 });
   const neutral = face({}, { yaw: 179 });
   const mapped = mapFace(current, neutral, options);
-  near(mapped.angleX, 2 / 28 * 0.7);
-  assert.equal(mapped.angleY, -0.7); assert.equal(mapped.angleZ, 0.7);
+  near(mapped.angleX, 2 / 20);
+  assert.equal(mapped.angleY, -1); assert.equal(mapped.angleZ, 1);
   near(mapFace(current, neutral, { ...options, mirror: true }).angleX, -mapped.angleX);
   const self = mapFace(current, current, options);
   near(self.angleX, 0); near(self.angleY, 0); near(self.angleZ, 0);
@@ -76,7 +76,7 @@ test('looking up raises the head and pupils in renderer coordinates, with either
     assert.ok(gazeDown.eyeY > 0);
   }
 });
-test('sensitivity supports three while the conservative head limit remains unchanged', () => {
+test('sensitivity supports three while the full head limit remains unchanged', () => {
   const small = face({}, { yaw: 4, pitch: -4, roll: 4 });
   const normal = mapFace(small, null, options);
   const stronger = mapFace(small, null, { ...options, sensitivity: 1.5 });
@@ -87,7 +87,7 @@ test('sensitivity supports three while the conservative head limit remains uncha
   }
   near(mapFace(small, null, { ...options, sensitivity: 100 }).angleX, maximum.angleX);
   const limited = mapFace(face({}, { yaw: 80, pitch: -80, roll: 80 }), null, { ...options, sensitivity: 3 });
-  for (const key of ['angleX', 'angleY', 'angleZ']) near(limited[key], 0.7);
+  for (const key of ['angleX', 'angleY', 'angleZ']) near(limited[key], 1);
 });
 test('horizontal pose, gaze and tilt flip together when mirroring is enabled', () => {
   const sample = face({ eyeLookOutRight: 0.4, eyeLookInLeft: 0.4 }, { yaw: 10, roll: 10 });
@@ -97,4 +97,10 @@ test('horizontal pose, gaze and tilt flip together when mirroring is enabled', (
     assert.ok(direct[key] > 0);
     near(mirrored[key], -direct[key]);
   }
+});
+
+test('body motion and small gaze scores receive the stronger mapping', () => {
+  const mapped = mapFace(face({ eyeLookOutRight: 0.15, eyeLookUpLeft: 0.2, eyeLookUpRight: 0.2 }, { yaw: 20, roll: 20 }), null, options);
+  near(mapped.angleX, 1); near(mapped.angleZ, 1); near(mapped.body, 0.5);
+  near(mapped.eyeX, 0.3); near(mapped.eyeY, -0.4);
 });
