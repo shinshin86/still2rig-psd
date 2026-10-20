@@ -30,7 +30,7 @@ export function installCameraControls(callbacks: {
     callbacks.active(camera.active);
     sync();
     if (next === 'tracking' || next === 'missing') void refreshDevices();
-  });
+  }, slow => { element('camera-background-note').hidden = !slow; });
   function sync() {
     start.disabled = !modelReady || !avatarReady || camera.active || preparing;
     stop.disabled = !camera.active;

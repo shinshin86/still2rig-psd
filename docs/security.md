@@ -46,6 +46,29 @@ model is prepared.
 (including 1.0.1) introduce external metrics reporting. Review telemetry and
 asset loading before any upgrade, and rerun network-isolation QA. No CDN is used.
 
+## Local stream view
+
+The stream page reads only a generated PSD selected through its opaque identifier.
+Its URL never contains an absolute path. The identifier is deterministic from the
+output location, so it survives a server restart while that location is unchanged.
+Files opened through the local file picker are unavailable to the stream page.
+
+`POST /api/live/state` accepts at most 16 KiB of JSON, requires the same origin
+and the dedicated `X-Still2Rig-Action: live-state` header, and validates known
+fields, types and finite numbers. Numeric ranges are clamped. Images, audio,
+video and landmark arrays are rejected. Only pose numbers, motion settings,
+opaque PSD IDs and an ephemeral source ID pass through this PC's local server.
+The receiver uses `GET /api/live/events`; neither path relies on development HMR.
+Cross-origin event connections are rejected. No CORS access is enabled.
+
+Only the latest state is retained in memory. Slow receivers have one replaceable
+pending update, and source pages have at most one outgoing request. Updates are
+limited to approximately 30 per second. A 1.5-second source lease prevents
+multiple tabs from alternating the same character's pose. Stale, unobserved
+channels are removed, and all state disappears when the server stops. The server
+continues to bind to `127.0.0.1`; do not expose it to a network. No stream state
+or camera frames are written to disk.
+
 ## Colab connection
 
 The MCP bridge binds to an automatically selected localhost port. The selected

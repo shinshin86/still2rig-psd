@@ -165,3 +165,38 @@ errors, cancellation during startup, direct tracking-input pixel changes,
 skipped if the verified model is missing; QA never downloads it. To run the
 same suite against a production build, first run `npm run preview:build`, then
 `WEBUI_QA_SERVER=preview npm run preview:qa` (set `WEBUI_QA_PORT` if needed).
+
+## Show the character in OBS
+
+In **カメラで動かす**, choose a background under **配信ソフトに映す**, then
+copy the stream URL. In OBS, add a **Browser** source, paste the URL, and set
+both width and height to **1080**. Use **配信画面を開く** to check it in a
+separate browser window. Only generated PSDs selected from the saved-file list
+are available; files opened directly in the browser cannot be used for streaming.
+
+The stream page shows only the character, with transparency by default. Green,
+blue, and a custom color are also available. The URL uses a stable opaque PSD
+identifier; restarting the server preserves it while that generated file stays
+in the same output location. Removing or renaming the PSD invalidates its URL.
+The optional `fit=cover` crops to fill the frame; `contain` is the default.
+
+Camera motion and motion settings are sent to the stream page through the local
+server. Camera images are never sent. If updates stop for one second, the
+character fades back to its normal idle movement and blinking. Multiple source
+pages use a short exclusive lease to avoid alternating poses; close the previous
+source page before controlling the same PSD from another page. The connection
+count counts open stream pages, including browser previews and OBS sources.
+
+Both `npm run preview` (the development server) and the built preview server
+support streaming without development hot reload. Port changes also change the
+URL. For a fixed development URL use
+`npm run dev --workspace @still2rig-psd/webui -- --port 5173 --strictPort`.
+For a built preview run `npm run preview:build` followed by
+`npm run preview --workspace @still2rig-psd/webui -- --port 4173 --strictPort`.
+Keep the server running while OBS uses its URL.
+
+A worker clock keeps capture and sending independent of page animation frames.
+Track processing is used when the browser provides it, with a local video-frame
+fallback. Some browsers or operating systems can still slow down minimized
+pages; the camera tab displays a notice when background capture falls below
+approximately 15 frames per second. Bringing the page forward can restore it.

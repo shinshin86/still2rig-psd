@@ -29,7 +29,7 @@
       #progress { width: 0; height: 100%; background: linear-gradient(90deg, #58d5ff, #a878ff); transition: width 160ms linear; }
       .header-source { min-width: 0; }
       .source-actions { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; gap: 8px; align-items: stretch; }
-      #generated-psd-select, #camera-device { width: 100%; min-width: 0; padding: 9px 10px; color: #edf4ff; background: #151b28; border: 1px solid #4a5671; border-radius: 8px; font: 12px/1.3 inherit; }
+      #generated-psd-select, #camera-device, #stream-background { width: 100%; min-width: 0; padding: 9px 10px; color: #edf4ff; background: #151b28; border: 1px solid #4a5671; border-radius: 8px; font: 12px/1.3 inherit; }
       #generated-psd-refresh, #generated-psd-open-folder { white-space: nowrap; }
       .source-note { margin: 6px 0 0; color: #8f9ab7; font-size: 11px; line-height: 1.4; }
       .file-button { display: inline-grid; place-items: center; min-height: 40px; padding: 8px 13px; color: #101a23; background: #72d9ff; border-radius: 8px; font: 700 12px/1.2 inherit; cursor: pointer; white-space: nowrap; }
@@ -243,6 +243,7 @@
         body[data-layer-processing='true'] .layer-processing-overlay { animation-duration: 1ms; }
         .layer-processing-spinner { animation-duration: 1.4s; }
       }
+      #motion-camera-conflict { margin: 14px 0 18px; }
       .camera-controls { display: grid; gap: 10px; margin: 0 0 18px; padding: 14px; border: 1px solid var(--border, #d4d4da); border-radius: 12px; min-width: 0; }
       .camera-controls h3, .camera-controls p { margin: 0; }
       .camera-controls button { white-space: normal; overflow-wrap: anywhere; min-height: 44px; }
@@ -490,8 +491,21 @@
             <label class="field" for="camera-smoothing">なめらかさ<input id="camera-smoothing" type="range" min="0" max="1" step="0.05" value="0.3" /></label>
             <label class="camera-check"><input id="camera-preview" type="checkbox" />カメラ映像を確認する</label>
             <video id="camera-video" autoplay muted playsinline hidden aria-label="カメラ映像の確認"></video>
+            <p id="camera-background-note" class="tuning-note" role="status" hidden>このページが隠れているため、動きが遅くなっています。ページを前に戻してお試しください。</p>
             <p id="camera-state" class="tuning-note" role="status" aria-live="polite">準備の状況を確認しています…</p>
             <p id="camera-conflict" class="tuning-note" hidden>カメラで動かしている間は、顔と体の向き・視線・目と口の開閉・口の形・眉の高さと自動チェックを使えません。髪の揺れや、目と口の位置・大きさは調整できます。カメラを停止すると元の設定に戻ります。</p>
+          </section>
+          <section class="camera-controls" aria-labelledby="stream-title">
+            <h3 id="stream-title">配信ソフトに映す</h3>
+            <label for="stream-background">背景</label>
+            <select id="stream-background"><option value="transparent">透明</option><option value="green">グリーン</option><option value="blue">ブルー</option><option value="custom">好きな色</option></select>
+            <input id="stream-color" type="color" value="#284060" aria-label="背景の色" hidden />
+            <div class="demo-row">
+              <button id="stream-copy" type="button" disabled>配信用のURLをコピー</button>
+              <button id="stream-open" type="button" disabled>配信画面を開く</button>
+            </div>
+            <p id="stream-note" class="tuning-note"></p>
+            <p id="stream-status" class="tuning-note" role="status" aria-live="polite"></p>
           </section>
           </section>
 

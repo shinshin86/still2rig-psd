@@ -1,3 +1,5 @@
+import { createLivePublisher } from './live/publisher';
+import { installStreamControls } from './live/controls';
 import { installCameraControls } from './tracking/controls';
 import type { TrackingInput } from './tracking/pose.mjs';
 import { detectAnime25RigFromBuffer } from './rig/anime25Rig';
@@ -42,6 +44,7 @@ interface GeneratedPsd {
 }
 
 interface RigQaApi {
+  setLiveEnabled: (enabled: boolean) => void;
   setTrackingInput: (input: Partial<TrackingInput> | null, weight: number) => void;
   getCameraState: () => { state: string; active: boolean; liveTracks: number };
   ready: boolean;
@@ -201,6 +204,10 @@ if (presetButtons.length !== 3) {
 let avatar: Anime25RigAvatar | null = null;
 let cameraControls: ReturnType<typeof installCameraControls> | null = null;
 let cameraActive = false;
+let liveInput: Partial<TrackingInput> | null = null;
+let liveWeight = 0;
+let livePublisher: ReturnType<typeof createLivePublisher> | null = null;
+let streamControls: ReturnType<typeof installStreamControls> | null = null;
 let generatedPsds: GeneratedPsd[] = [];
 let eyeOpen = 1;
 let mouthOpen = 0;
@@ -1350,7 +1357,12 @@ async function runDemo(): Promise<void> {
 }
 
 const api: RigQaApi = {
-  setTrackingInput(input, weight) { avatar?.setTrackingInput(input, weight); },
+  setLiveEnabled(enabled) { livePublisher?.enable(enabled); },
+  setTrackingInput(input, weight) {
+    liveInput = input; liveWeight = weight;
+    if (input) livePublisher?.enable();
+    avatar?.setTrackingInput(input, weight);
+  },
   getCameraState() { return cameraControls?.getState() ?? { state: 'off', active: false, liveTracks: 0 }; },
   ready: false,
   error: null,
@@ -1582,6 +1594,7 @@ function setExpressionRecipient(recipient: ExpressionRecipient): void {
 }
 
 function syncExpressionRequestControl(): void {
+  streamControls?.sync();
   const item = generatedPsds.find((candidate) => candidate.id === activeGeneratedPsdId);
   const usable = Boolean(item?.jobId);
   const unavailable = !usable && (expressionRequestSource === 'local' || Boolean(item));
@@ -1822,9 +1835,15 @@ function setCameraConflicts(active: boolean): void {
 function installEventListeners(): void {
   createAdvancedParameterControls();
   cameraControls = installCameraControls({
-    input(input, weight) { avatar?.setTrackingInput(input, weight); },
-    active(active) { setCameraConflicts(active); },
+    input(input, weight) { api.setTrackingInput(input, weight); },
+    active(active) { setCameraConflicts(active); if (active) livePublisher?.enable(); },
   });
+  streamControls = installStreamControls(() => activeGeneratedPsdId, () => livePublisher?.enable());
+  livePublisher = createLivePublisher(() => activeGeneratedPsdId && avatar ? {
+    psd: activeGeneratedPsdId, input: liveInput, weight: liveWeight,
+    settings: { mode: currentMode, autoBlink: autoBlinkEnabled, eyeOpen, mouthOpen,
+      parameters: { ...profileParameters }, tuning: { ...motionTuning } },
+  } : null, message => streamControls?.status(message));
   canvas.getContext('webgl', {
     alpha: true,
     stencil: true,

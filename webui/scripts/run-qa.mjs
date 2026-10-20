@@ -6,6 +6,7 @@ import { createRequire } from 'node:module';
 import { readPsd } from 'ag-psd';
 import { chromium } from 'playwright';
 import { mapFace } from '../src/tracking/pose.mjs';
+import { runLiveQa } from './live-qa.mjs';
 
 const webuiRoot = path.resolve(import.meta.dirname, '..');
 const repositoryRoot = path.resolve(webuiRoot, '..');
@@ -52,7 +53,9 @@ await fs.writeFile(path.join(fixtureJobRoot, 'job.json'), `${JSON.stringify({
   },
 }, null, 2)}\n`);
 
-const server = spawn(process.execPath, [
+let serverLog = '';
+function startServer() {
+const child = spawn(process.execPath, [
   viteBin,
   ...(previewBuild ? ['preview'] : []),
   '--host',
@@ -68,9 +71,12 @@ const server = spawn(process.execPath, [
   },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
-let serverLog = '';
-server.stdout.on('data', (chunk) => { serverLog += chunk; });
-server.stderr.on('data', (chunk) => { serverLog += chunk; });
+child.stdout.on('data', (chunk) => { serverLog += chunk; });
+child.stderr.on('data', (chunk) => { serverLog += chunk; });
+
+return child;
+}
+let server = startServer();
 
 async function waitForServer() {
   for (let attempt = 0; attempt < 80; attempt += 1) {
@@ -1284,7 +1290,22 @@ try {
       cameraHidden: document.querySelector('#camera-panel').hidden,
     };
   });
+  // Capture full-travel poses for the flat-layer seam review.
+  await cameraPage.setViewportSize({ width: 1440, height: 900 });
+  await cameraPage.evaluate(() => window.rigQa.setWorkspaceMode('motion'));
+  for (const key of ['angleX', 'angleY', 'angleZ']) for (const sign of [-1, 1]) {
+    await cameraPage.evaluate(input => window.rigQa.setTrackingInput(input, 1), { ...trackingNeutral, [key]: sign });
+    await cameraPage.waitForTimeout(400);
+    await cameraPage.locator('#rig-canvas').screenshot({ path: path.join(qaRoot, `tracking-limit-${key}-${sign < 0 ? 'minus' : 'plus'}.png`) });
+  }
+  await cameraPage.evaluate(() => window.rigQa.setLiveEnabled(false));
+  const live = await runLiveQa({ browser, baseUrl, psd: apiGeneratedId, fixtureFile, qaRoot, restart: async () => {
+    const previous = server;
+    await new Promise(resolve => { previous.once('exit', resolve); previous.kill('SIGTERM'); });
+    server = startServer(); await waitForServer();
+  } });
   const checks = {
+    ...live.checks,
     cameraDeviceSharesSelectStyle: cameraDeviceStyle.matches && cameraDeviceStyle.height >= 44,
     cameraSensitivityStartsStronger: cameraSensitivity.value === 1.5 && cameraSensitivity.max === 3,
     trackingVerticalDirectionsMatchCanvas: directionNeutral.count > 0 &&
@@ -1636,6 +1657,7 @@ try {
     noCompactConsoleErrors: compactConsoleErrors.length === 0,
   };
   const report = {
+    live,
     camera: { cameraDeviceStyle, cameraSensitivity, directionNeutral, trackingDirections, cameraInitiallyLoadedMessage, cameraLoadedMessage, cameraTabsLayout, cameraTabBeforeLoad, wrongModelAction, wrongFolderAction, prepareAction, preparedModelStatus, fakeCamera, cameraFailureStates, cancelledStart, trackingDifferences, trackingZeroDifference, trackingStoppedDifference, cameraMobile, cameraErrors, cameraDiagnostics, externalRequests },
     pass: Object.values(checks).every(Boolean),
     checks,

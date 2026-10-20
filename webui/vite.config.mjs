@@ -3,6 +3,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 
 import { defineConfig } from 'vite';
+import { liveRelayPlugin } from './server/live-relay.mjs';
 import { createRequire } from 'node:module';
 import { ensureFaceModel, faceModelFile, faceModelReady } from '../src/face-model.mjs';
 
@@ -92,7 +93,7 @@ function readJsonBody(request) {
 }
 
 function isTrustedActionRequest(request, action) {
-  if (request.headers['x-still2rig-action'] !== action) return false;
+  if (action !== null && request.headers['x-still2rig-action'] !== action) return false;
   const origin = request.headers.origin;
   if (!origin) {
     const fetchSite = request.headers['sec-fetch-site'];
@@ -247,5 +248,6 @@ function faceAssetsPlugin() {
 }
 
 export default defineConfig({
-  plugins: [generatedPsdPlugin(), faceAssetsPlugin()],
+  plugins: [generatedPsdPlugin(), faceAssetsPlugin(), liveRelayPlugin({ listPsds: listGeneratedPsds, trusted: isTrustedActionRequest, sendJson })],
+  build: { rolldownOptions: { input: { main: path.join(import.meta.dirname, 'index.html'), stream: path.join(import.meta.dirname, 'stream.html') } } },
 });
