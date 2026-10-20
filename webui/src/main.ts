@@ -27,7 +27,7 @@ import {
 
 type QaMode = 'static' | 'physics' | 'idle-physics';
 type MotionPreset = 'calm' | 'standard' | 'active' | 'custom';
-type WorkspaceMode = 'motion' | 'layers';
+type WorkspaceMode = 'motion' | 'layers' | 'camera';
 type UiMotionTuning = Anime25MotionTuning & { intensity: number };
 
 interface GeneratedPsd {
@@ -123,6 +123,10 @@ const psdFileInput = requireElement<HTMLInputElement>('#psd-file-input');
 const dropOverlay = requireElement<HTMLElement>('#drop-overlay');
 const motionTab = requireElement<HTMLButtonElement>('#motion-tab');
 const layerEditTab = requireElement<HTMLButtonElement>('#layer-edit-tab');
+const cameraTab = requireElement<HTMLButtonElement>('#camera-tab');
+const cameraPanel = requireElement<HTMLElement>('#camera-panel');
+const cameraActiveIndicator = requireElement<HTMLElement>('#camera-active-indicator');
+const motionCameraConflict = requireElement<HTMLElement>('#motion-camera-conflict');
 const motionPanel = requireElement<HTMLElement>('#motion-panel');
 const layerEditPanel = requireElement<HTMLElement>('#layer-edit-panel');
 const layerEditorUnavailable = requireElement<HTMLElement>('#layer-editor-unavailable');
@@ -1159,11 +1163,13 @@ function confirmDiscardLayerChanges(): boolean {
 }
 
 function setWorkspaceMode(mode: WorkspaceMode): void {
-  if (mode === 'layers' && layerEditTab.disabled) return;
+  if ((mode === 'layers' && layerEditTab.disabled) || (mode === 'camera' && cameraTab.disabled)) return;
   workspaceMode = mode;
   document.body.dataset.workspaceMode = mode;
   motionTab.setAttribute('aria-selected', String(mode === 'motion'));
   layerEditTab.setAttribute('aria-selected', String(mode === 'layers'));
+  cameraTab.setAttribute('aria-selected', String(mode === 'camera'));
+  cameraPanel.hidden = mode !== 'camera';
   motionPanel.hidden = mode !== 'motion';
   layerEditPanel.hidden = mode !== 'layers';
   previewModeBadge.hidden = mode !== 'layers';
@@ -1186,7 +1192,9 @@ function setWorkspaceMode(mode: WorkspaceMode): void {
     applyAvatarMotionMode(currentMode);
     statusNode.textContent = '準備完了';
     phaseNode.textContent = 'PSD読み込み完了';
-    detailNode.textContent = '「動きを自動チェック」または個別の操作を試せます。';
+    detailNode.textContent = mode === 'camera'
+      ? 'カメラを開始すると、顔の動きに合わせて動かせます。'
+      : '「動きを自動チェック」または個別の操作を試せます。';
   }
   renderLayerEditor();
 }
@@ -1782,12 +1790,17 @@ function setAvatarControlsDisabled(disabled: boolean): void {
     demoStop,
   ];
   for (const control of controls) control.disabled = disabled;
+  cameraTab.disabled = disabled;
   cameraControls?.setAvatarReady(!disabled);
   if (!disabled && cameraActive) setCameraConflicts(true);
 }
 
 function setCameraConflicts(active: boolean): void {
   cameraActive = active;
+  cameraActiveIndicator.hidden = !active;
+  cameraTab.setAttribute('aria-label', active ? 'カメラで動かす（動作中）' : 'カメラで動かす');
+  motionCameraConflict.hidden = !active;
+  motionCameraConflict.textContent = requireElement<HTMLElement>('#camera-conflict').textContent;
   eyeControl.disabled = active || !avatar;
   mouthControl.disabled = active || !avatar;
   blinkToggle.disabled = active || !avatar;
@@ -1822,6 +1835,7 @@ function installEventListeners(): void {
 
   motionTab.addEventListener('click', () => setWorkspaceMode('motion'));
   layerEditTab.addEventListener('click', () => setWorkspaceMode('layers'));
+  cameraTab.addEventListener('click', () => setWorkspaceMode('camera'));
   moveLayerFront.addEventListener('click', () => {
     hideCanvasPickMenu();
     void moveSelectedLayer('front');

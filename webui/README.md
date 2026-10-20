@@ -57,7 +57,7 @@ browsing. Symlinks in output directories are not served.
   slider, exact numeric input, displayed default, and one-click reset
 - Canvas drag, wheel zoom, zoom slider, and view reset
 - PSD drag-and-drop and file-picker input
-- Separate **Check motion** and **Fix overlaps** work modes
+- Separate **Check motion**, **Fix overlaps**, and **Camera motion** tabs
 - Plain-language front/back fixes for arms, clothing, face, and front hair
 - Alpha-aware canvas click selection with overlap candidates and visible selection feedback
 - One-step front/back movement, desktop drag sorting with a visible insertion target,
@@ -135,7 +135,7 @@ PSD、合成QA素材、スクリーンショットはすべてGit管理外に保
 
 ## Camera motion
 
-Open **カメラで動かす** in the motion panel. On first use, press the preparation
+Load a PSD, then open the **カメラで動かす** tab. On first use, press the preparation
 button to download the approximately 4 MB face model, or prepare it from the
 repository root with `npm run still2rig-psd -- face-model`. Nothing downloads
 automatically. The CLI and preview share the same hash-verified local model.
@@ -145,9 +145,9 @@ Mirror motion is enabled by default. Adjust motion size and smoothing as needed;
 the optional camera image starts hidden. Controls for face and body direction, gaze, eye and mouth opening, mouth shape,
 and brow height, along with the automatic demo, are disabled while the camera
 controls the character. Hair, body shape, and eye/mouth position and size remain
-adjustable. Stop
-the camera to restore the existing settings. Switching to layer editing also
-stops it. Camera frames remain in the browser and no microphone is requested.
+adjustable in the **動きを確認** tab without stopping the camera. A small dot
+on the camera tab indicates that it is running. Stop the camera to restore the
+existing settings. Switching to **重なりを直す** stops it. Camera frames remain in the browser and no microphone is requested.
 
 Face tracking runs in a worker at up to 30 frames per second, preferring GPU
 with CPU fallback. When a face is lost for about half a second, the character

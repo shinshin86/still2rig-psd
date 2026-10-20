@@ -153,6 +153,8 @@ try {
     avatarReady: document.body.dataset.avatarReady,
     generatedOptions: document.querySelectorAll('#generated-psd-select option').length - 1,
     openFolderDisabled: document.querySelector('#generated-psd-open-folder')?.disabled,
+    cameraTabDisabled: document.querySelector('#camera-tab')?.disabled,
+    layerTabDisabled: document.querySelector('#layer-edit-tab')?.disabled,
     expressionRequestHidden: document.querySelector('#expression-request-control')?.hidden,
     emptyStateOpacity: getComputedStyle(document.querySelector('.empty-state')).opacity,
     legacyBadgeCount: document.querySelectorAll('.badge').length,
@@ -1060,6 +1062,12 @@ try {
     return route.fulfill({ json: { ready: true, downloaded: true } });
   });
   await cameraPage.goto(`${baseUrl}?autoload=0`);
+  await cameraPage.waitForFunction(() => window.rigQa !== undefined);
+  await cameraPage.evaluate(() => window.rigQa.setWorkspaceMode('camera'));
+  const cameraTabBeforeLoad = await cameraPage.evaluate(() => ({ disabled: document.querySelector('#camera-tab').disabled, mode: document.body.dataset.workspaceMode }));
+  await cameraPage.selectOption('#generated-psd-select', apiGeneratedId);
+  await cameraPage.waitForFunction(() => window.rigQa?.ready === true);
+  await cameraPage.click('#camera-tab');
   await cameraPage.waitForFunction(() => document.querySelector('#camera-state').textContent.includes('最初に'));
   const automaticModelPosts = modelPosts;
   await cameraPage.locator('#camera-controls').screenshot({ path: path.join(qaRoot, 'camera-first-use.png') });
@@ -1070,6 +1078,8 @@ try {
   await cameraPage.unroute('**/api/face-model');
   await cameraPage.goto(baseUrl);
   await cameraPage.waitForFunction(() => window.rigQa?.ready === true);
+  await cameraPage.click('#camera-tab');
+  await cameraPage.screenshot({ path: path.join(qaRoot, 'camera-tab-desktop.png') });
   const cameraInitiallyLoadedMessage = await cameraPage.locator('#camera-state').textContent();
   await cameraPage.evaluate(() => {
     window.rigQa.setMode('static'); window.rigQa.setAutoBlink(false); window.rigQa.setState(1, 0);
@@ -1185,6 +1195,19 @@ try {
         .filter(input => !input.disabled).map(input => input.id.replace('parameter-', '')),
     }));
     await cameraPage.locator('#camera-controls').screenshot({ path: path.join(qaRoot, 'camera-running.png') });
+    await cameraPage.evaluate(() => { window.__cameraCanvas = document.querySelector('#rig-canvas'); });
+    await cameraPage.click('#motion-tab');
+    const tabMotion = await cameraPage.evaluate(() => ({
+      ...window.rigQa.getCameraState(),
+      mode: document.body.dataset.workspaceMode,
+      motionHidden: document.querySelector('#motion-panel').hidden,
+      cameraHidden: document.querySelector('#camera-panel').hidden,
+      indicatorHidden: document.querySelector('#camera-active-indicator').hidden,
+      conflictHidden: document.querySelector('#motion-camera-conflict').hidden,
+      sameCanvas: window.__cameraCanvas === document.querySelector('#rig-canvas'),
+    }));
+    await cameraPage.screenshot({ path: path.join(qaRoot, 'camera-motion-running.png') });
+
     await cameraPage.evaluate(() => {
       document.querySelector('#advanced-parameters').open = true;
       for (const details of document.querySelectorAll('.parameter-group')) details.open = true;
@@ -1199,6 +1222,7 @@ try {
     }
     await cameraPage.evaluate(() => { document.querySelector('#advanced-parameters').open = false; });
 
+    await cameraPage.click('#camera-tab');
     await cameraPage.click('#camera-stop');
     const stopped = await cameraPage.evaluate(() => ({
       ...window.rigQa.getCameraState(),
@@ -1207,9 +1231,20 @@ try {
     }));
     await cameraPage.click('#camera-start');
     await cameraPage.waitForFunction(() => window.rigQa.getCameraState().state !== 'starting');
+    await cameraPage.click('#layer-edit-tab');
+    const tabLayers = await cameraPage.evaluate(() => ({
+      ...window.rigQa.getCameraState(),
+      mode: document.body.dataset.workspaceMode,
+      cameraHidden: document.querySelector('#camera-panel').hidden,
+      indicatorHidden: document.querySelector('#camera-active-indicator').hidden,
+      sameCanvas: window.__cameraCanvas === document.querySelector('#rig-canvas'),
+    }));
+    await cameraPage.click('#camera-tab');
+    await cameraPage.click('#camera-start');
+    await cameraPage.waitForFunction(() => window.rigQa.getCameraState().state !== 'starting');
     await cameraPage.evaluate(() => window.dispatchEvent(new Event('pagehide')));
     const pagehide = await cameraPage.evaluate(() => window.rigQa.getCameraState());
-    fakeCamera = { skipped: false, running, stopped, pagehide };
+    fakeCamera = { skipped: false, running, stopped, tabMotion, tabLayers, pagehide };
   } else console.log('SKIP camera inference: verified local model is not available.');
   // Exercise the multiple-camera selector without requiring physical devices.
   const cameraDeviceStyle = await cameraPage.evaluate(() => {
@@ -1234,12 +1269,20 @@ try {
   });
   await cameraPage.locator('#camera-controls').screenshot({ path: path.join(qaRoot, 'camera-mobile.png') });
   await cameraPage.locator('#camera-controls').screenshot({ path: path.join(qaRoot, 'camera-device-mobile.png') });
+  await cameraPage.screenshot({ path: path.join(qaRoot, 'camera-tab-mobile.png'), fullPage: true });
 
   const cameraLoadedMessage = await cameraPage.locator('#camera-state').textContent();
-  const cameraSectionOrder = await cameraPage.evaluate(() => {
-    const quick = document.querySelector('.quick-check');
-    const camera = document.querySelector('#camera-controls');
-    return !!(quick.compareDocumentPosition(camera) & Node.DOCUMENT_POSITION_FOLLOWING);
+  const cameraTabsLayout = await cameraPage.evaluate(() => {
+    const tabs = [...document.querySelectorAll('.workspace-mode-tabs button')];
+    return {
+      count: tabs.length,
+      selected: tabs.filter(tab => tab.getAttribute('aria-selected') === 'true').map(tab => tab.id),
+      sameRow: tabs.every(tab => Math.abs(tab.getBoundingClientRect().top - tabs[0].getBoundingClientRect().top) < 1),
+      labelsFit: tabs.every(tab => tab.scrollWidth <= tab.clientWidth),
+      ownPanel: document.querySelector('#camera-panel #camera-controls') !== null && !document.querySelector('#motion-panel #camera-controls'),
+      motionHidden: document.querySelector('#motion-panel').hidden,
+      cameraHidden: document.querySelector('#camera-panel').hidden,
+    };
   });
   const checks = {
     cameraDeviceSharesSelectStyle: cameraDeviceStyle.matches && cameraDeviceStyle.height >= 44,
@@ -1254,7 +1297,11 @@ try {
       ['physAmp', 'soft', 'bust', 'eyeCY', 'eyeScaleL', 'mouthCY', 'mouthScale'].every(name => fakeCamera.running.advancedEditable.includes(name)) &&
       fakeCamera.running.adjustedParameters.physAmp === 1.5 && fakeCamera.running.adjustedParameters.eyeCY === 0.2 &&
       fakeCamera.running.adjustedParameters.mouthScale === 1.1 && fakeCamera.running.adjustedParameters.bust === 2),
-    cameraFollowsFirstQuickCheck: cameraSectionOrder,
+    cameraUsesOwnTab: cameraTabsLayout.count === 3 && cameraTabsLayout.selected.join() === 'camera-tab' && cameraTabsLayout.ownPanel && cameraTabsLayout.motionHidden && !cameraTabsLayout.cameraHidden,
+    cameraTabFitsMobile: cameraTabsLayout.sameRow && cameraTabsLayout.labelsFit,
+    cameraTabNeedsPsd: waitingState.cameraTabDisabled && waitingState.layerTabDisabled && cameraTabBeforeLoad.disabled && cameraTabBeforeLoad.mode === 'motion',
+    cameraContinuesInMotionTab: fakeCamera.skipped || (fakeCamera.tabMotion.active && fakeCamera.tabMotion.liveTracks === 1 && fakeCamera.tabMotion.mode === 'motion' && !fakeCamera.tabMotion.motionHidden && fakeCamera.tabMotion.cameraHidden && !fakeCamera.tabMotion.indicatorHidden && !fakeCamera.tabMotion.conflictHidden && fakeCamera.tabMotion.sameCanvas),
+    cameraStopsInLayersTab: fakeCamera.skipped || (fakeCamera.tabLayers.state === 'off' && fakeCamera.tabLayers.liveTracks === 0 && fakeCamera.tabLayers.mode === 'layers' && fakeCamera.tabLayers.cameraHidden && fakeCamera.tabLayers.indicatorHidden && fakeCamera.tabLayers.sameCanvas),
     cameraLoadedMessageMatchesState: !modelStatus.ready || (cameraLoadedMessage === 'カメラは停止しています。' && cameraInitiallyLoadedMessage === 'カメラは停止しています。'),
     cameraActionsAreEndpointSpecific: wrongModelAction === 403 && wrongFolderAction === 403 && prepareAction === 'prepare-face-model' && (preparedModelStatus === null || preparedModelStatus === 200),
     cameraPreparationRequiresClick: automaticModelPosts === 0 && explicitModelPosts === 1 && preparedByButton,
@@ -1589,7 +1636,7 @@ try {
     noCompactConsoleErrors: compactConsoleErrors.length === 0,
   };
   const report = {
-    camera: { cameraDeviceStyle, cameraSensitivity, directionNeutral, trackingDirections, cameraInitiallyLoadedMessage, cameraLoadedMessage, cameraSectionOrder, wrongModelAction, wrongFolderAction, prepareAction, preparedModelStatus, fakeCamera, cameraFailureStates, cancelledStart, trackingDifferences, trackingZeroDifference, trackingStoppedDifference, cameraMobile, cameraErrors, cameraDiagnostics, externalRequests },
+    camera: { cameraDeviceStyle, cameraSensitivity, directionNeutral, trackingDirections, cameraInitiallyLoadedMessage, cameraLoadedMessage, cameraTabsLayout, cameraTabBeforeLoad, wrongModelAction, wrongFolderAction, prepareAction, preparedModelStatus, fakeCamera, cameraFailureStates, cancelledStart, trackingDifferences, trackingZeroDifference, trackingStoppedDifference, cameraMobile, cameraErrors, cameraDiagnostics, externalRequests },
     pass: Object.values(checks).every(Boolean),
     checks,
     waitingState,
