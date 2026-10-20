@@ -17,3 +17,15 @@ test('live state rejects media fields, unknown keys, wrong types and non-finite 
     const value = state(); change(value); assert.throws(() => parseLiveState(value));
   }
 });
+test('live layer orders accept optional originals and bounded unique PSD IDs', () => {
+  assert.equal(parseLiveState(state()).layerOrder, null);
+  assert.equal(parseLiveState({ ...state(), layerOrder: null }).layerOrder, null);
+  const layerOrder = ['0:face', '1:front hair', '2:顔'];
+  assert.deepEqual(parseLiveState({ ...state(), layerOrder }).layerOrder, layerOrder);
+  const full = { ...state(), layerOrder: Array.from({ length: 256 }, (_, i) => `${i}:part`) };
+  assert.equal(parseLiveState(full).layerOrder.length, 256);
+  assert.ok(Buffer.byteLength(JSON.stringify(full)) < 16384);
+  for (const invalid of [[], ['0:face', '0:face'], ['0:' + 'a'.repeat(159)], ['0:face\n'], ['1:\u0085'], ['face'], [1], '0:face', {}, Array.from({ length: 257 }, (_, i) => `${i}:part`)]) {
+    assert.throws(() => parseLiveState({ ...state(), layerOrder: invalid }));
+  }
+});

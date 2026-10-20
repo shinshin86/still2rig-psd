@@ -180,6 +180,11 @@ identifier; restarting the server preserves it while that generated file stays
 in the same output location. Removing or renaming the PSD invalidates its URL.
 The optional `fit=cover` crops to fill the frame; `contain` is the default.
 
+Changes made with **重なりを直す** also appear in the stream view, including
+while the preview temporarily shows the original for comparison. The server
+keeps the edited order until it stops. After a server restart, reopen the PSD
+and reapply the changes, or use a saved corrected PSD.
+
 Camera motion and motion settings are sent to the stream page through the local
 server. Camera images are never sent. If updates stop for one second, the
 character fades back to its normal idle movement and blinking. Multiple source

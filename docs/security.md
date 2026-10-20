@@ -57,11 +57,12 @@ Files opened through the local file picker are unavailable to the stream page.
 and the dedicated `X-Still2Rig-Action: live-state` header, and validates known
 fields, types and finite numbers. Numeric ranges are clamped. Images, audio,
 video and landmark arrays are rejected. Only pose numbers, motion settings,
-opaque PSD IDs and an ephemeral source ID pass through this PC's local server.
+the order of part names, opaque PSD IDs and an ephemeral source ID pass through this PC's local server.
 The receiver uses `GET /api/live/events`; neither path relies on development HMR.
 Cross-origin event connections are rejected. No CORS access is enabled.
 
-Only the latest state is retained in memory. Slow receivers have one replaceable
+Only the latest state and the last part order for each PSD are retained in memory.
+Part orders remain after inactive channels are removed, until the server stops. Slow receivers have one replaceable
 pending update, and source pages have at most one outgoing request. Updates are
 limited to approximately 30 per second. A 1.5-second source lease prevents
 multiple tabs from alternating the same character's pose. Stale, unobserved

@@ -124,6 +124,61 @@ export async function runLiveQa({ browser, baseUrl, psd, fixtureFile, qaRoot, re
   const resumed = await receiver.evaluate(() => window.streamQa.state().active);
   await sender.evaluate(() => window.rigQa.setLiveEnabled(false));
 
+  // A connected stream must receive edits even after camera publishing has stopped.
+  await sender.evaluate(input => {
+    window.requestAnimationFrame = window.__liveRaf;
+    window.rigQa.setTrackingInput(input, 0);
+    window.rigQa.setAutoBlink(false); window.rigQa.setMode('static');
+  }, neutral);
+  await receiver.waitForFunction(() => window.streamQa.state().active && window.streamQa.state().weight === 0);
+  await receiver.waitForTimeout(500);
+  const readPixels = page => page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => {
+    const canvas = document.querySelector('#avatar'); const gl = canvas.getContext('webgl');
+    const pixels = new Uint8Array(canvas.width * canvas.height * 4);
+    gl.readPixels(0, 0, canvas.width, canvas.height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+    resolve(Array.from(pixels));
+  })));
+  const orderBefore = await readPixels(receiver);
+  await receiver.screenshot({ path: path.join(qaRoot, 'stream-layer-order-before.png'), omitBackground: true });
+  await sender.evaluate(() => window.rigQa.setLiveEnabled(false));
+  await sender.click('#layer-edit-tab');
+  await sender.click('#open-layer-list');
+  await sender.locator('.layer-order-item').filter({ has: sender.locator('strong', { hasText: /^腕・手$/ }) }).click();
+  await sender.getByRole('button', { name: '服の手前にする', exact: true }).click();
+  await sender.waitForFunction(() => document.body.dataset.layerProcessing !== 'true' && window.rigQa.getLayerEditorState().dirty);
+  const editedOrder = await sender.evaluate(() => window.rigQa.getLayerEditorState().currentOrder);
+  await receiver.waitForFunction(order => JSON.stringify(window.streamQa.state().layerOrder) === JSON.stringify(order), editedOrder);
+  await receiver.waitForTimeout(500);
+  const orderAfter = await readPixels(receiver);
+  const orderChangedPixels = orderAfter.filter((value, i) => i % 4 === 0 && orderAfter.slice(i, i+3).some((v, j) => Math.abs(v - orderBefore[i+j]) > 12)).length;
+  await receiver.screenshot({ path: path.join(qaRoot, 'stream-layer-order-after.png'), omitBackground: true });
+  await sender.click('#before-after-toggle');
+  await sender.waitForFunction(() => document.body.dataset.layerProcessing !== 'true' && window.rigQa.getLayerEditorState().showingOriginal);
+  const comparisonKeepsEdited = await receiver.evaluate(order => JSON.stringify(window.streamQa.state().layerOrder) === JSON.stringify(order), editedOrder);
+  await sender.click('#before-after-toggle');
+  await sender.waitForFunction(() => document.body.dataset.layerProcessing !== 'true' && !window.rigQa.getLayerEditorState().showingOriginal);
+  await sender.click('#reset-layer-edit');
+  await sender.waitForFunction(() => document.body.dataset.layerProcessing !== 'true' && !window.rigQa.getLayerEditorState().dirty);
+  await receiver.waitForFunction(() => window.streamQa.state().layerOrder === null);
+  await receiver.waitForTimeout(500);
+  const orderReset = await readPixels(receiver);
+  const resetChangedBytes = orderReset.filter((value, i) => Math.abs(value - orderBefore[i]) > 3).length;
+  await sender.locator('.layer-order-item').filter({ has: sender.locator('strong', { hasText: /^腕・手$/ }) }).click();
+  await sender.getByRole('button', { name: '服の手前にする', exact: true }).click();
+  await receiver.waitForFunction(order => JSON.stringify(window.streamQa.state().layerOrder) === JSON.stringify(order), editedOrder);
+  await sender.evaluate(() => window.rigQa.setLiveEnabled(false));
+  await receiver.close(); await green.close();
+  // The pose channel expires, but the order must survive independently.
+  await sender.waitForTimeout(11200);
+  const orderReopened = await context.newPage();
+  await orderReopened.goto(streamUrl);
+  await orderReopened.waitForFunction(order => JSON.stringify(window.streamQa?.state().layerOrder) === JSON.stringify(order), editedOrder);
+  const persistedOrder = await orderReopened.evaluate(() => ({ ...window.streamQa.state() }));
+  await orderReopened.close();
+
+  await sender.click('#reset-layer-edit');
+  await sender.waitForFunction(() => document.body.dataset.layerProcessing !== 'true' && !window.rigQa.getLayerEditorState().dirty);
+  await sender.evaluate(() => window.rigQa.setLiveEnabled(false));
   await sender.setInputFiles('#psd-file-input', fixtureFile);
   await sender.waitForFunction(() => window.rigQa.ready && document.querySelector('#stream-copy').disabled);
   const localFile = await sender.evaluate(() => ({ copyDisabled: document.querySelector('#stream-copy').disabled, openDisabled: document.querySelector('#stream-open').disabled, note: document.querySelector('#stream-note').textContent }));
@@ -139,6 +194,9 @@ export async function runLiveQa({ browser, baseUrl, psd, fixtureFile, qaRoot, re
   await reopened.close();
   return {
     checks: {
+      streamReflectsLayerEdits: orderChangedPixels > 100 && comparisonKeepsEdited,
+      streamRestoresOriginalOrder: resetChangedBytes === 0,
+      streamRetainsOrderWithoutCamera: !persistedOrder.active && JSON.stringify(persistedOrder.layerOrder) === JSON.stringify(editedOrder),
       streamUsesStableGeneratedPsd: new URL(streamUrl).searchParams.get('psd') === psd && restartReady,
       streamHasOnlyTransparentCharacter: layout.alphas.every(alpha => alpha === 0) && layout.text === '' && layout.width === layout.viewport[0] && layout.height === layout.viewport[1],
       streamShowsGreenBackground: greenBackground === 'rgb(0, 255, 0)',
@@ -154,6 +212,6 @@ export async function runLiveQa({ browser, baseUrl, psd, fixtureFile, qaRoot, re
       streamRequestsStayLocal: external.length === 0,
       streamHasNoErrors: errors.length === 0,
     },
-    layout, changedPixels, settings, idle, localFile, backgroundCapture, backgroundSending, connections, external, errors,
+    layout, changedPixels, orderChangedPixels, resetChangedBytes, persistedOrder, settings, idle, localFile, backgroundCapture, backgroundSending, connections, external, errors,
   };
 }

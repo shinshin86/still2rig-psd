@@ -1015,6 +1015,7 @@ async function refreshEditedPreview(message: string): Promise<void> {
     phaseNode.textContent = '未保存の変更があります';
     detailNode.textContent = message;
     announceLayerEdit(message);
+    livePublisher?.orderChanged();
   } finally {
     await finishLayerProcessing();
     layerEditBusy = false;
@@ -1841,6 +1842,7 @@ function installEventListeners(): void {
   streamControls = installStreamControls(() => activeGeneratedPsdId, () => livePublisher?.enable());
   livePublisher = createLivePublisher(() => activeGeneratedPsdId && avatar ? {
     psd: activeGeneratedPsdId, input: liveInput, weight: liveWeight,
+    layerOrder: layerOrderSignature(currentLayerOrder) === layerOrderSignature(originalLayerOrder) ? null : [...currentLayerOrder],
     settings: { mode: currentMode, autoBlink: autoBlinkEnabled, eyeOpen, mouthOpen,
       parameters: { ...profileParameters }, tuning: { ...motionTuning } },
   } : null, message => streamControls?.status(message));

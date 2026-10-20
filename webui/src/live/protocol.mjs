@@ -24,15 +24,22 @@ function numbers(value, ranges) {
   if (!record(value) || Object.keys(value).some(key => !Object.hasOwn(ranges, key))) throw new Error('Invalid fields');
   return Object.fromEntries(Object.entries(value).map(([key, n]) => [key, number(n, ...ranges[key])]));
 }
+export function parseLayerOrder(value) {
+  if (value == null) return null;
+  if (!Array.isArray(value) || value.length < 1 || value.length > 256 ||
+      value.some(id => typeof id !== 'string' || id.length > 160 || !/^\d+:[^\x00-\x1f\x7f-\x9f]*$/u.test(id)) ||
+      new Set(value).size !== value.length) throw new Error('Invalid layer order');
+  return [...value];
+}
 export function parseLiveState(value) {
-  if (!keysOnly(value, ['source', 'psd', 'input', 'weight', 'settings'])) throw new Error('Invalid state');
+  if (!keysOnly(value, ['source', 'psd', 'input', 'weight', 'settings', 'layerOrder'])) throw new Error('Invalid state');
   if (typeof value.source !== 'string' || !/^[a-zA-Z0-9_-]{8,80}$/.test(value.source)) throw new Error('Invalid source');
   if (typeof value.psd !== 'string' || !/^[a-zA-Z0-9_-]{1,1024}$/.test(value.psd)) throw new Error('Invalid PSD');
   const s = value.settings;
   if (!keysOnly(s, ['mode', 'autoBlink', 'eyeOpen', 'mouthOpen', 'parameters', 'tuning']) ||
       !['static', 'physics', 'idle-physics'].includes(s.mode) || typeof s.autoBlink !== 'boolean') throw new Error('Invalid settings');
   return {
-    source: value.source, psd: value.psd,
+    source: value.source, psd: value.psd, layerOrder: parseLayerOrder(value.layerOrder),
     input: value.input === null ? null : numbers(value.input, trackingRanges),
     weight: number(value.weight, 0, 1),
     settings: { mode: s.mode, autoBlink: s.autoBlink, eyeOpen: number(s.eyeOpen, 0, 1), mouthOpen: number(s.mouthOpen, 0, 1),

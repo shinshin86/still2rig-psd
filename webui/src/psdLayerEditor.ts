@@ -96,6 +96,10 @@ export function inspectEditablePsd(buffer: ArrayBuffer): EditablePsdSummary {
   return { layers, editable: reason === null, reason };
 }
 
+export function applyPsdLayerOrder(psd: Psd, order: readonly string[]): void {
+  psd.children = applyOrder(psd.children ?? [], order);
+}
+
 function applyOrder(children: Layer[], order: readonly string[]): Layer[] {
   const byId = new Map(
     children.map((layer, index) => [layerId(index, layer.name ?? ''), layer]),

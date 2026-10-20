@@ -16,6 +16,7 @@ async function readState(request) {
 export function liveRelayPlugin({ listPsds, trusted, sendJson }) {
   function install(server) {
     const channels = new Map();
+    const layerOrders = new Map();
     const channel = psd => {
       if (!channels.has(psd)) channels.set(psd, { latest: null, clients: new Set(), sent: null });
       return channels.get(psd);
@@ -36,7 +37,7 @@ export function liveRelayPlugin({ listPsds, trusted, sendJson }) {
     server.httpServer?.once('close', () => {
       clearInterval(tick); clearInterval(heartbeat);
       for (const room of channels.values()) for (const client of room.clients) client.close();
-      channels.clear();
+      channels.clear(); layerOrders.clear();
     });
     server.middlewares.use((request, response, next) => {
       const url = new URL(request.url ?? '/', 'http://127.0.0.1');
@@ -52,6 +53,7 @@ export function liveRelayPlugin({ listPsds, trusted, sendJson }) {
             if (room.latest && room.latest.source !== state.source && Date.now() - room.latest.at < 1500) {
               return sendJson(response, { error: '別のページから動かしています。' }, 409);
             }
+            layerOrders.set(state.psd, state.layerOrder);
             room.latest = { ...state, at: Date.now() };
             sendJson(response, { ok: true });
           } catch (error) { sendJson(response, { error: '動きの情報を受け取れませんでした。' }, error.status ?? 400); }
@@ -79,7 +81,7 @@ export function liveRelayPlugin({ listPsds, trusted, sendJson }) {
       };
       response.on('drain', () => { blocked = false; if (pending) client.offer(pending); });
       room.clients.add(client);
-      client.offer(room.latest);
+      client.offer(room.latest ?? { psd, layerOrder: layerOrders.get(psd) ?? null });
       response.on('close', () => room.clients.delete(client));
     });
   }

@@ -91,6 +91,13 @@ interface MotionParams extends PsdMotionParameters {
   breathHead: number;
 }
 
+interface AnimationState {
+  current: MotionParams; blinkT: number; nextBlink: number; nextRandom: number;
+  randomTarget: { ax: number; ay: number; az: number; bd: number; ex: number; ey: number };
+  bounce: { x: number; v: number; dy: number };
+  springs: Map<string, StrandSpring[]>;
+}
+
 export interface Anime25RigAvatar {
   setTrackingInput: (input: Partial<TrackingInput> | null, weight: number) => void;
   setMouthOpen: (value: number) => void;
@@ -109,6 +116,8 @@ export interface Anime25RigAvatar {
   setLayerFocus: (name: string | null) => void;
   getLayerFocus: () => string | null;
   pickLayersAt: (canvasX: number, canvasY: number) => string[];
+  getAnimationState: () => AnimationState;
+  setAnimationState: (state: AnimationState) => void;
   dispose: () => void;
 }
 
@@ -1154,6 +1163,21 @@ export function createAnime25RigAvatar(
         if (!matches.includes(layer.bn)) matches.push(layer.bn);
       }
       return matches;
+    },
+    getAnimationState() {
+      return { current: { ...current }, blinkT, nextBlink, nextRandom,
+        randomTarget: { ...randomTarget }, bounce: { ...bounce },
+        springs: new Map(layers.map(layer => [layer.name, structuredClone(layer.spr ?? [])])) };
+    },
+    setAnimationState(state) {
+      Object.assign(current, state.current); Object.assign(randomTarget, state.randomTarget); Object.assign(bounce, state.bounce);
+      blinkT = state.blinkT; nextBlink = state.nextBlink; nextRandom = state.nextRandom;
+      for (const layer of layers) {
+        const springs = state.springs.get(layer.name);
+        if (layer.spr && springs?.length === layer.spr.length) layer.spr.forEach((spring, i) => Object.assign(spring, springs[i]));
+      }
+      // Draw the replacement before it becomes visible; keep the current pose at dt=0.
+      cancelAnimationFrame(animationFrame); last = performance.now(); tick(last);
     },
     dispose() {
       disposed = true;

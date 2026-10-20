@@ -41,5 +41,17 @@ export function createLivePublisher(snapshot: () => Omit<LiveState, 'source'> | 
   };
   const close = () => { closed = true; clock.terminate(); abort.abort(); };
   window.addEventListener('pagehide', close, { once: true });
-  return { enable(value = true) { enabled = value; }, close };
+  return {
+    enable(value = true) { enabled = value; },
+    async orderChanged() {
+      if (enabled || closed) return;
+      const state = snapshot();
+      if (!state) return;
+      try {
+        const response = await fetch(`/api/live/status?psd=${encodeURIComponent(state.psd)}`, { signal: abort.signal });
+        if (response.ok && (await response.json()).connected > 0 && snapshot()?.psd === state.psd) enabled = true;
+      } catch { /* A later edit or camera start can retry. */ }
+    },
+    close,
+  };
 }
