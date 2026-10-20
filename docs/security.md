@@ -46,6 +46,19 @@ model is prepared.
 (including 1.0.1) introduce external metrics reporting. Review telemetry and
 asset loading before any upgrade, and rerun network-isolation QA. No CDN is used.
 
+## Microphone input
+
+Microphone capture starts only after the user presses **マイクを開始** and grants
+browser permission. It uses a separate audio-only stream; camera capture remains
+video-only. Waveform samples are analyzed on the browser main thread and are
+never sent to workers, servers or external services. Audio is not recorded,
+saved, played back or transmitted. Only a bounded mouth-opening number is sent
+to the local stream view, where it fades out if updates stop.
+
+Stopping the microphone, changing PSDs, switching to layer editing, and leaving
+the page stop all audio tracks and close the audio context. Pending permission
+replies cannot restart capture after it has been stopped.
+
 ## Local stream view
 
 The stream page reads only a generated PSD selected through its opaque identifier.

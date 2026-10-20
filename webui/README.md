@@ -166,6 +166,24 @@ skipped if the verified model is missing; QA never downloads it. To run the
 same suite against a production build, first run `npm run preview:build`, then
 `WEBUI_QA_SERVER=preview npm run preview:qa` (set `WEBUI_QA_PORT` if needed).
 
+## Move the mouth with your voice
+
+In **カメラで動かす**, use **声で口を動かす** and press **マイクを開始**.
+Allow microphone access when the browser asks. Select **使うマイク** when multiple
+microphones are available, and adjust **声への反応の大きさ** while watching
+**いまの口の開き**. Quiet sounds below the noise floor keep the mouth closed.
+
+The microphone works without the camera and leaves idle movement and blinking
+running. With the camera, the larger mouth opening wins; camera head movement,
+expression and tracking fade remain unchanged. The stream view receives the same
+mouth opening. Only its numeric value is sent through the local server. Audio
+stays inside the browser and is never recorded, saved, played back or transmitted.
+
+**マイクを停止** restores the existing mouth settings. Switching PSDs, entering
+**重なりを直す**, or leaving the page also stops capture and releases the microphone.
+Sampling uses a worker clock so it continues without page animation frames;
+browser or operating-system background restrictions can still affect capture.
+
 ## Show the character in OBS
 
 In **カメラで動かす**, choose a background under **配信ソフトに映す**, then

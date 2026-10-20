@@ -32,7 +32,7 @@ export function parseLayerOrder(value) {
   return [...value];
 }
 export function parseLiveState(value) {
-  if (!keysOnly(value, ['source', 'psd', 'input', 'weight', 'settings', 'layerOrder'])) throw new Error('Invalid state');
+  if (!keysOnly(value, ['source', 'psd', 'input', 'weight', 'settings', 'layerOrder', 'voiceMouth'])) throw new Error('Invalid state');
   if (typeof value.source !== 'string' || !/^[a-zA-Z0-9_-]{8,80}$/.test(value.source)) throw new Error('Invalid source');
   if (typeof value.psd !== 'string' || !/^[a-zA-Z0-9_-]{1,1024}$/.test(value.psd)) throw new Error('Invalid PSD');
   const s = value.settings;
@@ -42,6 +42,7 @@ export function parseLiveState(value) {
     source: value.source, psd: value.psd, layerOrder: parseLayerOrder(value.layerOrder),
     input: value.input === null ? null : numbers(value.input, trackingRanges),
     weight: number(value.weight, 0, 1),
+    voiceMouth: value.voiceMouth == null ? null : number(value.voiceMouth, 0, 1),
     settings: { mode: s.mode, autoBlink: s.autoBlink, eyeOpen: number(s.eyeOpen, 0, 1), mouthOpen: number(s.mouthOpen, 0, 1),
       parameters: numbers(s.parameters, parameterRanges), tuning: numbers(s.tuning, tuningRanges) },
   };

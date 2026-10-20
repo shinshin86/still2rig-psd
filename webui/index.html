@@ -29,7 +29,7 @@
       #progress { width: 0; height: 100%; background: linear-gradient(90deg, #58d5ff, #a878ff); transition: width 160ms linear; }
       .header-source { min-width: 0; }
       .source-actions { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; gap: 8px; align-items: stretch; }
-      #generated-psd-select, #camera-device, #stream-background { width: 100%; min-width: 0; padding: 9px 10px; color: #edf4ff; background: #151b28; border: 1px solid #4a5671; border-radius: 8px; font: 12px/1.3 inherit; }
+      #generated-psd-select, #camera-device, #voice-device, #stream-background { width: 100%; min-width: 0; padding: 9px 10px; color: #edf4ff; background: #151b28; border: 1px solid #4a5671; border-radius: 8px; font: 12px/1.3 inherit; }
       #generated-psd-refresh, #generated-psd-open-folder { white-space: nowrap; }
       .source-note { margin: 6px 0 0; color: #8f9ab7; font-size: 11px; line-height: 1.4; }
       .file-button { display: inline-grid; place-items: center; min-height: 40px; padding: 8px 13px; color: #101a23; background: #72d9ff; border-radius: 8px; font: 700 12px/1.2 inherit; cursor: pointer; white-space: nowrap; }
@@ -248,7 +248,7 @@
       .camera-controls h3, .camera-controls p { margin: 0; }
       .camera-controls button { white-space: normal; overflow-wrap: anywhere; min-height: 44px; }
       .camera-controls .field { margin: 0; }
-      #camera-device { min-height: 44px; }
+      #camera-device, #voice-device { min-height: 44px; }
       .camera-check { display: flex; align-items: center; gap: 8px; font-size: 13px; min-height: 32px; }
       .camera-controls video { width: 100%; max-width: 240px; border-radius: 8px; justify-self: center; }
       .camera-controls [hidden] { display: none; }
@@ -494,6 +494,19 @@
             <p id="camera-background-note" class="tuning-note" role="status" hidden>このページが隠れているため、動きが遅くなっています。ページを前に戻してお試しください。</p>
             <p id="camera-state" class="tuning-note" role="status" aria-live="polite">準備の状況を確認しています…</p>
             <p id="camera-conflict" class="tuning-note" hidden>カメラで動かしている間は、顔と体の向き・視線・目と口の開閉・口の形・眉の高さと自動チェックを使えません。髪の揺れや、目と口の位置・大きさは調整できます。カメラを停止すると元の設定に戻ります。</p>
+          </section>
+          <section id="voice-controls" class="camera-controls" aria-labelledby="voice-title">
+            <h3 id="voice-title">声で口を動かす</h3>
+            <p class="tuning-note">マイクの音はこのパソコンの中だけで使い、録音や送信はしません。</p>
+            <div class="demo-row">
+              <button id="voice-start" type="button" disabled>マイクを開始</button>
+              <button id="voice-stop" type="button" disabled>マイクを停止</button>
+            </div>
+            <label id="voice-device-field" class="field" hidden>使うマイク<select id="voice-device" aria-label="使うマイク"></select></label>
+            <label class="field" for="voice-sensitivity">声への反応の大きさ<input id="voice-sensitivity" type="range" min="0.25" max="3" step="0.05" value="1" /></label>
+            <label class="field" for="voice-meter">いまの口の開き<meter id="voice-meter" min="0" max="1" value="0" style="width:100%"></meter></label>
+            <p id="voice-state" class="tuning-note" role="status" aria-live="polite">マイクは停止しています。</p>
+            <p id="voice-conflict" class="tuning-note" hidden>声で口を動かしている間は、口の開きと自動チェックを使えません。マイクを停止すると元の設定に戻ります。</p>
           </section>
           <section class="camera-controls" aria-labelledby="stream-title">
             <h3 id="stream-title">配信ソフトに映す</h3>

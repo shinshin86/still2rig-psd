@@ -6,6 +6,7 @@ import { createRequire } from 'node:module';
 import { readPsd } from 'ag-psd';
 import { chromium } from 'playwright';
 import { mapFace } from '../src/tracking/pose.mjs';
+import { runVoiceQa } from './voice-qa.mjs';
 import { runLiveQa } from './live-qa.mjs';
 
 const webuiRoot = path.resolve(import.meta.dirname, '..');
@@ -1299,6 +1300,7 @@ try {
     await cameraPage.locator('#rig-canvas').screenshot({ path: path.join(qaRoot, `tracking-limit-${key}-${sign < 0 ? 'minus' : 'plus'}.png`) });
   }
   await cameraPage.evaluate(() => window.rigQa.setLiveEnabled(false));
+  const voice = await runVoiceQa({ browser, baseUrl, qaRoot, fixtureFile });
   const live = await runLiveQa({ browser, baseUrl, psd: apiGeneratedId, fixtureFile, qaRoot, restart: async () => {
     const previous = server;
     await new Promise(resolve => { previous.once('exit', resolve); previous.kill('SIGTERM'); });
@@ -1306,6 +1308,7 @@ try {
   } });
   const checks = {
     ...live.checks,
+    ...voice.checks,
     cameraDeviceSharesSelectStyle: cameraDeviceStyle.matches && cameraDeviceStyle.height >= 44,
     cameraSensitivityStartsStronger: cameraSensitivity.value === 1.5 && cameraSensitivity.max === 3,
     trackingVerticalDirectionsMatchCanvas: directionNeutral.count > 0 &&
@@ -1658,6 +1661,7 @@ try {
   };
   const report = {
     live,
+    voice,
     camera: { cameraDeviceStyle, cameraSensitivity, directionNeutral, trackingDirections, cameraInitiallyLoadedMessage, cameraLoadedMessage, cameraTabsLayout, cameraTabBeforeLoad, wrongModelAction, wrongFolderAction, prepareAction, preparedModelStatus, fakeCamera, cameraFailureStates, cancelledStart, trackingDifferences, trackingZeroDifference, trackingStoppedDifference, cameraMobile, cameraErrors, cameraDiagnostics, externalRequests },
     pass: Object.values(checks).every(Boolean),
     checks,

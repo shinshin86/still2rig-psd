@@ -29,3 +29,12 @@ test('live layer orders accept optional originals and bounded unique PSD IDs', (
     assert.throws(() => parseLiveState({ ...state(), layerOrder: invalid }));
   }
 });
+
+test('voice mouth is optional, nullable, finite and bounded without accepting audio data', () => {
+  assert.equal(parseLiveState(state()).voiceMouth, null);
+  assert.equal(parseLiveState({ ...state(), voiceMouth: null }).voiceMouth, null);
+  assert.equal(parseLiveState({ ...state(), voiceMouth: 0.6 }).voiceMouth, 0.6);
+  assert.equal(parseLiveState({ ...state(), voiceMouth: 4 }).voiceMouth, 1);
+  assert.equal(parseLiveState({ ...state(), voiceMouth: -4 }).voiceMouth, 0);
+  for (const voiceMouth of ['1', NaN, Infinity, [], {}]) assert.throws(() => parseLiveState({ ...state(), voiceMouth }));
+});
