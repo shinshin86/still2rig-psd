@@ -1,7 +1,7 @@
 import { expressionParameterNames, expressionPresetValues, expressionPresets } from '../../src/expressionPresets.mjs';
 
 export const expressionPartCases = [
-  ...['browWorry', 'browAngry', 'browFlat', 'upperLid', 'eyeWide', 'eyeNarrow', 'eyeWinkL', 'eyeWinkR', 'eyeSmileL', 'eyeSmileR'].map(key => ({ id: key, values: t => ({ [key]: t }) })),
+  ...['browWorry', 'browAngry', 'browFlat', 'upperLid', 'eyeWide', 'eyeNarrow', 'eyeWinkL', 'eyeWinkR', 'eyeSmileL', 'eyeSmileR', 'tears', 'sweat', 'angerMark'].map(key => ({ id: key, values: t => ({ [key]: t }) })),
   { id: 'lidTilt-inward', values: t => ({ upperLid: 0.7, lidTilt: t }) },
   { id: 'lidTilt-outward', values: t => ({ upperLid: 0.7, lidTilt: -t }) },
   { id: 'mouth-up', values: t => ({ mouthForm: t }) },

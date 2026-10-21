@@ -381,3 +381,24 @@ visible hair, and whether the motion looks natural, still need visual review.
 Physics frames depend on timing, so borderline results can vary between runs.
 Missing required eye layers or feature anchors produce a failed report with a
 message instead of crashing the eye-region calculation.
+
+### Transparent tears, sweat and anger artwork
+
+`tears`, `sweat` and `anger_mark` are optional generated overlays. Their requests
+use the current face with visible hair as a placement reference; returned PNGs
+contain only the added water or red strokes with genuine alpha transparency.
+Import checks proportions, request hashes, transparent background, visible alpha
+outside the allowed region, sparse coverage, neutral background patches and warm
+skin/hair-like colors. These color checks are heuristics: inspect the isolated
+layer over a checkerboard and its composite before repair. Unlike edited face
+crops, transparent artwork has no unchanged background from which to estimate
+alignment or a seam. Placement is checked in the registered canvas coordinates.
+
+Tears sit in front of the eyes but behind front hair, appear from the lower-lid
+edge downwards, and keep their upper edge attached during blinking. Sweat moves
+down a few pixels as it appears; the anger symbol grows slightly into place.
+Both sit above the hair and follow head motion. Sadness uses tears, flustered uses
+sweat, and anger uses the symbol. Missing artwork keeps the previous face and
+disables the corresponding slider with a reason. No overlay changes production
+readiness. Review strengths every 0.05, blink states, head turns and transitions;
+a successful pixel check does not establish natural-looking artwork or motion.

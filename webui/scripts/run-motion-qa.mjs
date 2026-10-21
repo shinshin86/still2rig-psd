@@ -188,11 +188,11 @@ async function main() {
 
     const expressionMasks = expressionMasksFromLayers(inspectPsd(psdFile).layers,
       info.canvas.width, info.canvas.height, info.anchors);
-    for (const name of Object.keys(expressionMasks)) {
+    for (const name of Object.keys(expressionMasks).filter(name=>!['tears','sweat','anger_mark'].includes(name))) {
       captures[name] = [];
-      const key = name === 'eye-smile' ? 'eyeSmile' : 'blush';
-      for (const strength of name === 'eye-smile' ? [...Array.from({ length: 21 }, (_, i) => i / 20), 0.48, 0.52] : [0, 0.5, 1]) {
-        await setState(1, 0, { eyeSmile: 0, blush: 0, [key]: strength });
+      const key = name === 'eye-smile' ? 'eyeSmile' : name === 'anger_mark' ? 'angerMark' : name;
+      for (const strength of name === 'eye-smile' ? [...Array.from({ length: 21 }, (_, i) => i / 20), 0.48, 0.52] : ['tears','sweat','anger_mark'].includes(name) ? Array.from({length:21},(_,i)=>i/20) : [0, 0.5, 1]) {
+        await setState(1, 0, { eyeSmile: 0, blush: 0, tears:0, sweat:0, angerMark:0, [key]: strength });
         await sleep(500);
         captures[name].push(await capture(name, `strength-${strength.toFixed(2)}`));
       }
@@ -205,7 +205,7 @@ async function main() {
         captures[name].push(await capture(name, 'strength-1.00-blink'));
       }
     }
-    await setState(1, 0, { eyeSmile: 0, blush: 0 });
+    await setState(1, 0, { eyeSmile: 0, blush: 0, tears:0, sweat:0, angerMark:0 });
 
     captures['hair-physics-only'] = [];
     await setMode('physics');
@@ -250,6 +250,19 @@ async function main() {
     // follows elapsed time, so an earlier capture changes its sampled phase.
     // Reload to remove drag inertia before checking expression isolation.
     await loadPsd(page, psdFile);
+    for (const name of ['tears','sweat','anger_mark'].filter(name=>expressionMasks[name])) {
+      const key = name === 'anger_mark' ? 'angerMark' : name;
+      captures[name] = [];
+      for (let step=0;step<=20;step++) {
+        await setState(1,0,{eyeSmile:0,blush:0,tears:0,sweat:0,angerMark:0,[key]:step/20});
+        await sleep(500);
+        captures[name].push(await capture(name,`strength-${(step/20).toFixed(2)}`));
+      }
+      for (const eye of [.5,0]) {
+        await setState(eye,0,{[key]:1});await sleep(500);
+        captures[name].push(await capture(name,`strength-1.00-blink-${eye}`));
+      }
+    }
     Object.assign(captures, await captureExpressionSet({ page, capture,
       parts: info.summary.partsFound, partSteps: 2, settleMs: 500,
       pairs: [['neutral','joy'],['joy','neutral'],['joy','angry'],['sad','surprised'],['wink','joy'],['unamused','surprised']],

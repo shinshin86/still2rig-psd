@@ -1343,8 +1343,8 @@ try {
       trackingDirections['head-up'].y < directionNeutral.y && trackingDirections['head-down'].y > directionNeutral.y &&
       trackingDirections['gaze-up'].y < directionNeutral.y && trackingDirections['gaze-down'].y > directionNeutral.y,
     cameraOnlyDisablesTrackedControls: fakeCamera.skipped || (
-      ['angleX', 'angleY', 'angleZ', 'body', 'eyeX', 'eyeY', 'eyeSmile', 'eyeSmileL', 'eyeSmileR', 'blush'].every(name => fakeCamera.running.advancedDisabled.includes(name)) &&
-      fakeCamera.running.advancedDisabled.length === 10 &&
+      ['angleX', 'angleY', 'angleZ', 'body', 'eyeX', 'eyeY', 'eyeSmile', 'eyeSmileL', 'eyeSmileR', 'blush', 'tears', 'sweat', 'angerMark'].every(name => fakeCamera.running.advancedDisabled.includes(name)) &&
+      fakeCamera.running.advancedDisabled.length === 13 &&
       ['physAmp', 'soft', 'bust', 'eyeCY', 'eyeScaleL', 'mouthCY', 'mouthScale', 'brow', 'mouthForm', 'upperLid', 'eyeWide', 'eyeNarrow'].every(name => fakeCamera.running.advancedEditable.includes(name)) &&
       fakeCamera.running.adjustedParameters.physAmp === 1.5 && fakeCamera.running.adjustedParameters.eyeCY === 0.2 &&
       fakeCamera.running.adjustedParameters.mouthScale === 1.1 && fakeCamera.running.adjustedParameters.bust === 2),
@@ -1611,7 +1611,7 @@ try {
       blinkReopened.left > 0.9 &&
       blinkReopened.right > 0.9,
     advancedParametersExposeInternalDefaults:
-      advancedInitial.itemCount === 45 &&
+      advancedInitial.itemCount === 48 &&
       advancedInitial.groupCount === 4 &&
       advancedInitial.angleZ === 0 &&
       advancedInitial.physAmp === 2 &&
