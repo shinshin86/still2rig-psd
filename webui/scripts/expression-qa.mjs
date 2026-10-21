@@ -1,6 +1,6 @@
 import path from 'node:path';
 
-export async function runExpressionQa({ browser, baseUrl, fixtureFile, expressionFile, qaRoot }) {
+export async function runExpressionQa({ browser, baseUrl, fixtureFile, expressionFile, expressionWithoutClose, qaRoot }) {
   const errors = [];
   const external = [];
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
@@ -64,6 +64,10 @@ export async function runExpressionQa({ browser, baseUrl, fixtureFile, expressio
   await load(fixtureFile);
   const missing = await controls();
   await capture('missing-neutral');
+  for (const eye of [0.5, 0]) {
+    await state(0, 0, eye); await capture(`missing-blink-${eye}`);
+  }
+  await state(0, 0);
   await state(1, 1); await capture('missing-values');
   const absentPixels = await difference('missing-neutral', 'missing-values');
   await page.locator('#parameter-blush-number').evaluate(input => input.scrollIntoView({ block: 'center' }));
@@ -73,8 +77,43 @@ export async function runExpressionQa({ browser, baseUrl, fixtureFile, expressio
   const available = await controls();
   await capture('neutral');
   const neutralMatchesLegacy = await difference('missing-neutral', 'neutral');
+  const zeroSmileBlinks = [];
+  for (const eye of [0.5, 0]) {
+    await state(0, 0, eye); await capture(`zero-blink-${eye}`);
+    zeroSmileBlinks.push(await difference(`missing-blink-${eye}`, `zero-blink-${eye}`));
+  }
+  await state(0.25, 0); await capture('smile-quarter');
   await state(0.5, 0); await capture('smile-half');
+  for (const strength of [0, 0.25, 0.5, 0.48, 0.5, 0.52, 0.75, 1]) for (const eye of [1, 0.5, 0]) {
+    await state(strength, 0, eye);
+    await capture(`smile-${strength}-blink-${eye}`);
+    await page.locator('#rig-canvas').screenshot({ path: path.join(qaRoot, `expression-smile-${strength}-blink-${eye}.png`) });
+  }
   await state(1, 0); await capture('smile');
+  const thresholdSwitch = await difference('smile-0.5-blink-1', 'smile');
+  const thresholdBefore = await difference('smile-0.48-blink-1', 'smile', [70, 65, 180, 100]);
+  const thresholdAfter = await difference('smile-0.52-blink-1', 'smile');
+  const lowerLid = await page.evaluate(() => {
+    const names = ['neutral', 'smile-quarter', 'smile-half', 'smile-0.48-blink-1'];
+    return Object.fromEntries(names.map(name => {
+      const frame = window.__expressionFrames[name];
+      const eyes = [[86, 116], [140, 170]].map(([x0, x1]) => {
+        let whiteBottom = -1, white = 0, iris = 0, upperInk = 100, closedInk = 0;
+        for (let y = 65; y <= 92; y++) for (let x = x0; x <= x1; x++) {
+          const i = ((frame.height - 1 - y) * frame.width + x) * 4;
+          const [r,g,b] = frame.data.slice(i, i + 3);
+          if (r > 235 && g > 235 && b > 235) { white++; whiteBottom = Math.max(whiteBottom, y); }
+          if (b > r + 35 && g > r + 30 && b > 110) iris++;
+          if (r < 120 && g < 100 && b < 90 && x >= x0 + 10 && x <= x1 - 10) {
+            upperInk = Math.min(upperInk, y);
+            if (y >= 78 && y <= 81) closedInk++;
+          }
+        }
+        return { white, whiteBottom, iris, upperInk, closedInk };
+      });
+      return [name, eyes];
+    }));
+  });
   await page.locator('#rig-canvas').screenshot({ path: path.join(qaRoot, 'expression-smile.png') });
   await state(1, 0, 0); await capture('smile-blink');
   const smile = await difference('neutral', 'smile', [70, 55, 180, 100]);
@@ -152,18 +191,41 @@ export async function runExpressionQa({ browser, baseUrl, fixtureFile, expressio
   const streamChanged = streamBefore.some((value, index) => Math.abs(value - streamAfter[index]) > 1);
   const streamSettings = await receiver.evaluate(() => window.streamQa.state().settings.parameters);
   await page.evaluate(() => window.rigQa.setLiveEnabled(false));
+  await load(expressionWithoutClose);
+  const withoutCloseParts = await page.evaluate(() => window.rigQa.summary.partsFound);
+  for (const strength of [0.48, 0.5, 0.52, 1]) {
+    await state(strength, 0); await capture(`no-close-${strength}`);
+    await page.locator('#rig-canvas').screenshot({ path: path.join(qaRoot, `expression-no-close-${strength}.png`) });
+  }
+  await state(0.5, 0, 0); await capture('no-close-blink');
+  const noCloseSwitch = await difference('no-close-0.5', 'smile-0.5-blink-1');
+  const noCloseThreshold = await difference('no-close-0.48', 'no-close-0.5');
+  const noCloseAfter = await difference('no-close-0.52', 'smile-0.52-blink-1');
+  const noCloseBlink = await difference('no-close-0.5', 'no-close-blink');
   await context.close();
 
-  return { missing, available, absentPixels, neutralMatchesLegacy, smile, smileHalf, smileBlink, blush, blushHalf,
-    eyeTransforms, restored, sliders, mobile, selections, afterSelection, streamSettings, errors, external,
+  return { missing, available, absentPixels, neutralMatchesLegacy, zeroSmileBlinks, lowerLid, thresholdSwitch, thresholdBefore, thresholdAfter, smile, smileHalf, smileBlink, blush, blushHalf,
+    eyeTransforms, restored, sliders, mobile, selections, afterSelection, streamSettings,
+    withoutCloseParts, noCloseSwitch, noCloseThreshold, noCloseAfter, noCloseBlink, errors, external,
     checks: {
       missingExpressionsDisabledWithReasons: Object.values(missing).every(item => item.disabled && item.numberDisabled && !item.reasonHidden && item.reason.includes('絵がありません')),
       absentExpressionsPreservePixels: absentPixels.inside === 0 && neutralMatchesLegacy.inside === 0,
+      zeroSmilePreservesLegacyBlinks: zeroSmileBlinks.every(diff => diff.totalDelta === 0),
+      smileRaisesLowerLid: [0, 1].every(side => {
+        const before = lowerLid.neutral[side], quarter = lowerLid['smile-quarter'][side], half = lowerLid['smile-half'][side];
+        return half.whiteBottom < quarter.whiteBottom && quarter.whiteBottom < before.whiteBottom &&
+          half.iris < quarter.iris && quarter.iris < before.iris && Math.abs(half.upperInk - before.upperInk) <= 4;
+      }),
+      smileNeverUsesClosedArtwork: ['smile-quarter','smile-half','smile-0.48-blink-1'].every(name =>
+        lowerLid[name].every(eye => eye.closedInk === 0)),
+      smileMorphContinuesAfterSwitch: thresholdSwitch.totalDelta > 0 && thresholdAfter.totalDelta > 0,
+      smileSwitchWorksWithoutClosedArtwork: !withoutCloseParts.includes('eye_close') && noCloseThreshold.totalDelta > 0 &&
+        noCloseSwitch.totalDelta === 0 && noCloseAfter.totalDelta === 0 && noCloseBlink.totalDelta === 0,
       expressionControlsEnabled: Object.values(available).every(item => !item.disabled && !item.numberDisabled && item.reasonHidden && item.value === 0),
       smileChangesOnlyEyes: smile.inside > 10 && smile.outside === 0,
       smileIgnoresBlinkAtFullStrength: smileBlink.inside === 0,
       blushChangesOnlyCheeks: blush.inside > 10 && blush.outside === 0,
-      expressionStrengthsAreContinuous: smileHalf.totalDelta > 0 && smileHalf.totalDelta < smile.totalDelta && blushHalf.totalDelta > 0 && blushHalf.totalDelta < blush.totalDelta,
+      expressionStrengthsFollowStages: smileHalf.totalDelta > 0 && smileHalf.totalDelta < smile.totalDelta && blushHalf.totalDelta > 0 && blushHalf.totalDelta < blush.totalDelta,
       smileFollowsEyeAndHeadControls: Object.values(eyeTransforms).every(diff => diff.inside > 0),
       expressionsRestoreNeutral: restored.inside === 0 && afterSelection.inside === 0,
       expressionSlidersWork: sliders.eyeSmile.value === 1 && sliders.blush.value === 0.7,

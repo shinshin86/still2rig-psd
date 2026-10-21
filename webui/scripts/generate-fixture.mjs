@@ -147,11 +147,16 @@ if (process.argv.includes('--expressions')) {
   children.splice(children.findIndex(layer => layer.name === 'eyewhite'), 0, blush);
   const smile = makeLayer('eye_smile', (data) => {
     for (const cx of [101, 155]) for (let dx = -14; dx <= 14; dx += 1) {
-      const y = 76 + Math.round(Math.abs(dx) * 0.45);
+      const y = 70 + Math.round(Math.abs(dx) * 0.45);
       rectangle(data, cx + dx, y, cx + dx, y + 2, line);
     }
   });
   children.splice(children.findIndex(layer => layer.name === 'eye_close') + 1, 0, smile);
+}
+
+if (process.argv.includes('--without-eye-close')) {
+  const index = children.findIndex(layer => layer.name === 'eye_close');
+  if (index >= 0) children.splice(index, 1);
 }
 
 const composite = imageData();

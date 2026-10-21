@@ -61,6 +61,8 @@ const expressionFile = path.join(expressionJobRoot, 'output', `${expressionJobId
 await runNode(path.join(webuiRoot, 'scripts', 'generate-fixture.mjs'), [expressionFile, '--expressions', '--exposed-eyes']);
 const expressionBaseline = path.join(outputRoot, 'expression-baseline.psd');
 await runNode(path.join(webuiRoot, 'scripts', 'generate-fixture.mjs'), [expressionBaseline, '--exposed-eyes']);
+const expressionWithoutClose = path.join(outputRoot, 'expression-without-close.psd');
+await runNode(path.join(webuiRoot, 'scripts', 'generate-fixture.mjs'), [expressionWithoutClose, '--expressions', '--exposed-eyes', '--without-eye-close']);
 await fs.writeFile(path.join(expressionJobRoot, 'job.json'), `${JSON.stringify({
   schemaVersion: 1, jobId: expressionJobId, createdAt: '2025-01-01T00:00:00.000Z',
   state: 'production-structure-ready', result: { productionReady: true,
@@ -1324,7 +1326,7 @@ try {
   }
   await cameraPage.evaluate(() => window.rigQa.setLiveEnabled(false));
   const voice = await runVoiceQa({ browser, baseUrl, qaRoot, fixtureFile });
-  const expressions = await runExpressionQa({ browser, baseUrl, fixtureFile: expressionBaseline, expressionFile, qaRoot });
+  const expressions = await runExpressionQa({ browser, baseUrl, fixtureFile: expressionBaseline, expressionFile, expressionWithoutClose, qaRoot });
   const live = await runLiveQa({ browser, baseUrl, psd: apiGeneratedId, fixtureFile, qaRoot, restart: async () => {
     const previous = server;
     await new Promise(resolve => { previous.once('exit', resolve); previous.kill('SIGTERM'); });

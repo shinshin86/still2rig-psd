@@ -4,6 +4,7 @@
  */
 import type { TrackingInput } from '../tracking/pose.mjs';
 import type { Anime25RigLayer, Anime25RigResult } from './anime25Rig';
+import { morphSmile, raiseLowerLid, resolveEyeExpression, smileInkVisibility, upperLidY } from './eyeExpression.mjs';
 import {
   createPsdMotionProfileRuntime,
   DEFAULT_PSD_MOTION_PARAMETERS,
@@ -31,6 +32,10 @@ interface EyeAnchor {
   icx: number;
   icy: number;
   closeY: number;
+  smileY?: number;
+  smileInkBounds?: { x0: number; x1: number; y0: number; y1: number };
+  upperLid?: { x: number; y: number }[];
+  smileLid?: { x: number; y: number }[];
 }
 
 interface RigAnchors {
@@ -79,6 +84,8 @@ interface RenderLayer extends Anime25RigLayer {
   tex: WebGLTexture;
   vboPos: WebGLBuffer;
   vboUV: WebGLBuffer;
+  vboInk: WebGLBuffer;
+  inkVisibility: Float32Array;
   ibo: WebGLBuffer;
   sw?: Float32Array;
   su?: Float32Array;
@@ -152,12 +159,12 @@ const HAIR_WIND_SCALE = 3.0;
 const HAIR_PHYSICS_SCALE = 1.8;
 
 const VERTEX_SHADER =
-  'attribute vec2 aPos; attribute vec2 aUV; uniform vec2 uRes; uniform vec2 uViewOffset; uniform float uViewScale; varying vec2 vUV;' +
-  'void main(){ vUV=aUV; vec2 p=(aPos-uRes*0.5)*uViewScale+uRes*0.5+uViewOffset; vec2 c=p/uRes*2.0-1.0; gl_Position=vec4(c.x,-c.y,0.0,1.0); }';
+  'attribute vec2 aPos; attribute vec2 aUV; attribute float aInk; varying float vInk; uniform vec2 uRes; uniform vec2 uViewOffset; uniform float uViewScale; varying vec2 vUV;' +
+  'void main(){ vUV=aUV; vInk=aInk; vec2 p=(aPos-uRes*0.5)*uViewScale+uRes*0.5+uViewOffset; vec2 c=p/uRes*2.0-1.0; gl_Position=vec4(c.x,-c.y,0.0,1.0); }';
 
 const FRAGMENT_SHADER =
-  'precision mediump float; varying vec2 vUV; uniform sampler2D uTex; uniform float uCut; uniform float uAlpha;' +
-  'void main(){ vec4 c=texture2D(uTex,vUV); if(c.a<uCut) discard; gl_FragColor=c*uAlpha; }';
+  'precision mediump float; varying vec2 vUV; varying float vInk; uniform sampler2D uTex; uniform float uCut; uniform float uAlpha;' +
+  'void main(){ vec4 c=texture2D(uTex,vUV); if(c.a<uCut) discard; gl_FragColor=c*(uAlpha*vInk); }';
 
 function clamp(value: number, min: number, max: number): number {
   return value < min ? min : value > max ? max : value;
@@ -294,24 +301,28 @@ function fadeAlpha(
   hasEyeClose: Record<'L' | 'R', boolean>,
   hasEyeSmile: Record<'L' | 'R', boolean>,
 ): number {
-  const smile = layer.side && hasEyeSmile[layer.side as 'L' | 'R'] ? params.eyeSmile : 0;
+  const expression = resolveEyeExpression(layer.side === 'L' ? params.eyeOpenL : params.eyeOpenR,
+    params.eyeSmile, Boolean(layer.side && hasEyeSmile[layer.side as 'L' | 'R']));
+  const originalAlpha = 1 - expression.smileAlpha;
   if (!layer.fade) return 1;
-  if (layer.fade === 'eyeSmile') return params.eyeSmile;
+  if (layer.fade === 'eyeSmile') return expression.smileAlpha;
   if (layer.fade === 'blush') return params.blush;
   if (layer.fade === 'eyeOpen') {
-    const value = layer.side === 'L' ? params.eyeOpenL : params.eyeOpenR;
+    const value = expression.eyeOpen;
+    if (expression.smileProgress > 0 && layer.bn === 'eyelash') return originalAlpha;
     if (
       (layer.side === 'L' || layer.side === 'R') &&
       !hasEyeClose[layer.side] &&
       layer.bn === 'eyelash'
     ) {
-      return 1 - smile;
+      return originalAlpha;
     }
-    return (1 - smile) * smooth((value - (0.1 + params.eyeEase * 0.45)) / 0.15);
+    return originalAlpha * smooth((value - (0.1 + params.eyeEase * 0.45)) / 0.15);
   }
   if (layer.fade === 'eyeClose') {
-    const value = layer.side === 'L' ? params.eyeOpenL : params.eyeOpenR;
-    return (1 - smile) * (1 - smooth((value - (0.1 + params.eyeEase * 0.45)) / 0.15));
+    if (expression.smileProgress > 0) return 0;
+    const value = expression.eyeOpen;
+    return originalAlpha * (1 - smooth((value - (0.1 + params.eyeEase * 0.45)) / 0.15));
   }
   if (layer.fade === 'mouthOpen') {
     return smooth((params.mouthOpen - (0.05 + params.mouthEase * 0.35)) / 0.12);
@@ -337,8 +348,9 @@ function createRenderLayer(
   layer.bn = baseRigName(layer.name);
 
   const cell = (layer.phys ? 30 : 42) * Math.max(0.6, canvasWidth / 768);
-  const nx = Math.max(2, Math.round(layer.w / cell));
-  const ny = Math.max(2, Math.round(layer.h / cell));
+  const eyeGrid = layer.fade === 'eyeOpen' || layer.fade === 'eyeSmile' ? 24 : 2;
+  const nx = Math.max(eyeGrid, Math.round(layer.w / cell));
+  const ny = Math.max(eyeGrid, Math.round(layer.h / cell));
   const vertexCount = (nx + 1) * (ny + 1);
   const base = new Float32Array(vertexCount * 2);
   const uv = new Float32Array(vertexCount * 2);
@@ -368,6 +380,7 @@ function createRenderLayer(
   const typedIndices = new Uint16Array(indices);
   layer.base = base;
   layer.cur = new Float32Array(base);
+  layer.inkVisibility = new Float32Array(vertexCount).fill(1);
   layer.uv = uv;
   layer.indices = typedIndices;
   layer.nIdx = indices.length;
@@ -439,6 +452,7 @@ function createRenderLayer(
 
   layer.vboPos = createBuffer(gl);
   layer.vboUV = createBuffer(gl);
+  layer.vboInk = createBuffer(gl);
   layer.ibo = createBuffer(gl);
 
   gl.bindBuffer(gl.ARRAY_BUFFER, layer.vboUV);
@@ -479,6 +493,7 @@ export function createAnime25RigAvatar(
   gl.useProgram(program);
   const locPos = getAttribLocation(gl, program, 'aPos');
   const locUV = getAttribLocation(gl, program, 'aUV');
+  const locInk = getAttribLocation(gl, program, 'aInk');
   const locRes = getUniformLocation(gl, program, 'uRes');
   const locViewOffset = getUniformLocation(gl, program, 'uViewOffset');
   const locViewScale = getUniformLocation(gl, program, 'uViewScale');
@@ -487,6 +502,7 @@ export function createAnime25RigAvatar(
 
   gl.enableVertexAttribArray(locPos);
   gl.enableVertexAttribArray(locUV);
+  gl.enableVertexAttribArray(locInk);
   gl.enable(gl.BLEND);
   gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
   gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
@@ -615,7 +631,9 @@ export function createAnime25RigAvatar(
         : layer.side === 'R'
           ? anchors.eyeR
           : null;
-    const eyeOpen = layer.side === 'L' ? params.eyeOpenL : params.eyeOpenR;
+    const expression = resolveEyeExpression(layer.side === 'L' ? params.eyeOpenL : params.eyeOpenR,
+      params.eyeSmile, Boolean(layer.side && hasEyeSmile[layer.side as 'L' | 'R']));
+    const eyeOpen = expression.eyeOpen;
     const mouthHalfWidth = (anchors.mouth.x1 - anchors.mouth.x0) / 2;
     const strandCount = layer.strands?.length || 0;
     const centerX = layer.x + layer.w / 2;
@@ -626,6 +644,18 @@ export function createAnime25RigAvatar(
       let x = base[index];
       let y = base[index + 1];
       const vertex = index >> 1;
+      layer.inkVisibility[vertex] = 1;
+      if (layer.fade === 'eyeSmile' && eyeAnchor) {
+        layer.inkVisibility[vertex] = smileInkVisibility(x, y, eyeAnchor, expression.smileRestore);
+      }
+      if (layer.bn === 'eyelash' && eyeAnchor && expression.smileProgress > 0) {
+        // Remove the lower-lash fringe before it collapses into isolated dots.
+        // This clips one drawing; it never blends two different eye drawings.
+        const upper = upperLidY(eyeAnchor.upperLid, x, eyeAnchor.y0);
+        const band = (eyeAnchor.y1 - eyeAnchor.y0) * 0.12;
+        const lowerInk = smooth((y - upper - band) / Math.max(1, band));
+        layer.inkVisibility[vertex] = 1 - lowerInk * smooth((expression.smileProgress - 0.45) / 0.4);
+      }
 
       const isEyePart =
         Boolean(eyeAnchor) &&
@@ -664,6 +694,21 @@ export function createAnime25RigAvatar(
             eyeAnchor.closeY +
             (y - eyeAnchor.closeY) * (1 - 0.85 * (1 - eyeOpen));
         }
+        if (expression.smileProgress > 0) {
+          if (layer.bn === 'irides') {
+            // The rising white-of-eye stencil hides the lower iris first.
+            const tuck = smooth((expression.smileProgress - 0.5) / 0.5);
+            const pivot = eyeAnchor.smileY ?? eyeAnchor.y0;
+            y = pivot + (y - pivot) * (1 - 0.4 * tuck);
+          } else {
+            y = raiseLowerLid(y, x, eyeAnchor, expression.smileProgress, layer.bn === 'eyelash');
+          }
+        }
+      }
+
+      if (layer.fade === 'eyeSmile' && eyeAnchor) {
+        const shaped = morphSmile(x, y, eyeAnchor, expression.smileRestore);
+        x = shaped.x; y = shaped.y;
       }
 
       if (layer.fade === 'eyeClose' && eyeAnchor) {
@@ -671,8 +716,7 @@ export function createAnime25RigAvatar(
       }
 
       if (layer.bn === 'eyebrow' && eyeAnchor) {
-        const smile = layer.side && hasEyeSmile[layer.side as 'L' | 'R'] ? params.eyeSmile : 0;
-        y += (-params.brow * 9 + (1 - eyeOpen) * 3.5 * (1 - smile)) * faceScale;
+        y += (-params.brow * 9 + expression.blinkBrow * 3.5) * faceScale;
         const sideAngle =
           layer.side === 'L' ? params.browAngL : params.browAngR;
         const symmetricAngle =
@@ -938,6 +982,9 @@ export function createAnime25RigAvatar(
         ? (key === 'eyeOpenL' || key === 'eyeOpenR' ? 1 : 1 - Math.exp(-dt / 0.025))
         : Math.min(1, dt * 14);
       current[key] += (target[key] - current[key]) * alpha;
+      // A discrete expression handoff must reach an exact slider threshold,
+      // rather than approach it forever from one side through smoothing.
+      if (key === 'eyeSmile' && Math.abs(target[key] - current[key]) < 0.001) current[key] = target[key];
     }
 
     const dragStiffness = dragInertia.active ? 90 : 34;
@@ -1038,6 +1085,9 @@ export function createAnime25RigAvatar(
       gl.vertexAttribPointer(locPos, 2, gl.FLOAT, false, 0, 0);
       gl.bindBuffer(gl.ARRAY_BUFFER, layer.vboUV);
       gl.vertexAttribPointer(locUV, 2, gl.FLOAT, false, 0, 0);
+      gl.bindBuffer(gl.ARRAY_BUFFER, layer.vboInk);
+      gl.bufferData(gl.ARRAY_BUFFER, layer.inkVisibility, gl.DYNAMIC_DRAW);
+      gl.vertexAttribPointer(locInk, 1, gl.FLOAT, false, 0, 0);
       gl.bindTexture(gl.TEXTURE_2D, layer.tex);
       gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, layer.ibo);
 
@@ -1203,6 +1253,7 @@ export function createAnime25RigAvatar(
         gl.deleteTexture(layer.tex);
         gl.deleteBuffer(layer.vboPos);
         gl.deleteBuffer(layer.vboUV);
+        gl.deleteBuffer(layer.vboInk);
         gl.deleteBuffer(layer.ibo);
       }
       gl.deleteProgram(program);

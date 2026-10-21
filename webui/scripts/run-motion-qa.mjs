@@ -190,12 +190,15 @@ async function main() {
     for (const name of Object.keys(expressionMasks)) {
       captures[name] = [];
       const key = name === 'eye-smile' ? 'eyeSmile' : 'blush';
-      for (const strength of [0, 0.5, 1]) {
+      for (const strength of name === 'eye-smile' ? [...Array.from({ length: 21 }, (_, i) => i / 20), 0.48, 0.52] : [0, 0.5, 1]) {
         await setState(1, 0, { eyeSmile: 0, blush: 0, [key]: strength });
         await sleep(500);
         captures[name].push(await capture(name, `strength-${strength.toFixed(2)}`));
       }
       if (name === 'eye-smile') {
+        await setState(0.5, 0, { eyeSmile: 1, blush: 0 });
+        await sleep(500);
+        captures[name].push(await capture(name, 'strength-1.00-blink-half'));
         await setState(0, 0, { eyeSmile: 1, blush: 0 });
         await sleep(500);
         captures[name].push(await capture(name, 'strength-1.00-blink'));

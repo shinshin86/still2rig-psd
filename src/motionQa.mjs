@@ -516,7 +516,17 @@ export function evaluateExpressionCaptures(captures, masks) {
     checks[`${name}RegionStable`] = nonRegion <= 0.35;
     if (name === 'eye-smile') {
       const blink = frames.find(item => item.label === 'strength-1.00-blink')?.frame;
-      checks.smileBlinkStable = Boolean(blink) && changedPixels(after, blink, null, 1) === 0;
+      const halfBlink = frames.find(item => item.label === 'strength-1.00-blink-half')?.frame;
+      checks.smileProgressionCaptured = [...Array.from({ length: 21 }, (_, i) => (i / 20).toFixed(2)), '0.48', '0.52'].every(strength =>
+        frames.some(item => item.label === `strength-${strength}`));
+      const morphChanges = Object.fromEntries(['0.50', '0.75', '0.95'].map(strength => {
+        const frame = frames.find(item => item.label === `strength-${strength}`)?.frame;
+        return [strength, frame ? changedPixels(after, frame, mask, 1) : null];
+      }));
+      metrics[name].morphChangedPixels = morphChanges;
+      checks.smileMorphProgresses = Object.values(morphChanges).every(count => count !== null && count > 0);
+      checks.smileBlinkStable = Boolean(blink && halfBlink) && changedPixels(after, blink, null, 1) === 0
+        && changedPixels(after, halfBlink, null, 1) === 0;
     }
   }
   return { checks, metrics };

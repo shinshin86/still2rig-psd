@@ -29,6 +29,9 @@ test('smiling eyes split per side without changing closed-eye anchors; faint blu
   const rig = rigger.buildRig(input);
   assert.equal(rig.anchors.eyeL.closeY, baseline.anchors.eyeL.closeY);
   assert.equal(rig.anchors.eyeR.closeY, baseline.anchors.eyeR.closeY);
+  assert.equal(rig.anchors.eyeL.smileY, 30);
+  assert.equal(rig.anchors.eyeR.smileY, 30);
+  assert.equal(baseline.anchors.eyeL.smileY, undefined);
   const smile = rig.layers.filter(part => part.fade === 'eyeSmile');
   assert.equal(smile.length, 2);
   assert.deepEqual(Array.from(smile, part => part.side).sort(), ['L', 'R']);
@@ -38,4 +41,26 @@ test('smiling eyes split per side without changing closed-eye anchors; faint blu
   assert.equal(blush.phys, null); assert.equal(blush.side, null);
   assert.equal(Math.max(...Array.from(blush.img.data).filter((_, index) => index % 4 === 3)), 6);
   assert.ok(!rig.warnings.some(warning => /eye_smile|blush/.test(warning)));
+});
+
+test('smile height follows each side ink instead of a surrounding skin patch', () => {
+  const input = psd();
+  const art = layer('eye_smile', [[24, 20, 56, 50], [72, 20, 104, 50]]);
+  for (let i = 0; i < art.imageData.data.length; i += 4) {
+    if (art.imageData.data[i + 3]) art.imageData.data.set([248, 215, 190], i);
+  }
+  for (const [left, top] of [[30, 30], [78, 34]]) for (let y = top; y < top + 3; y++) for (let x = left; x < left + 20; x++) {
+    art.imageData.data.set([50, 30, 20, 255], (y * 128 + x) * 4);
+  }
+  // A detached mark near the hair must not expand the eyelid contour.
+  for (let y = 40; y < 43; y++) for (let x = 112; x < 115; x++) {
+    art.imageData.data.set([50, 30, 20, 255], (y * 128 + x) * 4);
+  }
+  input.children.push(art);
+  const rig = rigger.buildRig(input);
+  assert.equal(rig.anchors.eyeL.smileY, 30);
+  assert.equal(rig.anchors.eyeR.smileY, 34);
+  assert.ok(rig.anchors.eyeR.smileInkBounds.x1 < 112);
+  assert.ok(rig.anchors.eyeL.smileLid.every(point => point.y >= 30 && point.y <= 32));
+  assert.ok(rig.anchors.eyeR.smileLid.every(point => point.y >= 34 && point.y <= 36));
 });
