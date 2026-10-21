@@ -38,3 +38,12 @@ test('voice mouth is optional, nullable, finite and bounded without accepting au
   assert.equal(parseLiveState({ ...state(), voiceMouth: -4 }).voiceMouth, 0);
   for (const voiceMouth of ['1', NaN, Infinity, [], {}]) assert.throws(() => parseLiveState({ ...state(), voiceMouth }));
 });
+
+test('optional expression settings clamp strengths and reject non-finite values', () => {
+  const value = state(); value.settings.parameters.eyeSmile = 4; value.settings.parameters.blush = -1;
+  assert.equal(parseLiveState(value).settings.parameters.eyeSmile, 1);
+  assert.equal(parseLiveState(value).settings.parameters.blush, 0);
+  for (const key of ['eyeSmile', 'blush']) for (const invalid of [NaN, Infinity, '1']) {
+    const bad = state(); bad.settings.parameters[key] = invalid; assert.throws(() => parseLiveState(bad));
+  }
+});

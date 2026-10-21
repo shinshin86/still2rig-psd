@@ -16,7 +16,7 @@ import { createRequire } from 'node:module';
 
 import { chromium } from 'playwright';
 
-import { evaluateMotionQa, hairTipMaskFromLayers, loadMotionContract, motionLayerPreflight, visibleHairMaskFromLayers } from '../../src/motionQa.mjs';
+import { evaluateMotionQa, expressionMasksFromLayers, hairTipMaskFromLayers, loadMotionContract, motionLayerPreflight, visibleHairMaskFromLayers } from '../../src/motionQa.mjs';
 import { decodePngRgba, inspectPsd } from '../../src/psd.mjs';
 
 const webuiRoot = path.resolve(import.meta.dirname, '..');
@@ -154,7 +154,7 @@ async function main() {
     const info = referencePsd === psdFile ? reference : await loadPsd(page, psdFile);
 
     const captures = {};
-    const setState = (eye, mouth) => page.evaluate(([e, m]) => window.rigQa.setState(e, m), [eye, mouth]);
+    const setState = (eye, mouth, expressions = {}) => page.evaluate(([e, m, x]) => window.rigQa.setState(e, m, x), [eye, mouth, expressions]);
     const setMode = (mode) => page.evaluate((m) => window.rigQa.setMode(m), mode);
 
     await setMode('static');
@@ -184,6 +184,24 @@ async function main() {
       captures['lip-sync-continuous'].push(await capture('lip-sync-continuous', `step-${step}-mouth-${mouth.toFixed(2)}`));
     }
     await setState(1, 0);
+
+    const expressionMasks = expressionMasksFromLayers(inspectPsd(psdFile).layers,
+      info.canvas.width, info.canvas.height, info.anchors);
+    for (const name of Object.keys(expressionMasks)) {
+      captures[name] = [];
+      const key = name === 'eye-smile' ? 'eyeSmile' : 'blush';
+      for (const strength of [0, 0.5, 1]) {
+        await setState(1, 0, { eyeSmile: 0, blush: 0, [key]: strength });
+        await sleep(500);
+        captures[name].push(await capture(name, `strength-${strength.toFixed(2)}`));
+      }
+      if (name === 'eye-smile') {
+        await setState(0, 0, { eyeSmile: 1, blush: 0 });
+        await sleep(500);
+        captures[name].push(await capture(name, 'strength-1.00-blink'));
+      }
+    }
+    await setState(1, 0, { eyeSmile: 0, blush: 0 });
 
     captures['hair-physics-only'] = [];
     await setMode('physics');
@@ -232,6 +250,7 @@ async function main() {
       captures,
       hairTipMask,
       visibleHairMask,
+      expressionMasks,
       contract,
     });
     const dragPeak = Math.max(...dragMotion.map((value) => Math.hypot(value.x, value.y)));

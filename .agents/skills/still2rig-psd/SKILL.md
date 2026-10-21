@@ -179,6 +179,19 @@ again with `--negative-fixture` when the checks themselves changed; that run mus
 FAIL. Only a passing `motion-qa` report for the current PSD SHA-256 supports a
 motion, seam, or hair-motion claim, and only for the built-in renderer.
 
+If the PSD includes visible `eye_smile` or `blush` artwork, motion QA also
+captures strengths 0, 0.5, and 1 and checks changes inside the expression region
+and stability outside it. Smiling eyes at strength 1 must stay identical during
+a blink. These optional checks use an RGB delta greater than 1 for faint blush;
+the regular eye/mouth threshold remains 24. Missing optional artwork adds no
+capture requirement and does not change expression production readiness.
+
+The preview and stream page support both strengths (0..1, default 0). In
+**細かい設定 → 目・眉**, **笑い目** and **頬の赤らみ** are disabled with a reason
+when the PSD has no matching artwork. Smiling eyes follow eye/head controls;
+blush follows the head with opacity only. Selecting either part in
+**重なりを直す** reveals it. Numeric-key expression switching is not supported.
+
 ## Completion report
 
 Report the job id, input SHA-256, pinned See-through revision, PSD path and

@@ -303,7 +303,7 @@ const round = (value, digits = 3) => Number(value.toFixed(digits));
  * @param {Uint8Array} input.hairTipMask  hair tip band in frame coordinates
  * @param {object} input.contract
  */
-export function evaluateMotionQa({ reference, captures, hairTipMask, visibleHairMask = null, contract }) {
+export function evaluateMotionQa({ reference, captures, hairTipMask, visibleHairMask = null, expressionMasks = {}, contract }) {
   const { width, height } = reference.frame;
   const anchors = reference.anchors;
   const missingFeatures = ['eyeL', 'eyeR', 'mouth'].filter((name) => {
@@ -408,13 +408,15 @@ export function evaluateMotionQa({ reference, captures, hairTipMask, visibleHair
     mouthToEyesRelativeResidual: mouthToEyesResidual <= t.mouthToEyesRelativeResidualPxMaximum,
     unexpectedSeamPixels: unexpectedSeams <= t.unexpectedSeamPixelsMaximum,
   };
+  const expressions = evaluateExpressionCaptures(captures, expressionMasks);
+  Object.assign(checks, expressions.checks);
   return {
     pass: Object.values(checks).every(Boolean),
     missingCaptures,
     metrics,
     checks,
     thresholds: t,
-    details: { seamByCapture, residualFrames, hairTipPixels: tipTotal },
+    details: { seamByCapture, residualFrames, hairTipPixels: tipTotal, expressions: expressions.metrics },
     units: {
       mae: 'percent of full RGB scale (0-100)',
       changedPixels: `pixels whose max channel delta exceeds ${CHANGE_THRESHOLD}`,
@@ -482,4 +484,40 @@ export function visibleHairMaskFromLayers(layers, width, height, alphaThreshold 
 
 export function dilate(mask, width, height, radius) {
   return invertMask(erode(invertMask(mask), width, height, radius));
+}
+
+/** Optional expression regions include a small sampling margin at native scale. */
+export function expressionMasksFromLayers(layers, width, height, anchors) {
+  const masks = {};
+  if (layers.some(layer => layer.name === 'eye_smile' && layerAlphaMask(layer, width, height, 8).some(Boolean))) {
+    masks['eye-smile'] = boxMask(width, height, [anchors.eyeL, anchors.eyeR]
+      .map(box => padBox(box, 16, width, height)));
+  }
+  const blush = layerAlphaMask(layers.find(layer => layer.name === 'blush'), width, height, 0);
+  if (blush.some(Boolean)) masks.blush = dilate(blush, width, height, 4);
+  return masks;
+}
+
+/** Fail absent/stuck expressions and changes beyond their own art region. */
+export function evaluateExpressionCaptures(captures, masks) {
+  const checks = {};
+  const metrics = {};
+  for (const [name, mask] of Object.entries(masks)) {
+    const frames = captures[name] || [];
+    const before = frames.find(item => item.label === 'strength-0.00')?.frame;
+    const after = frames.find(item => item.label === 'strength-1.00')?.frame;
+    checks[`${name}Captured`] = Boolean(before && after);
+    if (!before || !after) continue;
+    // One RGB level detects subtle blush without the opaque-ink threshold.
+    const changed = changedPixels(before, after, mask, 1);
+    const nonRegion = maePercent(before, after, invertMask(mask));
+    metrics[name] = { changedPixels: changed, nonRegionMaePercent: round(nonRegion, 4), changeThreshold: 1 };
+    checks[`${name}Changed`] = changed > 0;
+    checks[`${name}RegionStable`] = nonRegion <= 0.35;
+    if (name === 'eye-smile') {
+      const blink = frames.find(item => item.label === 'strength-1.00-blink')?.frame;
+      checks.smileBlinkStable = Boolean(blink) && changedPixels(after, blink, null, 1) === 0;
+    }
+  }
+  return { checks, metrics };
 }

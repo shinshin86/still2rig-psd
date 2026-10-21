@@ -4,6 +4,7 @@ import {
   SEAM_COLOR,
   changedPixels,
   evaluateMotionQa,
+  evaluateExpressionCaptures,
   erode,
   featureResiduals,
   loadMotionContract,
@@ -97,4 +98,21 @@ test('the motion contract lists every capture the adapter records', () => {
     'full-body-idle',
     'drag-inertia',
   ]);
+});
+
+test('optional expression QA detects faint artwork, missing captures, frozen frames and leakage', () => {
+  const neutral = frame(12, 12, [200, 170, 160]);
+  const blush = frame(12, 12, [200, 170, 160]);
+  paint(blush, 4, 4, 8, 8, [202, 168, 158]);
+  const mask = new Uint8Array(144);
+  for (let y = 4; y < 8; y += 1) mask.fill(1, y * 12 + 4, y * 12 + 8);
+  const capture = after => ({ blush: [{ label: 'strength-0.00', frame: neutral }, { label: 'strength-1.00', frame: after }] });
+  const good = evaluateExpressionCaptures(capture(blush), { blush: mask });
+  assert.ok(Object.values(good.checks).every(Boolean));
+  assert.equal(good.metrics.blush.changedPixels, 16);
+  assert.equal(evaluateExpressionCaptures({}, { blush: mask }).checks.blushCaptured, false);
+  assert.equal(evaluateExpressionCaptures(capture(neutral), { blush: mask }).checks.blushChanged, false);
+  paint(blush, 0, 0, 4, 4, [10, 10, 10]);
+  assert.equal(evaluateExpressionCaptures(capture(blush), { blush: mask }).checks.blushRegionStable, false);
+  assert.deepEqual(evaluateExpressionCaptures({}, {}), { checks: {}, metrics: {} });
 });

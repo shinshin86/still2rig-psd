@@ -8,6 +8,7 @@ import { chromium } from 'playwright';
 import { mapFace } from '../src/tracking/pose.mjs';
 import { runVoiceQa } from './voice-qa.mjs';
 import { runLiveQa } from './live-qa.mjs';
+import { runExpressionQa } from './expression-qa.mjs';
 
 const webuiRoot = path.resolve(import.meta.dirname, '..');
 const repositoryRoot = path.resolve(webuiRoot, '..');
@@ -52,6 +53,18 @@ await fs.writeFile(path.join(fixtureJobRoot, 'job.json'), `${JSON.stringify({
     productionReady: true,
     psd: `.still2rig-psd/jobs/${fixtureJobId}/output/${fixtureJobId}.psd`,
   },
+}, null, 2)}\n`);
+
+const expressionJobId = 'qa-expression-preview';
+const expressionJobRoot = path.join(jobsRoot, expressionJobId);
+const expressionFile = path.join(expressionJobRoot, 'output', `${expressionJobId}.psd`);
+await runNode(path.join(webuiRoot, 'scripts', 'generate-fixture.mjs'), [expressionFile, '--expressions', '--exposed-eyes']);
+const expressionBaseline = path.join(outputRoot, 'expression-baseline.psd');
+await runNode(path.join(webuiRoot, 'scripts', 'generate-fixture.mjs'), [expressionBaseline, '--exposed-eyes']);
+await fs.writeFile(path.join(expressionJobRoot, 'job.json'), `${JSON.stringify({
+  schemaVersion: 1, jobId: expressionJobId, createdAt: '2025-01-01T00:00:00.000Z',
+  state: 'production-structure-ready', result: { productionReady: true,
+    psd: `.still2rig-psd/jobs/${expressionJobId}/output/${expressionJobId}.psd` },
 }, null, 2)}\n`);
 
 let serverLog = '';
@@ -1311,6 +1324,7 @@ try {
   }
   await cameraPage.evaluate(() => window.rigQa.setLiveEnabled(false));
   const voice = await runVoiceQa({ browser, baseUrl, qaRoot, fixtureFile });
+  const expressions = await runExpressionQa({ browser, baseUrl, fixtureFile: expressionBaseline, expressionFile, qaRoot });
   const live = await runLiveQa({ browser, baseUrl, psd: apiGeneratedId, fixtureFile, qaRoot, restart: async () => {
     const previous = server;
     await new Promise(resolve => { previous.once('exit', resolve); previous.kill('SIGTERM'); });
@@ -1318,6 +1332,7 @@ try {
   } });
   const checks = {
     ...live.checks,
+    ...expressions.checks,
     ...voice.checks,
     cameraDeviceSharesSelectStyle: cameraDeviceStyle.matches && cameraDeviceStyle.height >= 44,
     cameraSensitivityStartsStronger: cameraSensitivity.value === 1.5 && cameraSensitivity.max === 3,
@@ -1327,7 +1342,7 @@ try {
       trackingDirections['gaze-up'].y < directionNeutral.y && trackingDirections['gaze-down'].y > directionNeutral.y,
     cameraOnlyDisablesTrackedControls: fakeCamera.skipped || (
       ['angleX', 'angleY', 'angleZ', 'body', 'eyeX', 'eyeY', 'mouthForm', 'brow'].every(name => fakeCamera.running.advancedDisabled.includes(name)) &&
-      fakeCamera.running.advancedDisabled.length === 8 &&
+      fakeCamera.running.advancedDisabled.length === 10 &&
       ['physAmp', 'soft', 'bust', 'eyeCY', 'eyeScaleL', 'mouthCY', 'mouthScale'].every(name => fakeCamera.running.advancedEditable.includes(name)) &&
       fakeCamera.running.adjustedParameters.physAmp === 1.5 && fakeCamera.running.adjustedParameters.eyeCY === 0.2 &&
       fakeCamera.running.adjustedParameters.mouthScale === 1.1 && fakeCamera.running.adjustedParameters.bust === 2),
@@ -1415,10 +1430,10 @@ try {
       waitingState.avatarReady === 'false',
     legacyWebglBadgeRemoved:
       waitingState.legacyBadgeCount === 0 && waitingState.titleParent === 'brand-block',
-    generatedLibraryListsOutputs: waitingState.generatedOptions === 1,
+    generatedLibraryListsOutputs: waitingState.generatedOptions === 2,
     generatedLibraryHidesLocalPaths:
       libraryResponse.ok &&
-      libraryPayload.items?.length === 1 &&
+      libraryPayload.items?.length === 2 &&
       !Object.hasOwn(libraryPayload.items[0], 'file') &&
       !JSON.stringify(libraryPayload).includes(repositoryRoot),
     generatedFolderApiOpensOnlyKnownOutputs:
@@ -1594,7 +1609,7 @@ try {
       blinkReopened.left > 0.9 &&
       blinkReopened.right > 0.9,
     advancedParametersExposeInternalDefaults:
-      advancedInitial.itemCount === 32 &&
+      advancedInitial.itemCount === 34 &&
       advancedInitial.groupCount === 4 &&
       advancedInitial.angleZ === 0 &&
       advancedInitial.physAmp === 2 &&
@@ -1722,6 +1737,7 @@ try {
     autoBlinkDisabled,
     blinkClosed,
     blinkReopened,
+    expressions,
     advancedInitial,
     advancedAdjusted,
     advancedResetState,

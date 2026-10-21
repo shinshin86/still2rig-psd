@@ -18,6 +18,8 @@ export interface PsdMotionParameters {
   body: number;
   armY: number;
   armPos: number;
+  eyeSmile: number;
+  blush: number;
   eyeOpenL: number;
   eyeOpenR: number;
   eyeX: number;
@@ -87,6 +89,8 @@ export const PSD_MOTION_PARAMETER_DEFINITIONS: readonly PsdMotionParameterDefini
       max: 1,
       step: 0.01,
     },
+    { key: 'eyeSmile', label: '笑い目', group: 'eyes', min: 0, max: 1, step: 0.01 },
+    { key: 'blush', label: '頬の赤らみ', group: 'eyes', min: 0, max: 1, step: 0.01 },
     { key: 'body', label: 'Body', group: 'face', min: -1, max: 1, step: 0.01 },
     { key: 'armY', label: 'Arm Y', group: 'face', min: -1, max: 1, step: 0.01 },
     {
@@ -324,6 +328,8 @@ export const DEFAULT_PSD_MOTION_PARAMETERS: Readonly<PsdMotionParameters> = {
   body: 0,
   armY: 0,
   armPos: 0,
+  eyeSmile: 0,
+  blush: 0,
   eyeOpenL: 1,
   eyeOpenR: 1,
   eyeX: 0,

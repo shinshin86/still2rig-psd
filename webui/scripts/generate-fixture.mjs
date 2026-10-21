@@ -127,6 +127,33 @@ const children = [
   }),
 ];
 
+if (process.argv.includes('--exposed-eyes')) {
+  children[children.findIndex(layer => layer.name === 'front hair')] = makeLayer('front hair', data => {
+    ellipse(data, 128, 32, 88, 28, hairFront);
+    rectangle(data, 72, 30, 81, 105, hairFront);
+    rectangle(data, 178, 30, 183, 108, hairFront);
+  });
+}
+
+if (process.argv.includes('--expressions')) {
+  const blush = makeLayer('blush', (data) => {
+    for (const cx of [96, 158]) {
+      for (let y = 94; y <= 114; y += 1) for (let x = cx - 16; x <= cx + 16; x += 1) {
+        const radius = ((x - cx) / 16) ** 2 + ((y - 104) / 10) ** 2;
+        if (radius < 1) setPixel(data, x, y, [230, 60, 90, Math.round(90 * (1 - radius))]);
+      }
+    }
+  });
+  children.splice(children.findIndex(layer => layer.name === 'eyewhite'), 0, blush);
+  const smile = makeLayer('eye_smile', (data) => {
+    for (const cx of [101, 155]) for (let dx = -14; dx <= 14; dx += 1) {
+      const y = 76 + Math.round(Math.abs(dx) * 0.45);
+      rectangle(data, cx + dx, y, cx + dx, y + 2, line);
+    }
+  });
+  children.splice(children.findIndex(layer => layer.name === 'eye_close') + 1, 0, smile);
+}
+
 const composite = imageData();
 for (const child of children) {
   for (let offset = 0; offset < child.imageData.data.length; offset += 4) {

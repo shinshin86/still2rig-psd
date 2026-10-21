@@ -30,6 +30,7 @@
     'earwear':     { depth: 0.97, group: 'head' },
     'ears':        { depth: 0.96, group: 'head' },
     'face':        { depth: 1.00, group: 'head' },
+    'blush':       { depth: 1.03, group: 'head', fade: 'blush' },
     'facedetail':  { depth: 1.02, group: 'head' },
     'headwear':    { depth: 1.20, group: 'head' },
     'mouth_close': { depth: 1.08, group: 'head', fade: 'mouthClose' },
@@ -40,6 +41,7 @@
     'irides':      { depth: 1.08, group: 'head', split: true, fade: 'eyeOpen' },
     'eyelash':     { depth: 1.12, group: 'head', split: true, fade: 'eyeOpen' },
     'eye_close':   { depth: 1.12, group: 'head', split: true, fade: 'eyeClose' },
+    'eye_smile':   { depth: 1.12, group: 'head', split: true, fade: 'eyeSmile' },
     'front hair':  { depth: 1.28, group: 'head', phys: 'hair' }
   };
 
@@ -342,7 +344,7 @@
       eff = new Uint8Array(W * H);
       for (var i = 0; i < W * H; i++) eff[i] = mask[i] ? fullAlpha[i] : 0;
     }
-    var bb = bboxOf(eff, W, H, 8);
+    var bb = bboxOf(eff, W, H, slot.fade === 'blush' ? 0 : 8);
     if (!bb) return null;
     var pad = 2;
     var x0 = Math.max(0, bb.x0 - pad), y0 = Math.max(0, bb.y0 - pad);
@@ -382,7 +384,8 @@
     var entries = [];
     for (var i = 0; i < kids.length; i++) {
       var name = normName(kids[i].name);
-      var fa = cleanAlpha(fullAlphaOf(kids[i], W, H), W, H, 40);
+      var fa = fullAlphaOf(kids[i], W, H);
+      if (name !== 'blush') fa = cleanAlpha(fa, W, H, 40);
       entries.push({ name: name, layer: kids[i], alpha: fa });
     }
     var byName = {};
@@ -532,7 +535,7 @@
       stats.layers++;
       var a = new Uint8Array(W * H), j, before = 0, after = 0;
       for (j = 0; j < W * H; j++) { a[j] = d[j * 4 + 3]; if (a[j]) before++; }
-      cleanAlpha(a, W, H, 40);
+      if (normName(c.name) !== 'blush') cleanAlpha(a, W, H, 40);
       for (j = 0; j < W * H; j++) { if (a[j]) after++; d[j * 4 + 3] = a[j]; }
       if (after < before) stats.noisy++;
       var bb = bboxOf(a, W, H, 0);

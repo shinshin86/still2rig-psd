@@ -180,7 +180,7 @@ export function resolveBasePsdMotionParameters(
   ttsInput: number,
   motionEnabled: boolean,
 ): PsdMotionParameters {
-  if (!motionEnabled) return { ...DEFAULT_PSD_MOTION_PARAMETERS };
+  if (!motionEnabled) return { ...DEFAULT_PSD_MOTION_PARAMETERS, eyeSmile: profile.parameters.eyeSmile, blush: profile.parameters.blush };
   return {
     ...profile.parameters,
     mouthOpen: composePsdMotionMouthOpen(
@@ -292,8 +292,12 @@ function fadeAlpha(
   layer: RenderLayer,
   params: MotionParams,
   hasEyeClose: Record<'L' | 'R', boolean>,
+  hasEyeSmile: Record<'L' | 'R', boolean>,
 ): number {
+  const smile = layer.side && hasEyeSmile[layer.side as 'L' | 'R'] ? params.eyeSmile : 0;
   if (!layer.fade) return 1;
+  if (layer.fade === 'eyeSmile') return params.eyeSmile;
+  if (layer.fade === 'blush') return params.blush;
   if (layer.fade === 'eyeOpen') {
     const value = layer.side === 'L' ? params.eyeOpenL : params.eyeOpenR;
     if (
@@ -301,13 +305,13 @@ function fadeAlpha(
       !hasEyeClose[layer.side] &&
       layer.bn === 'eyelash'
     ) {
-      return 1;
+      return 1 - smile;
     }
-    return smooth((value - (0.1 + params.eyeEase * 0.45)) / 0.15);
+    return (1 - smile) * smooth((value - (0.1 + params.eyeEase * 0.45)) / 0.15);
   }
   if (layer.fade === 'eyeClose') {
     const value = layer.side === 'L' ? params.eyeOpenL : params.eyeOpenR;
-    return 1 - smooth((value - (0.1 + params.eyeEase * 0.45)) / 0.15);
+    return (1 - smile) * (1 - smooth((value - (0.1 + params.eyeEase * 0.45)) / 0.15));
   }
   if (layer.fade === 'mouthOpen') {
     return smooth((params.mouthOpen - (0.05 + params.mouthEase * 0.35)) / 0.12);
@@ -503,6 +507,10 @@ export function createAnime25RigAvatar(
   const layers = rig.layers
     .map((layer) => createRenderLayer(gl, layer, canvasWidth, anchors))
     .filter((layer): layer is RenderLayer => Boolean(layer));
+  const hasEyeSmile = {
+    L: layers.some(layer => layer.bn === 'eye_smile' && layer.side === 'L'),
+    R: layers.some(layer => layer.bn === 'eye_smile' && layer.side === 'R'),
+  };
   const hasEyeClose = {
     L: layers.some((layer) => layer.bn === 'eye_close' && layer.side === 'L'),
     R: layers.some((layer) => layer.bn === 'eye_close' && layer.side === 'R'),
@@ -623,6 +631,7 @@ export function createAnime25RigAvatar(
         Boolean(eyeAnchor) &&
         (layer.fade === 'eyeOpen' ||
           layer.fade === 'eyeClose' ||
+          layer.fade === 'eyeSmile' ||
           layer.bn === 'eyebrow');
 
       if (eyeAnchor && isEyePart) {
@@ -662,7 +671,8 @@ export function createAnime25RigAvatar(
       }
 
       if (layer.bn === 'eyebrow' && eyeAnchor) {
-        y += (-params.brow * 9 + (1 - eyeOpen) * 3.5) * faceScale;
+        const smile = layer.side && hasEyeSmile[layer.side as 'L' | 'R'] ? params.eyeSmile : 0;
+        y += (-params.brow * 9 + (1 - eyeOpen) * 3.5 * (1 - smile)) * faceScale;
         const sideAngle =
           layer.side === 'L' ? params.browAngL : params.browAngR;
         const symmetricAngle =
@@ -1012,7 +1022,7 @@ export function createAnime25RigAvatar(
     gl.uniform2f(locViewOffset, viewOffsetX, viewOffsetY);
     gl.uniform1f(locViewScale, viewScale);
     for (const layer of layers) {
-      const alpha = fadeAlpha(layer, params, hasEyeClose);
+      const alpha = fadeAlpha(layer, params, hasEyeClose, hasEyeSmile);
       if (
         alpha < 0.004 &&
         !(layer.fade === 'eyeOpen' && layer.name.startsWith('eyewhite'))
@@ -1165,7 +1175,7 @@ export function createAnime25RigAvatar(
       const matches: string[] = [];
       for (let index = layers.length - 1; index >= 0; index -= 1) {
         const layer = layers[index]!;
-        if (fadeAlpha(layer, current, hasEyeClose) < 0.08) continue;
+        if (fadeAlpha(layer, current, hasEyeClose, hasEyeSmile) < 0.08) continue;
         if (!layerContainsPoint(layer, modelX, modelY)) continue;
         if (!matches.includes(layer.bn)) matches.push(layer.bn);
       }

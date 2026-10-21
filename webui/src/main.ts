@@ -55,7 +55,7 @@ interface RigQaApi {
   error: string | null;
   summary: unknown;
   anchors: Record<string, unknown>;
-  setState: (eyeOpen: number, mouthOpen: number) => void;
+  setState: (eyeOpen: number, mouthOpen: number, expressions?: { eyeSmile?: number; blush?: number }) => void;
   setMode: (mode: QaMode) => void;
   setAutoBlink: (enabled: boolean) => void;
   getAutoBlink: () => boolean;
@@ -208,6 +208,7 @@ if (presetButtons.length !== 3) {
 }
 
 let avatar: Anime25RigAvatar | null = null;
+let avatarParts = new Set<string>();
 let cameraControls: ReturnType<typeof installCameraControls> | null = null;
 let cameraActive = false;
 let voiceControls: ReturnType<typeof installVoiceControls> | null = null;
@@ -330,6 +331,8 @@ const PARAMETER_LABELS: Partial<Record<PsdMotionParameterName, string>> = {
   body: '上半身の傾き',
   armY: '腕の上下',
   armPos: '腕の位置',
+  eyeSmile: '笑い目',
+  blush: '頬の赤らみ',
   eyeOpenL: '左目の開き',
   eyeOpenR: '右目の開き',
   eyeX: '視線の左右',
@@ -371,6 +374,7 @@ interface AdvancedParameterControl {
   definition: PsdMotionParameterDefinition;
   range: HTMLInputElement;
   number: HTMLInputElement;
+  unavailable: HTMLElement;
 }
 
 const advancedControls = new Map<PsdMotionParameterName, AdvancedParameterControl>();
@@ -476,7 +480,13 @@ function createAdvancedParameterControls(): void {
       number.max = String(definition.max);
       number.step = String(definition.step);
       number.setAttribute('aria-label', `${name.textContent}の数値`);
-      advancedControls.set(definition.key, { definition, range, number });
+      const unavailable = document.createElement('span');
+      unavailable.className = 'tuning-note';
+      unavailable.id = `parameter-${definition.key}-reason`;
+      unavailable.hidden = true;
+      range.setAttribute('aria-describedby', unavailable.id);
+      number.setAttribute('aria-describedby', unavailable.id);
+      advancedControls.set(definition.key, { definition, range, number, unavailable });
       syncAdvancedParameterControl(definition.key);
       const update = (input: HTMLInputElement) => {
         demoToken += 1;
@@ -486,7 +496,7 @@ function createAdvancedParameterControls(): void {
       number.addEventListener('change', () => update(number));
       inputRow.append(range, number);
       item.htmlFor = range.id;
-      item.append(heading, inputRow);
+      item.append(heading, inputRow, unavailable);
       grid.append(item);
     }
     details.append(summary, grid);
@@ -648,6 +658,10 @@ function setSelectedLayer(
   selectedPartBadge.textContent = `選択中：${selected.label}`;
   selectedPartBadge.hidden = workspaceMode !== 'layers';
   avatar?.setMotionEnabled(false);
+  const selectedProfile = createDefaultPsdMotionProfile();
+  selectedProfile.parameters.eyeSmile = selected.name.toLowerCase() === 'eye_smile' ? 1 : 0;
+  selectedProfile.parameters.blush = selected.name.toLowerCase() === 'blush' ? 1 : 0;
+  avatar?.setMotionProfile(selectedProfile);
   avatar?.setMouthOpen(selected.name.toLowerCase() === requestedExpressions.find(item => item.registration === 'mouth')?.name ? 1 : 0);
   avatar?.setEyeOpen(selected.name.toLowerCase() === requestedExpressions.find(item => item.registration === 'eyes')?.name ? 0 : 1);
   flashLayerFocus(selected.name.toLowerCase());
@@ -1196,6 +1210,7 @@ function setWorkspaceMode(mode: WorkspaceMode): void {
     cameraControls?.stop();
     voiceControls?.stop();
     avatar?.setMotionEnabled(false);
+    avatar?.setMotionProfile(createDefaultPsdMotionProfile());
     avatar?.setEyeOpen(1);
     avatar?.setMouthOpen(0);
     clearLayerFocus();
@@ -1387,7 +1402,15 @@ const api: RigQaApi = {
   error: null,
   summary: null,
   anchors: {},
-  setState(nextEyeOpen, nextMouthOpen) {
+  setState(nextEyeOpen, nextMouthOpen, expressions) {
+    if (expressions) {
+      for (const name of ['eyeSmile', 'blush'] as const) if (expressions[name] !== undefined) {
+        const definition = PSD_MOTION_PARAMETER_DEFINITIONS.find(item => item.key === name)!;
+        profileParameters[name] = normalizeParameterValue(definition, expressions[name]!);
+        syncAdvancedParameterControl(name);
+      }
+      applyAvatarMotionMode(currentMode);
+    }
     const previousEyeOpen = eyeOpen;
     eyeOpen = Math.max(0, Math.min(1, nextEyeOpen));
     mouthOpen = Math.max(0, Math.min(1, nextMouthOpen));
@@ -1510,6 +1533,7 @@ async function activatePsd(
   cameraControls?.stop();
   voiceControls?.stop();
   avatar = nextAvatar;
+  avatarParts = new Set(detection.summary.partsFound);
   previousAvatar?.dispose();
 
   viewOffsetX = options.preserveView ? previousView.offsetX : 0;
@@ -1696,7 +1720,7 @@ function expressionRequestMessage(item: GeneratedPsd, id: string): string {
     `npm run still2rig-psd -- import-expressions ${id} を実行し、取り込みが通ったら npm run still2rig-psd -- repair ${id} --expressions ${root}/generated-expressions を実行してください。`,
     '前回の修復で使った差し替え画像は自動で引き継がれます。引き継いだ内容も実行結果で確認してください。',
     `既存の品質検査の結果と、${labels}の絵を確認して報告してください。`,
-    'このプレビューでは笑い目・頬の赤らみの表示切替に対応していません。PSDへの取り込み結果だけを報告してください。',
+    '笑い目と頬の赤らみは、プレビューの「細かい設定」のつまみで確認できます。数字キーでの切り替えには対応していません。',
   ];
   const common = [
     '仮の表情（derive-expressions）で置き換えないでください。',
@@ -1855,7 +1879,11 @@ function setCameraConflicts(active: boolean): void {
     'eyeX', 'eyeY', 'mouthOpen', 'mouthForm', 'brow',
   ]);
   for (const [name, control] of advancedControls) {
-    const disabled = !avatar || (active && trackedParameters.has(name)) || (voiceActive && name === 'mouthOpen');
+    const part = name === 'eyeSmile' ? 'eye_smile' : name === 'blush' ? 'blush' : null;
+    const missing = Boolean(part && !avatarParts.has(part));
+    control.unavailable.hidden = !missing;
+    control.unavailable.textContent = missing ? `このPSDには${PARAMETER_LABELS[name]}の絵がありません。` : '';
+    const disabled = !avatar || missing || (active && trackedParameters.has(name)) || (voiceActive && name === 'mouthOpen');
     control.range.disabled = disabled;
     control.number.disabled = disabled;
   }

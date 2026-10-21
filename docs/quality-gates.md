@@ -240,6 +240,22 @@ background, and writes frames and `motion-qa.json` under
 `.still2rig-psd/jobs/<job>/reports/motion-qa/`. The job manifest records the
 result under `result.motionQa`.
 
+When visible `eye_smile` or `blush` artwork is present, the adapter also records
+strengths 0, 0.5, and 1. Smiling eyes include a fully closed blink at strength 1;
+its pixels must match the open-eye state at that strength. Each expression must
+change pixels in its own region while the rest stays stable. These comparisons
+use an RGB delta greater than 1 to retain faint blush (the regular eye/mouth
+checks use 24). Missing optional artwork adds no capture requirement and does
+not affect `productionReady`.
+
+In the preview, open **細かい設定** and **目・眉** to adjust **笑い目** and
+**頬の赤らみ** from 0 to 1 (default 0). Missing artwork disables its control
+and displays a reason. Smile strength fades out both ordinary open and closed
+eyes, follows eye size/position/angle and head movement, and does not change the
+closed-eye anchor. Blush follows the head and changes opacity only. The same
+values reach the stream page. Selecting either part in **重なりを直す** reveals
+its artwork; numeric-key expression switching is not supported.
+
 | Check | How it is measured |
 | --- | --- |
 | Eye and mouth change | Pixels whose largest RGB change exceeds 24 inside the eye or mouth region, open vs. closed. |
