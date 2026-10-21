@@ -27,10 +27,10 @@ export function validateExpressions(config, map) {
           || !Number.isInteger(mask.minimumDilation) || mask.minimumDilation < 0 || mask.minimumDilation > 128
           || typeof mask.fillBounds !== 'boolean' || typeof mask.mouthLimits !== 'boolean') fail();
     }
-    if (item.mask?.region !== undefined && !['cheeks', 'tears', 'temple', 'forehead'].includes(item.mask.region)) fail();
+    if (item.mask?.region !== undefined && !['cheeks', 'tears', 'temple', 'forehead', 'mouth'].includes(item.mask.region)) fail();
     if (item.mask?.upperExpansionRatio !== undefined && (typeof item.mask.upperExpansionRatio !== 'number' || !Number.isFinite(item.mask.upperExpansionRatio) || item.mask.upperExpansionRatio < 0 || item.mask.upperExpansionRatio > 1)) fail();
     if (item.extraction === 'soft' && (item.mask?.region !== 'cheeks' || item.registration !== 'face')) fail();
-    if (item.extraction === 'overlay' && (item.protectedCheck !== 'overlay' || item.registration !== 'face' || !['tears','temple','forehead'].includes(item.mask?.region))) fail();
+    if (item.extraction === 'overlay' && (item.protectedCheck !== 'overlay' || !((item.registration === 'face' && ['tears','temple','forehead'].includes(item.mask?.region)) || (item.registration === 'mouth' && item.mask?.region === 'mouth')))) fail();
     if (item.protectedCheck === 'overlay' && item.extraction !== 'overlay') fail();
     names.add(item.name);
   }

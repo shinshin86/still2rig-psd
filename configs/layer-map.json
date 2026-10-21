@@ -19,6 +19,8 @@
     { "source": "mouth.png", "target": "mouth_close", "required": true },
     { "source": "mouth_close.png", "target": "mouth_close", "required": false, "override": true },
     { "source": "mouth_open.png", "target": "mouth_open", "requiredForProduction": true },
+    { "source": "mouth_laugh.png", "target": "mouth_laugh", "required": false },
+    { "source": "mouth_round.png", "target": "mouth_round", "required": false },
     { "source": "eye_close.png", "target": "eye_close", "requiredForProduction": true },
     { "source": "eye_smile.png", "target": "eye_smile", "required": false },
     { "source": "tears.png", "target": "tears", "required": false },

@@ -170,6 +170,50 @@
       "placeholderFrom": null,
       "checkFrontHair": false,
       "protectedCheck": "overlay"
+    },
+    {
+      "name": "mouth_laugh",
+      "label": "笑った口",
+      "requestLabel": "笑った口",
+      "prompt": "Replace only the mouth with a cheerful open laughing anime mouth. Make the mouth about one tenth wider than the current open mouth, with raised corners, a dark warm mouth interior and a small pink tongue. Keep the mouth center at the existing lip line; keep its total height about half the width of the current open mouth. Match the fine brown line art and existing flat anime palette. Do not add teeth, lipstick, skin shading, hair, nose changes or a second mouth. Preserve the face, eyes, nose, chin outline, pose and every pixel outside the mask. Output ONLY the single new mouth drawing (outline, dark interior and tongue) on genuine alpha transparency at the exact reference coordinates. Do not render any part of the face, skin, hair, nose, eyes, neck or background. No white or checkerboard background. The source face is a position/style reference only.",
+      "editableLayers": [
+        "mouth_close"
+      ],
+      "mask": {
+        "dilationRatio": 0.2,
+        "minimumDilation": 3,
+        "fillBounds": true,
+        "mouthLimits": true,
+        "region": "mouth"
+      },
+      "extraction": "overlay",
+      "registration": "mouth",
+      "split": false,
+      "placeholderFrom": null,
+      "checkFrontHair": true,
+      "protectedCheck": "overlay"
+    },
+    {
+      "name": "mouth_round",
+      "label": "丸く開いた口",
+      "requestLabel": "丸く開いた口",
+      "prompt": "Replace only the mouth with one small surprised Japanese O anime mouth, about two fifths of the current open mouth width, rounded and about one quarter taller than wide. Use a fine brown outline, a dark warm interior and only a subtle pink tongue at the bottom. Keep the same existing mouth center and anime style. Do not add teeth, lipstick, skin shading, hair, nose changes or a second mouth. Preserve the face, eyes, nose, chin outline, pose and every pixel outside the mask. Output ONLY the single new mouth drawing (outline, dark interior and tongue) on genuine alpha transparency at the exact reference coordinates. Do not render any part of the face, skin, hair, nose, eyes, neck or background. No white or checkerboard background. The source face is a position/style reference only.",
+      "editableLayers": [
+        "mouth_close"
+      ],
+      "mask": {
+        "dilationRatio": 0.2,
+        "minimumDilation": 3,
+        "fillBounds": true,
+        "mouthLimits": true,
+        "region": "mouth"
+      },
+      "extraction": "overlay",
+      "registration": "mouth",
+      "split": false,
+      "placeholderFrom": null,
+      "checkFrontHair": true,
+      "protectedCheck": "overlay"
     }
   ]
 }

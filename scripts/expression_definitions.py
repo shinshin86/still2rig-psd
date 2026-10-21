@@ -55,14 +55,14 @@ def validate_expressions(config, layer_map):
                 fail()
         if item["mask"] is not None:
             mask = item["mask"]
-            if "region" in mask and mask["region"] not in ("cheeks", "tears", "temple", "forehead"):
+            if "region" in mask and mask["region"] not in ("cheeks", "tears", "temple", "forehead", "mouth"):
                 fail()
             if "upperExpansionRatio" in mask and (type(mask["upperExpansionRatio"]) not in (int, float)
                     or not math.isfinite(mask["upperExpansionRatio"]) or not 0 <= mask["upperExpansionRatio"] <= 1):
                 fail()
         if item["extraction"] == "soft" and (item["mask"].get("region") != "cheeks" or item["registration"] != "face"):
             fail()
-        if item["extraction"] == "overlay" and (item["protectedCheck"] != "overlay" or item["registration"] != "face" or item["mask"].get("region") not in ("tears", "temple", "forehead")):
+        if item["extraction"] == "overlay" and (item["protectedCheck"] != "overlay" or not ((item["registration"] == "face" and item["mask"].get("region") in ("tears", "temple", "forehead")) or (item["registration"] == "mouth" and item["mask"].get("region") == "mouth"))):
             fail()
         if item["protectedCheck"] == "overlay" and item["extraction"] != "overlay":
             fail()

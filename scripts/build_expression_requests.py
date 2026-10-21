@@ -54,7 +54,7 @@ def build_requests(job_id: str, layer_dir: Path, layer_map: Path, output_dir: Pa
         variant_layers = layers if definition["extraction"] == "overlay" else {key:value for key,value in layers.items() if key not in ("front hair","headwear")}
         variant_composite = composite_layers(variant_layers,definitions=definitions)
         region = mask_options.get("region")
-        editable = overlay_mask(layers,composite.size,region) if definition["extraction"] == "overlay" else cheek_mask(layers, composite.size) if region == "cheeks" else alpha_union(layers, targets, composite.size)
+        editable = overlay_mask(layers,composite.size,region) if definition["extraction"] == "overlay" and definition["registration"] == "face" else cheek_mask(layers, composite.size) if region == "cheeks" else alpha_union(layers, targets, composite.size)
         editable_box = editable.getbbox()
         if not editable_box:
             raise ValueError(f"Cannot prepare {name}: the relevant layers are empty.")
@@ -83,12 +83,14 @@ def build_requests(job_id: str, layer_dir: Path, layer_map: Path, output_dir: Pa
             editable = exclude_eye_obstacles(editable, layer_dir, mapping,
                                              eye_support=alpha_union(layers, targets, composite.size, threshold=0),
                                              eye_padding=max(4, dilation))
+        if definition["registration"] == "mouth" and definition["extraction"] == "overlay":
+            editable = ImageChops.multiply(editable, alpha_union(layers, ["face"], composite.size).filter(ImageFilter.MinFilter(9)))
         editable_box = editable.getbbox()
         editable = editable.crop(crop_box).resize(request_size, Image.Resampling.NEAREST)
         variant_dir = output_dir / name
         variant_dir.mkdir(exist_ok=True)
         variant_composite.crop(crop_box).resize(request_size, Image.Resampling.LANCZOS).save(variant_dir / "input.png")
-        composite_layers(variant_layers, [] if region == "cheeks" or definition["extraction"] == "overlay" else targets, definitions).crop(crop_box).resize(request_size, Image.Resampling.LANCZOS).save(variant_dir / "underlay.png")
+        composite_layers(variant_layers, [] if region == "cheeks" or (definition["extraction"] == "overlay" and definition["registration"] == "face") else targets, definitions).crop(crop_box).resize(request_size, Image.Resampling.LANCZOS).save(variant_dir / "underlay.png")
         mask = Image.new("RGBA", editable.size, (255, 255, 255, 255))
         mask.putalpha(ImageChops.invert(editable))
         mask.save(variant_dir / "mask.png")

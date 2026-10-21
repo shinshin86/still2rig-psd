@@ -4,12 +4,13 @@ export interface ExpressionDefinition {
   requestLabel: string | null;
   prompt: string | null;
   editableLayers: string[];
-  mask: { dilationRatio: number; minimumDilation: number; fillBounds: boolean; mouthLimits: boolean; region?: 'cheeks'; upperExpansionRatio?: number } | null;
-  extraction: 'diff' | 'soft' | null;
+  mask: { dilationRatio: number; minimumDilation: number; fillBounds: boolean; mouthLimits: boolean; region?: 'cheeks'|'tears'|'temple'|'forehead'|'mouth'; upperExpansionRatio?: number } | null;
+  extraction: 'diff' | 'soft' | 'overlay' | null;
   registration: 'eyes' | 'mouth' | 'face' | 'none';
   split: boolean;
   placeholderFrom: string | null;
   checkFrontHair: boolean;
+  protectedCheck: 'strict'|'seam'|'overlay';
   sources: string[];
   requiredForProduction: boolean;
 }

@@ -318,9 +318,14 @@ def import_results(args, report):
             source = Image.open(result_file)
             if "A" not in source.getbands() and "transparency" not in source.info:
                 raise ValueError(f"{name}: a PNG with genuine alpha transparency is required.")
-            result = result.resize(reference.size,Image.Resampling.LANCZOS)
+            if definition["registration"] == "mouth":
+                from overlay_expression import register_mouth_overlay
+                mouth = Image.open(args.layer_dir / f"{definition['editableLayers'][0]}.png").convert("RGBA")
+                result, details["mouthRegistration"] = register_mouth_overlay(result,mouth,box,reference.size,args.max_alignment_shift)
+            else:
+                result = result.resize(reference.size,Image.Resampling.LANCZOS)
             details["protectedCheck"] = "overlay"
-            details["overlay"] = validate_overlay_artwork(result,editable,name)
+            details["overlay"] = validate_overlay_artwork(result,editable,name,underlay if definition["registration"] == "mouth" else None)
             details["resizedProportionally"] = source.size != reference.size
             mode = "overlay"
         else:

@@ -46,7 +46,7 @@ test('requests preserve the default pair and select additional expressions with 
   assert.deepEqual(Object.keys(JSON.parse(fs.readFileSync(path.join(f.requests, 'requests.json'))).variants), ['eye_close', 'mouth_open']);
   ok('expression-requests', f.id, '--only', 'all');
   const variants = JSON.parse(fs.readFileSync(path.join(f.requests, 'requests.json'))).variants;
-  assert.deepEqual(Object.keys(variants), ['eye_close', 'mouth_open', 'eye_smile', 'blush', 'tears', 'sweat', 'anger_mark']);
+  assert.deepEqual(Object.keys(variants), ['eye_close', 'mouth_open', 'eye_smile', 'blush', 'tears', 'sweat', 'anger_mark', 'mouth_laugh', 'mouth_round']);
   assert.deepEqual(variants.eye_smile.protectedFeatures, { layers: ['eyebrow', 'front hair'], paddingPx: 4 });
   assert.ok(variants.eye_smile.editableBox[1] < variants.eye_close.editableBox[1]);
   const mask = readPngRgba(path.join(f.requests, 'blush/mask.png'));

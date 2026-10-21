@@ -69,6 +69,33 @@ const mouthReference = expressions.find(item => item.name === mouthDefinition.ed
 function overlayExpressionQuality(layerDir, definition, quality) {
   const image = readPngRgba(findLayerFile(layerDir,definition.sources));
   const art = artworkStats(image,8);
+  if (definition.registration === 'mouth') {
+    const faceImage = readPngRgba(findLayerFile(layerDir,['face.png']));
+    const faceStats = artworkStats(faceImage,quality.alphaThreshold);
+    const closed = readPngRgba(findLayerFile(layerDir,mouthReference.sources));
+    const center = centroid(closed);
+    const width = faceStats.bbox[2]-faceStats.bbox[0];
+    const height = faceStats.bbox[3]-faceStats.bbox[1];
+    let outside=0,skin=0,solid=0,transparent=0;
+    for(let i=0;i<image.data.length;i+=4) {
+      const a=image.data[i+3];
+      if(!a)transparent++;
+      if(a>8 && faceImage.data[i+3]<=quality.alphaThreshold)outside++;
+      if(a>=128) {
+        solid++;
+        if(faceImage.data[i+3]>=240 && Math.max(...[0,1,2].map(c=>Math.abs(image.data[i+c]-faceImage.data[i+c])))<=24)skin++;
+      }
+    }
+    const mouthError=distance(centroid(image),center);
+    return {artwork:art,errorsPx:{mouth:mouthError},checks:{
+      artworkPresent:art.visiblePixels>=8,
+      transparentBackground:transparent/(image.width*image.height)>=.9,
+      insideFace:outside===0,
+      compactMouth:Boolean(art.bbox)&&art.bbox[2]-art.bbox[0]<=width*.26&&art.bbox[3]-art.bbox[1]<=height*.14,
+      noSkinColor:skin/Math.max(1,solid)<.03,
+      mouthWithinTolerance:mouthError<=quality.registrationTolerancePixels,
+    }};
+  }
   const face = artworkStats(readPngRgba(findLayerFile(layerDir,['face.png'])),8);
   const eyes = ['eyewhite.png','irides.png','eyelash.png'].map(name=>findLayerFile(layerDir,[name])).filter(Boolean).map(file=>artworkStats(readPngRgba(file),16).bbox).filter(Boolean);
   const eye = {bbox:[Math.min(...eyes.map(b=>b[0])),Math.min(...eyes.map(b=>b[1])),Math.max(...eyes.map(b=>b[2])),Math.max(...eyes.map(b=>b[3]))]};
@@ -225,11 +252,11 @@ export function runQa({ psdFile, layerDir, buildReportFile, reportFile }) {
       : definition.registration === 'face' ? softExpressionQuality(layerDir, definition, defaults.quality)
       : expressionRegistration(layerDir, psd.width, defaults.quality.registrationTolerancePixels,
         isMouth ? definition : mouthDefinition, isMouth ? eyeDefinition : definition);
-    const checks = definition.registration === 'face' ? { ...detail.checks }
+    const checks = definition.registration === 'face' || definition.extraction === 'overlay' ? { ...detail.checks }
       : Object.fromEntries(Object.entries(detail.checks).filter(([name]) => isMouth ? name.startsWith('mouth') : name.startsWith('eyes')));
     checks.inFrontOfFace = before('face', definition.name);
     checks.behindFrontHair = !definition.checkFrontHair || before(definition.name, 'front hair');
-    if (definition.extraction === 'overlay' && !definition.checkFrontHair) checks.inFrontOfHair = before('front hair',definition.name);
+    if (definition.extraction === 'overlay' && definition.registration === 'face' && !definition.checkFrontHair) checks.inFrontOfHair = before('front hair',definition.name);
     registration.additionalExpressions ??= {};
     registration.additionalExpressions[definition.name] = { ...detail, checks, pass: Object.values(checks).every(Boolean) };
     if (definition.requiredForProduction) registration.checks[`${definition.name}Registered`] = Object.values(checks).every(Boolean);
