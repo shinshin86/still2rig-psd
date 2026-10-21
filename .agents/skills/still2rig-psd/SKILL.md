@@ -242,6 +242,26 @@ Blink-driven brow motion decreases toward the threshold. Smiling eyes follow eye
 blush follows the head with opacity only. Selecting either part in
 **重なりを直す** reveals it.
 
+### Expression combinations
+
+`configs/expression-presets.json` defines the nine faces in the **表情** buttons.
+Selection updates only expression sliders over 250 ms; manual changes show
+**自分で調整中**. Pose, gaze, normal blinking and voice input stay independent.
+Without smile artwork, joy raises the lower lid of the existing eye and wink
+closes one eye, handing off to closed-eye art without overlapping drawings.
+Missing blush is ignored. Brow deformation preserves ink thickness while
+changing its centerline. New controls bend worried/angry/flat brows,
+lower and tilt the upper lid, widen eyes and adjust smiling eyes per side.
+Mouth form affects both closed and open artwork. Camera mouth form and brow
+height add to expression values (clamped to -1..1); other tracking values keep
+their existing weighted blend. Upper-lid and widening deformations precede blink
+closure and diminish into a smile, so normal blinks still close fully.
+All values reach the stream in validated live settings; old profiles use zero
+for new controls. Motion QA captures parts, preset blink states and representative
+transitions. It checks coverage and wink-side isolation, not visual naturalness.
+Inspect every 0.05 strength step, endpoints and representative transitions on
+PSDs both with and without optional artwork, and retain close-up evidence.
+
 ## Completion report
 
 Report the job id, input SHA-256, pinned See-through revision, PSD path and

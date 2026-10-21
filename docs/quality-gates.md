@@ -329,6 +329,41 @@ and head movement without changing the closed-eye anchor. Blush follows the head
 and changes opacity only. The same values reach the stream page. Selecting either
 part in **重なりを直す** reveals its artwork.
 
+### Expression controls and camera input
+
+The **表情** buttons select a complete face: neutral, joy, shy, angry, sad,
+surprised, flustered, unamused or wink. Definitions live in
+`configs/expression-presets.json`. Selection updates the expression sliders over
+250 ms; the renderer smooths the movement as well. Changing an expression slider
+marks the selection **自分で調整中**. Selecting another face replaces expression
+values, while pose, gaze, blink, hair and microphone controls retain their values.
+Without smiling-eye artwork, joy raises the lower lid using the existing open eye,
+and wink closes one eye with a single-drawing handoff to the blink artwork.
+The upper lash approaches the closed-eye position and endpoints without thinning.
+The closed artwork retains its ink thickness and endpoints as its curve returns. Missing
+blush is ignored. Unavailable artwork controls display a reason beside their slider.
+
+Worried and angry brows bend the inner and outer ends in mirrored directions;
+the flat-brow control straightens their centerline while retaining ink thickness. The upper-lid control moves the upper
+lash down without thinning its ink and clips the iris through the white-eye
+stencil. Its signed tilt lowers the inner end for anger or the outer end for
+sadness. Widening slightly expands the eye and reduces the iris. These deformations
+run before normal blink closure and decrease as the lower lid rises into a smile.
+Left and right smile strengths are independent; the shared smile strength takes
+the maximum with each side. Mouth form bends both open and closed mouth artwork.
+
+Camera mouth form and brow height are added to the expression values and clamped
+to -1..1. Camera pose, gaze and eye openness retain their existing weighted blend;
+normal blinking can still close the eyes. Voice and camera mouth openness use the
+existing maximum rule. Expression values travel to the stream through the same
+validated live settings as the sliders. Older profiles default new controls to zero.
+
+Motion QA records each new part at 0/0.5/1, all nine expressions with open,
+half-blinking and closed eyes, and representative transitions. Coverage and the
+unchanged opposite eye of a wink have automatic checks. Naturalness still needs
+inspection of all 0.05 strength steps, expression endpoints and transition frames
+on both a PSD with optional artwork and a PSD without it.
+
 | Check | How it is measured |
 | --- | --- |
 | Eye and mouth change | Pixels whose largest RGB change exceeds 24 inside the eye or mouth region, open vs. closed. |
