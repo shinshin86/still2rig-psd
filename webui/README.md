@@ -77,7 +77,6 @@ proportion to their strength, including during blinking, and follow eye and
 head adjustments. Blush follows the head without feature deformation and only
 changes opacity. The stream page receives both settings. Selecting either
 part in **重なりを直す** reveals it without changing the motion settings.
-Numeric-key expression switching is not supported.
 
 ## Expected PSD structure
 
@@ -129,7 +128,7 @@ npm run preview
 開くと、顔や体の向き、目・眉、口、髪・物理の計34項目を、スライダーと数値入力で
 調整できます。「目・眉」の「笑い目」「頬の赤らみ」は0〜1で調整でき、最初の値は0です。
 対応する絵がPSDになければ操作できず、理由を表示します。これらの値は配信画面にも反映されます。
-「重なりを直す」で部分を選ぶと、その表情の絵を表示します。数字キーによる切り替えには対応していません。
+「重なりを直す」で部分を選ぶと、その表情の絵を表示します。
 各項目には最初の値を表示し、「最初の値に戻す」でまとめて元に戻せます。
 
 「重なりを直す」では、人物上の直したい部分をクリックして選べます。

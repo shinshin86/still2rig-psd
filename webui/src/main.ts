@@ -1720,7 +1720,7 @@ function expressionRequestMessage(item: GeneratedPsd, id: string): string {
     `npm run still2rig-psd -- import-expressions ${id} を実行し、取り込みが通ったら npm run still2rig-psd -- repair ${id} --expressions ${root}/generated-expressions を実行してください。`,
     '前回の修復で使った差し替え画像は自動で引き継がれます。引き継いだ内容も実行結果で確認してください。',
     `既存の品質検査の結果と、${labels}の絵を確認して報告してください。`,
-    '笑い目と頬の赤らみは、プレビューの「細かい設定」のつまみで確認できます。数字キーでの切り替えには対応していません。',
+    '笑い目と頬の赤らみは、プレビューの「細かい設定」のつまみで確認できます。',
   ];
   const common = [
     '仮の表情（derive-expressions）で置き換えないでください。',

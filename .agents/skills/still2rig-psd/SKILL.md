@@ -190,7 +190,7 @@ The preview and stream page support both strengths (0..1, default 0). In
 **細かい設定 → 目・眉**, **笑い目** and **頬の赤らみ** are disabled with a reason
 when the PSD has no matching artwork. Smiling eyes follow eye/head controls;
 blush follows the head with opacity only. Selecting either part in
-**重なりを直す** reveals it. Numeric-key expression switching is not supported.
+**重なりを直す** reveals it.
 
 ## Completion report
 

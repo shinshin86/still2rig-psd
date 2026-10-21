@@ -254,7 +254,7 @@ and displays a reason. Smile strength fades out both ordinary open and closed
 eyes, follows eye size/position/angle and head movement, and does not change the
 closed-eye anchor. Blush follows the head and changes opacity only. The same
 values reach the stream page. Selecting either part in **重なりを直す** reveals
-its artwork; numeric-key expression switching is not supported.
+its artwork.
 
 | Check | How it is measured |
 | --- | --- |
