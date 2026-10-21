@@ -93,8 +93,8 @@ export function decodePngRgba(buffer, label = 'PNG') {
   return { width, height, data: rgba };
 }
 
-function hasVisiblePixels(data) {
-  for (let index = 3; index < data.length; index += 4) if (data[index] > 16) return true;
+function hasVisiblePixels(data, threshold = 16) {
+  for (let index = 3; index < data.length; index += 4) if (data[index] > threshold) return true;
   return false;
 }
 
@@ -149,7 +149,7 @@ export function buildPsd({ layerDir, output, reportFile, previewPlaceholders = f
     const item = selected.get(target);
     if (!item) continue;
     const data = readPngRgba(item.source);
-    if (!hasVisiblePixels(data.data)) continue;
+    if (!hasVisiblePixels(data.data, expressions.some(item => item.name === target && item.extraction === 'soft') ? 0 : 16)) continue;
     if (!width) ({ width, height } = data);
     if (data.width !== width || data.height !== height) throw new Error(`Layer dimensions differ: ${path.basename(item.source)}`);
     layers.push({ name: target, left: 0, top: 0, right: width, bottom: height, imageData: data });

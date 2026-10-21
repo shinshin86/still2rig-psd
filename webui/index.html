@@ -351,10 +351,17 @@
           <section id="motion-panel" role="tabpanel" aria-labelledby="motion-tab">
           <h2 class="panel-title">動作を確認</h2>
           <details id="expression-request-control" class="advanced-panel" hidden>
-            <summary>閉じた目と開いた口の絵を作ってもらう</summary>
+            <summary>表情の絵を作ってもらう</summary>
             <div class="advanced-content">
               <p id="expression-request-summary" class="tuning-note"></p>
               <div id="expression-request-body">
+                <fieldset id="expression-choices" style="display:grid;gap:8px;margin:0;padding:10px;border:1px solid #495570;border-radius:8px">
+                  <legend>作ってもらう表情</legend>
+                  <label class="camera-check"><input type="checkbox" data-expression-choice="eye_close,mouth_open" checked />閉じた目と開いた口</label>
+                  <label class="camera-check"><input type="checkbox" data-expression-choice="eye_smile" />笑い目</label>
+                  <label class="camera-check"><input type="checkbox" data-expression-choice="blush" />頬の赤らみ</label>
+                </fieldset>
+                <p class="tuning-note">笑い目と頬の赤らみはPSDに追加できます。この画面での表情の切り替えは、まだ使えません。</p>
                 <div class="field-head"><span>依頼する相手</span></div>
                 <div class="request-recipient" role="group" aria-label="依頼する相手">
                   <button type="button" data-recipient="codex" aria-pressed="true">Codex</button>
@@ -363,14 +370,14 @@
                 <ol class="request-steps" data-recipient-steps="codex">
                   <li>下のボタンで依頼文をコピーします。</li>
                   <li>このフォルダで開いたCodexに貼り付けて送ります。Codexが絵を描き、このPSDに組み込みます。</li>
-                  <li>完了の連絡が来たら、上の「一覧を更新」を押してPSDを開き直し、まばたきと口の動きを確認します。</li>
+                  <li>完了の連絡が来たら、上の「一覧を更新」を押してPSDを開き直し、追加した絵と品質検査の結果を確認します。</li>
                 </ol>
                 <ol class="request-steps" data-recipient-steps="claude" hidden>
                   <li>下のボタンで依頼文をコピーします。</li>
                   <li>このフォルダで開いたClaude Codeに貼り付けて送ります。Claude Codeは絵を描けないため、画像生成に渡すファイルと保存先を案内してくれます。</li>
                   <li>案内に沿ってCodexなどの画像生成で絵を作り、指定された場所に保存します。</li>
                   <li>保存したことをClaude Codeに伝えると、絵を取り込んでPSDを作り直します。</li>
-                  <li>終わったら、上の「一覧を更新」を押してPSDを開き直し、まばたきと口の動きを確認します。</li>
+                  <li>終わったら、上の「一覧を更新」を押してPSDを開き直し、追加した絵と品質検査の結果を確認します。</li>
                 </ol>
                 <p id="expression-request-disclosure" class="request-disclosure">顔の画像がCodexの画像生成に送られます。依頼文をコピーすると、送信に同意したものとして依頼文に書き込まれます。</p>
                 <button id="expression-request-copy" type="button">依頼文をコピー</button>

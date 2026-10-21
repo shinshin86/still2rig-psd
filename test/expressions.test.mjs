@@ -75,7 +75,7 @@ config["expressions"].append(dummy)
 map_file=root/"layer-map.json"; map_file.write_text(json.dumps(mapping))
 definition_file=root/"expressions.json"; definition_file.write_text(json.dumps(config))
 definitions=load_expressions(mapping,definition_file)
-report=build_requests("synthetic-definition",layers,map_file,root/"requests",definitions)
+report=build_requests("synthetic-definition",layers,map_file,root/"requests",definitions,only="eye_close,mouth_open,test_expression")
 print(json.dumps({"variants":list(report["variants"]),"required":definitions[-1]["requiredForProduction"]}))
 `, path.relative(PROJECT_ROOT, root)], { cwd: PROJECT_ROOT, encoding: 'utf8' });
     assert.equal(result.status, 0, result.stderr);
@@ -105,11 +105,11 @@ test('additional eye definitions use the same registration check without changin
     expressions.push(validateExpressions(config, map).at(-1));
     fs.copyFileSync(path.join(layerDir, 'eye_close.png'), path.join(layerDir, 'test_eye.png'));
     const registered = runQa({ psdFile, layerDir, buildReportFile, reportFile });
-    assert.equal(registered.registration.checks.test_eyeRegistered, true);
+    assert.equal(registered.registration.additionalExpressions.test_eye.pass, true);
     assert.equal(registered.registration.checks.eyesHorizontallyRegistered, true);
     python('-c', 'from PIL import Image; import sys; im=Image.open(sys.argv[1]); im.transform(im.size,Image.Transform.AFFINE,(1,0,-24,0,1,0)).save(sys.argv[1])', path.join(layerDir, 'test_eye.png'));
     const shifted = runQa({ psdFile, layerDir, buildReportFile, reportFile });
-    assert.equal(shifted.registration.checks.test_eyeRegistered, false);
+    assert.equal(shifted.registration.additionalExpressions.test_eye.pass, false);
     assert.equal(shifted.registration.checks.eyesHorizontallyRegistered, true);
   } finally {
     expressions.length = count;

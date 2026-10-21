@@ -15,10 +15,12 @@
     { "source": "eyebrow.png", "target": "eyebrow", "required": false },
     { "source": "nose.png", "target": "nose", "required": false },
     { "source": "facedetail.png", "target": "facedetail", "required": false },
+    { "source": "blush.png", "target": "blush", "required": false },
     { "source": "mouth.png", "target": "mouth_close", "required": true },
     { "source": "mouth_close.png", "target": "mouth_close", "required": false, "override": true },
     { "source": "mouth_open.png", "target": "mouth_open", "requiredForProduction": true },
     { "source": "eye_close.png", "target": "eye_close", "requiredForProduction": true },
+    { "source": "eye_smile.png", "target": "eye_smile", "required": false },
     { "source": "front hair.png", "target": "front hair", "required": false },
     { "source": "headwear.png", "target": "headwear", "required": false }
   ],

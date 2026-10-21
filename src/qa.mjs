@@ -159,6 +159,29 @@ function expressionRegistration(layerDir, canvasWidth, tolerance, mouthTarget = 
   };
 }
 
+function softExpressionQuality(layerDir, definition, quality) {
+  const file = findLayerFile(layerDir, definition.sources);
+  const image = readPngRgba(file);
+  const face = readPngRgba(findLayerFile(layerDir, ['face.png']));
+  const features = [...['eyewhite.png', 'irides.png', 'eyelash.png'].map(name => findLayerFile(layerDir, [name])), findLayerFile(layerDir, mouthReference.sources)]
+    .filter(Boolean).map(readPngRgba);
+  let pixels = 0, outside = 0, overlap = 0, maximum = 0;
+  for (let i = 3; i < image.data.length; i += 4) {
+    const alpha = image.data[i];
+    if (!alpha) continue;
+    pixels++;
+    maximum = Math.max(maximum, alpha);
+    if (face.data[i] <= quality.alphaThreshold) outside++;
+    if (features.some(feature => feature.data[i] > quality.alphaThreshold)) overlap++;
+  }
+  return {
+    checks: { insideFace: outside === 0, avoidsEyesAndMouth: pixels > 0 && overlap / pixels <= quality.softExpressionMaximumFeatureOverlap,
+      opacityWithinLimit: maximum <= Math.round(quality.softExpressionMaximumAlpha * 255) },
+    metrics: { visiblePixels: pixels, outsideFacePixels: outside, featureOverlapPixels: overlap, maximumAlpha: maximum / 255 },
+    thresholds: { maximumAlpha: quality.softExpressionMaximumAlpha, maximumFeatureOverlap: quality.softExpressionMaximumFeatureOverlap },
+  };
+}
+
 export function runQa({ psdFile, layerDir, buildReportFile, reportFile }) {
   const defaults = loadDefaults();
   const build = readJson(buildReportFile);
@@ -169,7 +192,8 @@ export function runQa({ psdFile, layerDir, buildReportFile, reportFile }) {
   const before = (back, front) => !positions.has(back) || !positions.has(front) || positions.get(back) < positions.get(front);
   const visible = psd.layers.every((layer) => {
     if (!layer.imageData) return false;
-    for (let index = 3; index < layer.imageData.data.length; index += 4) if (layer.imageData.data[index] > defaults.quality.alphaThreshold) return true;
+    const threshold = expressions.some(item => item.name === layer.name && item.extraction === 'soft') ? 0 : defaults.quality.alphaThreshold;
+    for (let index = 3; index < layer.imageData.data.length; index += 4) if (layer.imageData.data[index] > threshold) return true;
     return false;
   });
   const registration = expressionRegistration(layerDir, psd.width, defaults.quality.registrationTolerancePixels);
@@ -177,12 +201,16 @@ export function runQa({ psdFile, layerDir, buildReportFile, reportFile }) {
     if (definition.registration === 'none' || definition === mouthDefinition || definition === eyeDefinition
         || !findLayerFile(layerDir, definition.sources)) continue;
     const isMouth = definition.registration === 'mouth';
-    const detail = expressionRegistration(layerDir, psd.width, defaults.quality.registrationTolerancePixels,
-      isMouth ? definition : mouthDefinition, isMouth ? eyeDefinition : definition);
-    const checks = Object.fromEntries(Object.entries(detail.checks).filter(([name]) => isMouth ? name.startsWith('mouth') : name.startsWith('eyes')));
+    const detail = definition.registration === 'face' ? softExpressionQuality(layerDir, definition, defaults.quality)
+      : expressionRegistration(layerDir, psd.width, defaults.quality.registrationTolerancePixels,
+        isMouth ? definition : mouthDefinition, isMouth ? eyeDefinition : definition);
+    const checks = definition.registration === 'face' ? { ...detail.checks }
+      : Object.fromEntries(Object.entries(detail.checks).filter(([name]) => isMouth ? name.startsWith('mouth') : name.startsWith('eyes')));
+    checks.inFrontOfFace = before('face', definition.name);
+    checks.behindFrontHair = !definition.checkFrontHair || before(definition.name, 'front hair');
     registration.additionalExpressions ??= {};
-    registration.additionalExpressions[definition.name] = { ...detail, checks };
-    registration.checks[`${definition.name}Registered`] = Object.values(checks).every(Boolean);
+    registration.additionalExpressions[definition.name] = { ...detail, checks, pass: Object.values(checks).every(Boolean) };
+    if (definition.requiredForProduction) registration.checks[`${definition.name}Registered`] = Object.values(checks).every(Boolean);
   }
   const mouthArtwork = mouthArtworkQuality(layerDir, psd.width, psd.height, defaults.quality);
   const checks = {
@@ -192,8 +220,8 @@ export function runQa({ psdFile, layerDir, buildReportFile, reportFile }) {
     armsBehindTopwear: before('handwear', 'topwear'),
     bodyBehindNeck: before('topwear', 'neck') && before('handwear', 'neck'),
     neckBehindFace: before('neck', 'face'),
-    facePartsInFront: ['eyewhite', 'irides', 'eyelash', 'eyebrow', ...expressions.map(item => item.name)].every((name) => before('face', name)),
-    frontHairInFront: ['face', 'eyewhite', 'irides', ...expressions.filter(item => item.checkFrontHair).map(item => item.name)].every((name) => before(name, 'front hair')),
+    facePartsInFront: ['eyewhite', 'irides', 'eyelash', 'eyebrow', ...expressions.filter(item => item.requiredForProduction || item.prompt === null).map(item => item.name)].every((name) => before('face', name)),
+    frontHairInFront: ['face', 'eyewhite', 'irides', ...expressions.filter(item => item.checkFrontHair && (item.requiredForProduction || item.prompt === null)).map(item => item.name)].every((name) => before(name, 'front hair')),
     productionExpressions: build.missingProduction.length === 0 && build.placeholders.length === 0 && (build.previewExpressions || []).length === 0,
     expressionRegistration: Object.values(registration.checks).every(Boolean),
     expressionArtwork: Object.values(mouthArtwork.checks).every(Boolean),

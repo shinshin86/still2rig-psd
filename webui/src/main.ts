@@ -1,4 +1,4 @@
-import { requestedExpressions } from '../../src/expressions.mjs';
+import { requestedExpressions, generatableExpressions } from '../../src/expressions.mjs';
 import { installVoiceControls } from './voice/controls';
 import { createLivePublisher } from './live/publisher';
 import { installStreamControls } from './live/controls';
@@ -115,6 +115,8 @@ const expressionRequestSummary = requireElement<HTMLElement>('#expression-reques
 const expressionRequestBody = requireElement<HTMLElement>('#expression-request-body');
 const expressionRequestDisclosure = requireElement<HTMLElement>('#expression-request-disclosure');
 const expressionRecipientButtons = [...document.querySelectorAll<HTMLButtonElement>('[data-recipient]')];
+const expressionChoices = [...document.querySelectorAll<HTMLInputElement>('[data-expression-choice]')];
+const selectedExpressions = () => generatableExpressions.filter(item => expressionChoices.some(choice => choice.checked && choice.dataset.expressionChoice?.split(',').includes(item.name)));
 const expressionRecipientSteps = [...document.querySelectorAll<HTMLElement>('[data-recipient-steps]')];
 const startRequestCopy = requireElement<HTMLButtonElement>('#start-request-copy');
 const startRequestStatus = requireElement<HTMLElement>('#start-request-status');
@@ -1622,7 +1624,7 @@ function syncExpressionRequestControl(): void {
   expressionRequestBody.hidden = !usable;
   if (usable) {
     expressionRequestSummary.textContent = item?.productionReady === true
-      ? 'このPSDには閉じた目と開いた口の絵が入っています。絵を描き直したいときに使えます。'
+      ? 'このPSDには閉じた目と開いた口の絵が入っています。描き直しや、表情の追加を依頼できます。'
       : 'このPSDには閉じた目と開いた口の絵がまだないため、まばたきや口パクが不自然になります。画像生成でその絵を描き足し、このPSDに組み込めます。';
   } else if (unavailable) {
     expressionRequestSummary.textContent =
@@ -1634,8 +1636,9 @@ function syncExpressionRequestControl(): void {
   for (const steps of expressionRecipientSteps) {
     steps.hidden = steps.dataset.recipientSteps !== expressionRecipient;
   }
+  expressionRequestCopy.disabled = selectedExpressions().length === 0;
   expressionRequestDisclosure.hidden = expressionRecipient !== 'codex';
-  expressionRequestStatus.textContent = '';
+  expressionRequestStatus.textContent = selectedExpressions().length ? '' : '作ってもらう表情を1つ以上選んでください。';
   for (const button of startRecipientButtons) {
     button.setAttribute('aria-pressed', String(button.dataset.startRecipient === expressionRecipient));
   }
@@ -1683,13 +1686,17 @@ async function copyStartRequest(): Promise<void> {
 function expressionRequestMessage(item: GeneratedPsd, id: string): string {
   const root = `.still2rig-psd/jobs/${id}`;
   const target = `対象: ${item.name}（変換の識別名: ${id}）。`;
-  const prepare = `まず npm run still2rig-psd -- expression-requests ${id} を実行してください。`;
-  const names = requestedExpressions.map(item => item.name).join(' と ');
-  const results = `${root}/expression-requests/results/${requestedExpressions.map(item => `${item.name}.png`).join(' と ')}`;
+  const selected = selectedExpressions();
+  const labels = selected.map(item => item.label).join('・');
+  const selection = selected.map(item => item.name).join(',');
+  const prepare = `まず npm run still2rig-psd -- expression-requests ${id} --only ${selection} を実行してください。`;
+  const names = selected.map(item => item.name).join(' と ');
+  const results = `${root}/expression-requests/results/${selected.map(item => `${item.name}.png`).join(' と ')}`;
   const finish = [
     `npm run still2rig-psd -- import-expressions ${id} を実行し、取り込みが通ったら npm run still2rig-psd -- repair ${id} --expressions ${root}/generated-expressions を実行してください。`,
     '前回の修復で使った差し替え画像は自動で引き継がれます。引き継いだ内容も実行結果で確認してください。',
-    '既存の品質検査の結果と、閉じた目・開いた口の両方の見た目を確認して報告してください。',
+    `既存の品質検査の結果と、${labels}の絵を確認して報告してください。`,
+    'このプレビューでは笑い目・頬の赤らみの表示切替に対応していません。PSDへの取り込み結果だけを報告してください。',
   ];
   const common = [
     '仮の表情（derive-expressions）で置き換えないでください。',
@@ -1697,7 +1704,7 @@ function expressionRequestMessage(item: GeneratedPsd, id: string): string {
   ];
   if (expressionRecipient === 'codex') {
     return [
-      '$still2rig-psd を使い、このPSDの閉じた目と開いた口の絵を作って組み込んでください。',
+      `$still2rig-psd を使い、このPSDの${labels}の絵を作って組み込んでください。`,
       `${target}リポジトリの AGENTS.md とスキルの「Image-generated expressions」の手順に従ってください。`,
       prepare,
       'ユーザーはこの画面で、顔の切り抜き画像を Codex の組み込みの画像生成（imagegen）に送ることに同意済みです。ほかの外部サービスは使わないでください。',
@@ -1707,7 +1714,7 @@ function expressionRequestMessage(item: GeneratedPsd, id: string): string {
     ].join('\n');
   }
   return [
-    'リポジトリの AGENTS.md と .agents/skills/still2rig-psd/SKILL.md を読み、このPSDの閉じた目と開いた口の絵を用意する準備をしてください。',
+    `リポジトリの AGENTS.md と .agents/skills/still2rig-psd/SKILL.md を読み、このPSDの${labels}の絵を用意する準備をしてください。`,
     target,
     prepare,
     'Claude Code は画像を生成できません。画像の生成や外部サービスへの送信はしないでください。',
@@ -1720,7 +1727,7 @@ function expressionRequestMessage(item: GeneratedPsd, id: string): string {
 
 async function copyExpressionRequest(): Promise<void> {
   const item = generatedPsds.find((candidate) => candidate.id === activeGeneratedPsdId);
-  if (!item?.jobId) return;
+  if (!item?.jobId || selectedExpressions().length === 0) return;
   const message = expressionRequestMessage(item, item.jobId);
   try {
     await navigator.clipboard.writeText(message);
@@ -1978,6 +1985,7 @@ function installEventListeners(): void {
   expressionRequestCopy.addEventListener('click', () => {
     void copyExpressionRequest();
   });
+  for (const choice of expressionChoices) choice.addEventListener('change', syncExpressionRequestControl);
   for (const button of expressionRecipientButtons) {
     button.addEventListener('click', () => {
       setExpressionRecipient(button.dataset.recipient === 'claude' ? 'claude' : 'codex');

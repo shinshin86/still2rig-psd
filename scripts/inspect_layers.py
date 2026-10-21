@@ -17,7 +17,9 @@ from expression_definitions import load_expressions
 
 
 OPTIONAL_DROP = {"bottomwear.png", "handwear.png", "earwear.png", "headwear.png"}
-EXPRESSION_FILES = {f"{item['name']}.png" for item in load_expressions()}
+EXPRESSION_DEFINITIONS = load_expressions()
+EXPRESSION_FILES = {f"{item['name']}.png" for item in EXPRESSION_DEFINITIONS}
+SOFT_EXPRESSION_FILES = {f"{item['name']}.png" for item in EXPRESSION_DEFINITIONS if item["extraction"] == "soft"}
 # Layers drawn above the neck in the PSD; where they cover the source, it says nothing about the collar.
 NECK_ABOVE_LAYERS = ("ears.png", "face.png", "front hair.png", "headwear.png")
 
@@ -217,7 +219,10 @@ def main() -> None:
             canvas = image.size
         if image.size != canvas:
             raise ValueError(f"layer dimensions differ: {name}={image.size}, expected={canvas}")
-        if name in override_names:
+        if name in SOFT_EXPRESSION_FILES:
+            cleaned = image.copy()
+            meaningful = sum(value > 0 for value in cleaned.getchannel("A").tobytes())
+        elif name in override_names:
             # Supplied artwork can intentionally contain tiny highlights/ink.
             cleaned = image.copy()
             cleaned.putalpha(image.getchannel("A").point(lambda value: value if value > args.alpha_threshold else 0))
@@ -228,7 +233,7 @@ def main() -> None:
         target = args.output_dir / name
         if not dropped:
             cleaned.save(target, optimize=True)
-        row = {"name": name, **geometry(cleaned, args.alpha_threshold), "dropped": dropped}
+        row = {"name": name, **geometry(cleaned, 0 if name in SOFT_EXPRESSION_FILES else args.alpha_threshold), "dropped": dropped}
         rows.append(row)
 
     if "neck.png" in override_names:

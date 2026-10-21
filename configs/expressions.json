@@ -6,8 +6,17 @@
       "label": "閉じた目",
       "requestLabel": "closed eyes",
       "prompt": "Close both eyes with natural anime eyelid lines matching the existing line art and skin. Remove the open eyes inside the editable areas. Keep the same face, pose, hair, lighting and colors.",
-      "editableLayers": ["eyewhite", "irides", "eyelash"],
-      "mask": { "dilationRatio": 0.04, "minimumDilation": 3, "fillBounds": false, "mouthLimits": false },
+      "editableLayers": [
+        "eyewhite",
+        "irides",
+        "eyelash"
+      ],
+      "mask": {
+        "dilationRatio": 0.04,
+        "minimumDilation": 3,
+        "fillBounds": false,
+        "mouthLimits": false
+      },
       "extraction": "diff",
       "registration": "eyes",
       "split": true,
@@ -19,8 +28,15 @@
       "label": "開いた口",
       "requestLabel": "an open mouth",
       "prompt": "Replace the closed mouth with a small natural open mouth saying Japanese \"あ\", matching the existing anime line art, position and colors. Keep the same face, eyes, pose, hair and lighting.",
-      "editableLayers": ["mouth_close"],
-      "mask": { "dilationRatio": 0.2, "minimumDilation": 3, "fillBounds": true, "mouthLimits": true },
+      "editableLayers": [
+        "mouth_close"
+      ],
+      "mask": {
+        "dilationRatio": 0.2,
+        "minimumDilation": 3,
+        "fillBounds": true,
+        "mouthLimits": true
+      },
       "extraction": "diff",
       "registration": "mouth",
       "split": false,
@@ -36,6 +52,50 @@
       "mask": null,
       "extraction": null,
       "registration": "none",
+      "split": false,
+      "placeholderFrom": null,
+      "checkFrontHair": true
+    },
+    {
+      "name": "eye_smile",
+      "label": "笑い目",
+      "requestLabel": "smiling eyes",
+      "prompt": "Close both eyes into cheerful upward anime eyelash arcs shaped like ^ ^. Match the existing eye positions, size, line weight and colors. Keep the same face, hair, pose, lighting and all other features.",
+      "editableLayers": [
+        "eyewhite",
+        "irides",
+        "eyelash"
+      ],
+      "mask": {
+        "dilationRatio": 0.04,
+        "minimumDilation": 3,
+        "fillBounds": false,
+        "mouthLimits": false,
+        "upperExpansionRatio": 0.1
+      },
+      "extraction": "diff",
+      "registration": "eyes",
+      "split": true,
+      "placeholderFrom": null,
+      "checkFrontHair": true
+    },
+    {
+      "name": "blush",
+      "label": "頬の赤らみ",
+      "requestLabel": "soft cheek blush",
+      "prompt": "Add a subtle rosy blush to both cheeks with soft smooth gradients. Do not add lines, shadows, hatching or highlights. Keep the eyes, mouth, hair, face outline, pose and all other pixels unchanged.",
+      "editableLayers": [
+        "face"
+      ],
+      "mask": {
+        "dilationRatio": 0,
+        "minimumDilation": 0,
+        "fillBounds": false,
+        "mouthLimits": false,
+        "region": "cheeks"
+      },
+      "extraction": "soft",
+      "registration": "face",
       "split": false,
       "placeholderFrom": null,
       "checkFrontHair": true

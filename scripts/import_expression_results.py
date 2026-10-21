@@ -10,7 +10,8 @@ from pathlib import Path
 
 from PIL import Image, ImageChops, ImageFilter
 
-from expression_definitions import load_expressions
+from expression_definitions import load_expressions, CONFIG_ROOT
+from soft_expression import extract_soft_artwork
 from expression_requests_common import file_hash, layer_hash
 
 
@@ -262,11 +263,15 @@ def import_results(args, report):
     current_hash = layer_hash(args.layer_dir, args.layer_map)
     if (requests["layerSha256"] != current_hash
             or requests["layerDir"] != args.layer_dir.relative_to(Path.cwd()).as_posix()):
-        raise ValueError("Current layers changed. Rerun expression-requests and generate new results.")
+        raise ValueError("Current layers changed. Rerun expression-requests and generate new results. 依頼ファイルを作り直してください（expression-requests）。")
     report["layerSha256"] = current_hash
-    definitions = [item for item in load_expressions(json.loads(args.layer_map.read_text(encoding="utf-8"))) if item["prompt"] is not None]
+    available = {item["name"]: item for item in load_expressions(json.loads(args.layer_map.read_text(encoding="utf-8"))) if item["prompt"] is not None}
+    if not isinstance(requests.get("variants"), dict) or not requests["variants"] or any(name not in available for name in requests["variants"]):
+        raise ValueError("Unknown expression requests. Rerun expression-requests.")
+    definitions = [item for name, item in available.items() if name in requests["variants"]]
+    soft_maximum = json.loads((CONFIG_ROOT / "default.json").read_text(encoding="utf-8"))["quality"]["softExpressionMaximumAlpha"]
     outputs = {}
-    extractors = {"diff": extract_artwork}
+    extractors = {"diff": extract_artwork, "soft": lambda *values: extract_soft_artwork(*values, maximum_alpha=soft_maximum)}
     for definition in definitions:
         name = definition["name"]
         result_file = args.result_dir / f"{name}.png"
@@ -299,12 +304,13 @@ def import_results(args, report):
                 or list(reference.size) != item["size"]
                 or reference.size != (crop_size[0] * pixel_scale, crop_size[1] * pixel_scale)):
             raise ValueError(f"{name}: invalid crop or scale metadata. Rerun expression-requests.")
-        band = protected_band(reference, editable, args.protected_band * pixel_scale)
+        protected_editable = editable.point(lambda value: 255 if value > 0 else 0) if definition["extraction"] == "soft" else editable
+        band = protected_band(reference, protected_editable, args.protected_band * pixel_scale)
         details["alignment"] = alignment_check(reference, result, band, args.alignment_radius, pixel_scale,
                                                args.max_alignment_shift, args.max_alignment_scale)
         result = compensate_result(reference, result, details["alignment"], pixel_scale)
         details.update(protected_diff(reference, result, band))
-        support = protected_band(reference, editable, (args.protected_band + 2) * pixel_scale)
+        support = protected_band(reference, protected_editable, (args.protected_band + 2) * pixel_scale)
         face_core = Image.open(args.layer_dir / "face.png").convert("RGBA").getchannel("A").crop(item["cropBox"])
         face_core = face_core.point(lambda value: 255 if value >= 240 else 0).filter(ImageFilter.MinFilter(5))
         details.update(local_band_diff(reference, result, band, pixel_scale, support, face_core))
@@ -323,6 +329,8 @@ def import_results(args, report):
         # Enforce the boundary after resampling too: no skin outside editable pixels.
         editable = editable.resize(crop_size, Image.Resampling.NEAREST)
         result.putalpha(ImageChops.multiply(result.getchannel("A"), editable))
+        if definition["extraction"] == "soft":
+            result.putalpha(result.getchannel("A").point(lambda value: min(round(soft_maximum * 255), value)))
         canvas = Image.new("RGBA", tuple(requests["canvas"]))
         canvas.alpha_composite(result, (box[0], box[1]))
         outputs[name] = canvas

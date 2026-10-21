@@ -233,6 +233,15 @@ try {
   const claudeExpressionRequest = await copyExpressionRequest('claude');
   const codexExpressionRequest = await copyExpressionRequest('codex');
   const expressionRequestMessage = codexExpressionRequest.message;
+  const choice = value => page.locator(`[data-expression-choice="${value}"]`);
+  await choice('eye_close,mouth_open').uncheck();
+  const emptyExpressionSelectionDisabled = await page.locator('#expression-request-copy').isDisabled();
+  await choice('eye_smile').check(); await choice('blush').check();
+  const additionalCodexRequest = await copyExpressionRequest('codex');
+  const additionalClaudeRequest = await copyExpressionRequest('claude');
+  await page.locator('#expression-request-control').screenshot({ path: path.join(qaRoot, 'additional-expression-choices-desktop.png') });
+  await choice('eye_smile').uncheck(); await choice('blush').uncheck(); await choice('eye_close,mouth_open').check();
+  await page.click('[data-recipient="codex"]');
   await page.waitForFunction(() =>
     document.body.dataset.avatarReady === 'true' &&
     getComputedStyle(document.querySelector('.empty-state')).opacity === '0',
@@ -880,6 +889,7 @@ try {
     (element) => element.scrollWidth <= element.clientWidth,
   );
   await mobilePage.screenshot({ path: path.join(qaRoot, 'mobile-expression-request.png'), fullPage: true });
+  await mobilePage.locator('#expression-request-control').screenshot({ path: path.join(qaRoot, 'additional-expression-choices-mobile.png') });
   await mobilePage.evaluate(() => { document.querySelector('#expression-request-control').open = false; });
   await mobilePage.click('#layer-edit-tab');
   await mobilePage.waitForTimeout(220);
@@ -1358,6 +1368,15 @@ try {
       claudeStartRequest.expressionClaudePressed === 'true' &&
       startRecipientAfterReload === 'true' &&
       codexStartRequest.expressionClaudePressed === 'false',
+    additionalExpressionSelection:
+      emptyExpressionSelectionDisabled &&
+      additionalCodexRequest.message.includes('--only eye_smile,blush') &&
+      additionalCodexRequest.message.includes('笑い目・頬の赤らみ') &&
+      additionalCodexRequest.message.includes('results/eye_smile.png と blush.png') &&
+      additionalCodexRequest.message.includes('同意済み') &&
+      additionalClaudeRequest.message.includes('--only eye_smile,blush') &&
+      additionalClaudeRequest.message.includes('そこで止まって') &&
+      !additionalClaudeRequest.message.includes('同意済み'),
     expressionRequestCopiesCurrentSavedPsd:
       waitingState.expressionRequestHidden === true &&
       selectedGeneratedState.expressionRequestHidden === false &&

@@ -10,11 +10,11 @@ from PIL import Image, ImageChops, ImageDraw
 parser = argparse.ArgumentParser()
 parser.add_argument("request_dir", type=Path)
 parser.add_argument("result_dir", type=Path)
-parser.add_argument("mode", choices=["inside", "outside", "aspect", "resize", "noise", "artwork", "speckle", "soft", "shifted", "small-drift", "scaled", "context", "removed-brow", "moved-brow", "skin-patch", "alpha-jitter", "lost-alpha"])
+parser.add_argument("mode", choices=["inside", "outside", "aspect", "resize", "noise", "artwork", "speckle", "soft", "shifted", "small-drift", "scaled", "context", "removed-brow", "moved-brow", "skin-patch", "alpha-jitter", "lost-alpha", "additional", "additional-faint", "additional-strong", "additional-outside"])
 args = parser.parse_args()
 args.result_dir.mkdir(parents=True, exist_ok=True)
 requests = json.loads((args.request_dir / "requests.json").read_text())
-for name in ("eye_close", "mouth_open"):
+for name in requests["variants"]:
     item = requests["variants"][name]
     scale = item["scale"]
     left, top, _, _ = item["cropBox"]
@@ -22,6 +22,22 @@ for name in ("eye_close", "mouth_open"):
     mask = Image.open(args.request_dir / name / "mask.png").convert("RGBA")
     underlay = Image.open(args.request_dir / name / "underlay.png").convert("RGBA")
     editable = ImageChops.invert(mask.getchannel("A"))
+    if name in {"eye_smile", "blush"}:
+        if name == "eye_smile":
+            image = Image.composite(underlay, image, editable)
+            draw = ImageDraw.Draw(image)
+            for center in (37, 59):
+                points = [((x-left)*scale, (y-top)*scale) for x, y in ((center-6,36),(center,30),(center+6,36))]
+                draw.line(points, fill=(80,30,25,255), width=max(1,2*scale))
+        else:
+            opacity = 0.025 if args.mode == "additional-faint" else 1 if args.mode == "additional-strong" else 0.1
+            overlay = Image.new("RGBA", image.size, (255,64,96,0))
+            overlay.putalpha(editable.point(lambda value: round(value*opacity)))
+            image = Image.alpha_composite(image, overlay)
+        if args.mode == "additional-outside":
+            ImageDraw.Draw(image).rectangle(((31-left)*scale,(31-top)*scale,(43-left+1)*scale-1,(38-top+1)*scale-1), fill=(0,255,0,255))
+        image.save(args.result_dir / f"{name}.png")
+        continue
     artwork_mode = args.mode not in {"inside", "outside", "aspect", "resize", "noise"}
     image = Image.composite(underlay if artwork_mode else Image.new("RGBA", image.size, (80, 30, 25, 255)), image, editable)
     draw = ImageDraw.Draw(image)

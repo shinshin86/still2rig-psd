@@ -35,7 +35,7 @@ def validate_expressions(config, layer_map):
                 or not isinstance(item["editableLayers"], list)
                 or any(not isinstance(value, str) or value not in targets for value in item["editableLayers"])
                 or len(set(item["editableLayers"])) != len(item["editableLayers"])
-                or item["registration"] not in ("eyes", "mouth", "none")
+                or item["registration"] not in ("eyes", "mouth", "face", "none")
                 or type(item["split"]) is not bool or type(item["checkFrontHair"]) is not bool
                 or not (item["placeholderFrom"] is None or (isinstance(item["placeholderFrom"], str)
                         and item["placeholderFrom"] in targets and item["placeholderFrom"] != name))):
@@ -46,12 +46,21 @@ def validate_expressions(config, layer_map):
         else:
             mask = item["mask"]
             if (not text(item["prompt"]) or not text(item["requestLabel"]) or not item["editableLayers"]
-                    or item["extraction"] != "diff" or not isinstance(mask, dict) or set(mask) != MASK_KEYS
+                    or item["extraction"] not in ("diff", "soft") or not isinstance(mask, dict) or not MASK_KEYS <= set(mask) or not set(mask) <= MASK_KEYS | {"region", "upperExpansionRatio"}
                     or type(mask["dilationRatio"]) not in (int, float) or not math.isfinite(mask["dilationRatio"])
                     or not 0 <= mask["dilationRatio"] <= 1
                     or type(mask["minimumDilation"]) is not int or not 0 <= mask["minimumDilation"] <= 128
                     or type(mask["fillBounds"]) is not bool or type(mask["mouthLimits"]) is not bool):
                 fail()
+        if item["mask"] is not None:
+            mask = item["mask"]
+            if "region" in mask and mask["region"] != "cheeks":
+                fail()
+            if "upperExpansionRatio" in mask and (type(mask["upperExpansionRatio"]) not in (int, float)
+                    or not math.isfinite(mask["upperExpansionRatio"]) or not 0 <= mask["upperExpansionRatio"] <= 1):
+                fail()
+        if item["extraction"] == "soft" and (item["mask"].get("region") != "cheeks" or item["registration"] != "face"):
+            fail()
         names.add(name)
     if any(entry.get("requiredForProduction") is True and entry["target"] not in names for entry in layer_map["layers"]):
         fail()

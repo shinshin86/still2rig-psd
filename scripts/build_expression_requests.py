@@ -11,22 +11,21 @@ from pathlib import Path
 from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
 from expression_definitions import load_expressions
+from expression_masks import alpha_union, cheek_mask, expand_up
 from expression_requests_common import composite_layers, file_hash, layer_hash, mouth_limits, neutral_layers
 
 
-def alpha_union(layers, names, size):
-    mask = Image.new("L", size, 0)
-    for name in names:
-        if name in layers:
-            alpha = layers[name].getchannel("A").point(lambda value: 255 if value > 16 else 0)
-            mask = ImageChops.lighter(mask, alpha)
-    return mask
-
-
-def build_requests(job_id: str, layer_dir: Path, layer_map: Path, output_dir: Path, definitions=None):
+def build_requests(job_id: str, layer_dir: Path, layer_map: Path, output_dir: Path, definitions=None, only=None):
     mapping = json.loads(layer_map.read_text(encoding="utf-8"))
     definitions = load_expressions(mapping) if definitions is None else definitions
-    requested = [item for item in definitions if item["prompt"] is not None]
+    available = [item for item in definitions if item["prompt"] is not None]
+    if only is not None:
+        names = [item["name"] for item in available] if only == "all" else only.split(",")
+        if not names or len(set(names)) != len(names) or any(name not in {item["name"] for item in available} for name in names):
+            raise ValueError("Choose known expressions with --only name,name or --only all.")
+        requested = [item for item in available if item["name"] in names]
+    else:
+        requested = [item for item in available if item["requiredForProduction"]]
     composite, layers = neutral_layers(layer_dir, mapping, definitions)
     quality = json.loads((Path(__file__).resolve().parent.parent / "configs" / "default.json").read_text(encoding="utf-8"))["quality"]
     limits = mouth_limits(layers["face"], quality)
@@ -45,7 +44,7 @@ def build_requests(job_id: str, layer_dir: Path, layer_map: Path, output_dir: Pa
     request_size = (crop_size[0] * scale, crop_size[1] * scale)
     for definition in requested:
         name, targets, mask_options = definition["name"], definition["editableLayers"], definition["mask"]
-        editable = alpha_union(layers, targets, composite.size)
+        editable = cheek_mask(layers, composite.size) if mask_options.get("region") == "cheeks" else alpha_union(layers, targets, composite.size)
         editable_box = editable.getbbox()
         if not editable_box:
             raise ValueError(f"Cannot prepare {name}: the relevant layers are empty.")
@@ -66,12 +65,14 @@ def build_requests(job_id: str, layer_dir: Path, layer_map: Path, output_dir: Pa
                 round(center_x - half_width), round(center_y - limits["open"]["maximumHeight"] / 2 - dilation),
                 round(center_x + half_width), editable_box[1] + limits["open"]["maximumHeight"] + dilation,
             ), fill=255)
+        upper = round((editable_box[2] - editable_box[0]) * mask_options.get("upperExpansionRatio", 0))
+        editable = expand_up(editable, upper)
         editable_box = editable.getbbox()
         editable = editable.crop(crop_box).resize(request_size, Image.Resampling.NEAREST)
         variant_dir = output_dir / name
         variant_dir.mkdir(exist_ok=True)
         composite.crop(crop_box).resize(request_size, Image.Resampling.LANCZOS).save(variant_dir / "input.png")
-        composite_layers(layers, targets, definitions).crop(crop_box).resize(request_size, Image.Resampling.LANCZOS).save(variant_dir / "underlay.png")
+        composite_layers(layers, [] if mask_options.get("region") == "cheeks" else targets, definitions).crop(crop_box).resize(request_size, Image.Resampling.LANCZOS).save(variant_dir / "underlay.png")
         mask = Image.new("RGBA", editable.size, (255, 255, 255, 255))
         mask.putalpha(ImageChops.invert(editable))
         mask.save(variant_dir / "mask.png")
@@ -127,8 +128,9 @@ def main():
     parser.add_argument("--layer-dir", type=Path, required=True)
     parser.add_argument("--layer-map", type=Path, default=Path("configs/layer-map.json"))
     parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument("--only")
     args = parser.parse_args()
-    print(json.dumps(build_requests(args.job_id, args.layer_dir, args.layer_map, args.output_dir)))
+    print(json.dumps(build_requests(args.job_id, args.layer_dir, args.layer_map, args.output_dir, only=args.only)))
 
 
 if __name__ == "__main__":

@@ -32,7 +32,7 @@ Usage:
   still2rig-psd finalize JOB [--expressions DIR | --preview-expressions DIR] [--layer-overrides DIR] [--preview-placeholders]
   still2rig-psd repair JOB [--expressions DIR | --preview-expressions DIR | --no-expressions] [--layer-overrides DIR | --no-layer-overrides] [--preview-placeholders]
   still2rig-psd derive-expressions JOB
-  still2rig-psd expression-requests JOB
+  still2rig-psd expression-requests JOB [--only eye_smile,blush | all]
   still2rig-psd import-expressions JOB [DIR] [--max-outside-mean 6] [--max-outside-p99 20]
     [--max-band-local-mean 24] [--max-band-flat-mean 12]
     [--protected-band 8] [--alignment-radius 24] [--max-alignment-shift 12] [--max-alignment-scale 0.03]
@@ -175,7 +175,7 @@ function assembleArtifacts({ jobId, root, options, outputPsd, layerDir, reportsR
     output: outputPsd,
     reportFile: buildReportFile,
     previewPlaceholders: Boolean(options['preview-placeholders']),
-    previewExpressionTargets: options['preview-expressions'] ? previewExpressionTargets(inspectionReport) : [],
+    previewExpressionTargets: options['expression-preview-targets'] ?? (options['preview-expressions'] ? previewExpressionTargets(inspectionReport) : []),
   });
   const qaReportFile = path.join(reportsRoot, 'qa-report.json');
   const qa = runQa({ psdFile: outputPsd, layerDir, buildReportFile, reportFile: qaReportFile });
@@ -297,6 +297,51 @@ function inheritedExpressions(root, manifest) {
   return { key, directory, fromRepair: latest.repairId, legacy: !latest.options };
 }
 
+function mergeExpressionInputs(root, manifest, repairRoot, options, inheritedArt) {
+  const latest = manifest.result?.repairs?.at(-1);
+  const oldPreview = new Set((manifest.result?.previewExpressions || []).map(item => item.layer));
+  const explicit = options.expressions || options['preview-expressions'];
+  if (inheritedArt) {
+    if (!latest?.expressionProvenance) return null;
+    options['expression-preview-targets'] = [...oldPreview];
+    return Object.fromEntries(Object.entries(latest.expressionProvenance).map(([name, value]) =>
+      [name, { ...value, inheritedFromRepair: latest.repairId }]));
+  }
+  if (!explicit) return null;
+  const incoming = path.resolve(explicit);
+  if (!fs.existsSync(incoming) || !fs.statSync(incoming).isDirectory()) return null;
+  const previous = currentLayerDir(root, manifest);
+  const supplied = expressions.filter(item => fs.existsSync(path.join(incoming, `${item.name}.png`)));
+  const retained = expressions.filter(item => !supplied.includes(item) && fs.existsSync(path.join(previous, `${item.name}.png`)));
+  const optional = supplied.some(item => item.prompt && !item.requiredForProduction);
+  if (!retained.length && !optional) return null;
+  const provenance = {};
+  let imported = [];
+  try { const accepted = JSON.parse(fs.readFileSync(path.join(incoming, 'report.json'), 'utf8')).accepted; imported = Array.isArray(accepted) ? accepted : []; } catch { /* Supplied PNGs need no import report. */ }
+  const preview = new Set();
+  for (const item of retained) {
+    const old = latest?.expressionProvenance?.[item.name];
+    const derived = oldPreview.has(item.name);
+    provenance[item.name] = { ...(old || { kind: derived ? 'derived-preview' : 'supplied-artwork', importedResult: false }), inheritedFromRepair: latest?.repairId ?? null };
+    if (derived) preview.add(item.name);
+  }
+  for (const item of supplied) {
+    const derived = Boolean(options['preview-expressions']);
+    provenance[item.name] = { kind: derived ? 'derived-preview' : 'supplied-artwork', importedResult: imported.includes(item.name), inheritedFromRepair: null };
+    if (derived) preview.add(item.name);
+  }
+  if (retained.length) {
+    const snapshot = path.join(repairRoot, 'inputs', 'expressions');
+    fs.mkdirSync(snapshot, { recursive: true });
+    for (const item of retained) fs.copyFileSync(path.join(previous, `${item.name}.png`), path.join(snapshot, `${item.name}.png`));
+    for (const item of supplied) fs.copyFileSync(path.join(incoming, `${item.name}.png`), path.join(snapshot, `${item.name}.png`));
+    options.expressions = snapshot;
+    delete options['preview-expressions'];
+  }
+  options['expression-preview-targets'] = [...preview].sort();
+  return provenance;
+}
+
 function repair(jobId, options) {
   const { root, manifest } = loadJob(jobId);
   if (!manifest.result?.psd) throw new Error('Finalize the job before repairing it.');
@@ -308,6 +353,9 @@ function repair(jobId, options) {
   if (options['layer-overrides'] && options['no-layer-overrides']) {
     throw new Error('Use --layer-overrides DIR or --no-layer-overrides, not both.');
   }
+  if (options.expressions && options['preview-expressions']) {
+    throw new Error('Use either --expressions (drawn or image-generated artwork) or --preview-expressions (derived preview artwork), not both.');
+  }
   if (options['no-expressions'] && (options.expressions || options['preview-expressions'])) {
     throw new Error('Use an expression directory or --no-expressions, not both.');
   }
@@ -318,6 +366,7 @@ function repair(jobId, options) {
   const inheritedArt = !options.expressions && !options['preview-expressions'] && !options['no-expressions']
     ? inheritedExpressions(root, manifest) : null;
   if (inheritedArt) effective[inheritedArt.key] = inheritedArt.directory;
+  const expressionProvenance = options['no-expressions'] ? null : mergeExpressionInputs(root, manifest, repairRoot, effective, inheritedArt);
   const assembled = assembleArtifacts({
     jobId,
     root,
@@ -374,10 +423,10 @@ function repair(jobId, options) {
     result: {
       ...job.result,
       ...after,
-      repairs: [...(job.result.repairs || []), { repairId, createdAt, before, after, options: recordedOptions, inheritedOptions }],
+      repairs: [...(job.result.repairs || []), { repairId, createdAt, before, after, options: recordedOptions, inheritedOptions, ...(expressionProvenance ? { expressionProvenance } : {}) }],
     },
   }));
-  return { jobId, repairId, before, build: assembled.build, qa: assembled.qa, result: after, options: recordedOptions, inheritedOptions };
+  return { jobId, repairId, before, build: assembled.build, qa: assembled.qa, result: after, options: recordedOptions, inheritedOptions, ...(expressionProvenance ? { expressionProvenance } : {}) };
 }
 
 function currentLayerDir(root, manifest) {
@@ -408,13 +457,14 @@ function deriveExpressions(jobId) {
   };
 }
 
-function expressionRequests(jobId) {
+function expressionRequests(jobId, options) {
   const { root, manifest } = loadJob(jobId);
   const outputDir = path.join(root, 'expression-requests');
   const requests = JSON.parse(runPython('build_expression_requests.py', [
     '--job-id', jobId,
     '--layer-dir', currentLayerDir(root, manifest),
     '--output-dir', outputDir,
+    ...(options.only !== undefined ? ['--only', options.only] : []),
   ]));
   return {
     jobId,
@@ -579,7 +629,7 @@ export async function main(argv = process.argv.slice(2)) {
   } else if (command === 'derive-expressions') {
     print(deriveExpressions(positional[0]), true);
   } else if (command === 'expression-requests') {
-    print(expressionRequests(positional[0]), true);
+    print(expressionRequests(positional[0], options), true);
   } else if (command === 'import-expressions') {
     print(importExpressions(positional[0], positional[1], options), true);
   } else if (command === 'status') {
