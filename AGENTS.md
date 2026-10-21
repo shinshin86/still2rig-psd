@@ -45,6 +45,18 @@ Treat this folder as a future public repository.
   it only with `--preview-expressions`, and never describe it as drawn blink or
   lip-sync art.
 
+## Expression transitions
+
+- Every expression strength from 0 to 1 must look like a natural face, not
+  only the end points. Inspect a strip of intermediate strengths (for example
+  every 0.05) before reporting a transition as done.
+- Never show two eye or mouth drawings at once. Avoid half-transparent
+  crossfades between drawings whose shapes or positions differ.
+- Follow how a real face moves. For example, smiling eyes narrow as the lower
+  lid rises; they do not close from the top like a blink first.
+- A transition must not pass through an unrelated expression such as a closed
+  blink, and switching between drawings must not be noticeable.
+
 ## Local PSD preview
 
 - Use `npm run preview` to inspect finalized PSDs. The built-in WebUI lists
