@@ -18,6 +18,8 @@ export function expressionPresetValues(id, parts = []) {
     values.eyeWinkR = values.eyeSmileR;
     values.eyeSmile = values.eyeSmileL = values.eyeSmileR = 0;
   }
-  if (!available.has('blush')) values.blush = 0;
+  for (const [key, part] of [['blush','blush'],['tears','tears'],['sweat','sweat'],['angerMark','anger_mark']]) {
+    if (!available.has(part)) values[key] = 0;
+  }
   return values;
 }

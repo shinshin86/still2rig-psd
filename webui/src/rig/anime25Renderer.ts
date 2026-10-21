@@ -323,6 +323,7 @@ function fadeAlpha(
   if (!layer.fade) return 1;
   if (layer.fade === 'eyeSmile') return expression.smileAlpha;
   if (layer.fade === 'blush') return params.blush;
+  if (layer.fade === 'tears' || layer.fade === 'sweat' || layer.fade === 'angerMark') return params[layer.fade];
   if (layer.fade === 'eyeOpen') {
     const value = expression.eyeOpen;
     if (wink > 0 && !expression.smileProgress && layer.side && hasEyeClose[layer.side as 'L'|'R']) return value <= 0.1 ? 0 : 1;
@@ -366,7 +367,7 @@ function createRenderLayer(
   layer.bn = baseRigName(layer.name);
 
   const cell = (layer.phys ? 30 : 42) * Math.max(0.6, canvasWidth / 768);
-  const eyeGrid = layer.fade === 'eyeOpen' || layer.fade === 'eyeClose' || layer.fade === 'eyeSmile' || layer.bn === 'eyebrow' ? 24 :
+  const eyeGrid = layer.fade === 'eyeOpen' || layer.fade === 'eyeClose' || layer.fade === 'eyeSmile' || layer.bn === 'eyebrow' || layer.fade === 'tears' ? 24 :
     layer.fade === 'mouthOpen' || layer.fade === 'mouthClose' ? 8 : 2;
   const nx = Math.max(eyeGrid, Math.round(layer.w / cell));
   const ny = Math.max(eyeGrid, Math.round(layer.h / cell));
@@ -671,6 +672,20 @@ export function createAnime25RigAvatar(
       let y = base[index + 1];
       const vertex = index >> 1;
       layer.inkVisibility[vertex] = 1;
+      if (layer.fade === 'tears') {
+        const edge = layer.y + params.tears * layer.h;
+        layer.inkVisibility[vertex] = smooth((edge-y)/Math.max(1,layer.h*.08));
+        if (eyeAnchor) {
+          const lowerY = eyeAnchor.y1+(eyeAnchor.closeY-eyeAnchor.y1)*(1-eyeOpen);
+          const attachedY = lowerY+((eyeAnchor.smileY ?? lowerY)-lowerY)*lowerProgress;
+          y += (attachedY-eyeAnchor.y1)*Math.max(0,1-(y-layer.y)/layer.h);
+        }
+      }
+      if (layer.fade === 'sweat') y -= (1-params.sweat)*5*faceScale;
+      if (layer.fade === 'angerMark') {
+        const scale = .75 + .25*smooth(params.angerMark);
+        x = centerX+(x-centerX)*scale; y = centerY+(y-centerY)*scale;
+      }
       if (layer.fade === 'eyeSmile' && eyeAnchor) {
         layer.inkVisibility[vertex] = smileInkVisibility(x, y, eyeAnchor, expression.smileRestore);
       }

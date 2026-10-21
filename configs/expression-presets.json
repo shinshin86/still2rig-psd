@@ -15,7 +15,10 @@
     "brow",
     "eyeNarrow",
     "eyeWinkL",
-    "eyeWinkR"
+    "eyeWinkR",
+    "tears",
+    "sweat",
+    "angerMark"
   ],
   "presets": [
     {
@@ -50,7 +53,8 @@
         "browAngry": 1,
         "upperLid": 0.7,
         "lidTilt": 1,
-        "mouthForm": -0.9
+        "mouthForm": -0.9,
+        "angerMark": 1
       }
     },
     {
@@ -60,7 +64,8 @@
         "browWorry": 1,
         "upperLid": 0.55,
         "lidTilt": -1,
-        "mouthForm": -0.8
+        "mouthForm": -0.8,
+        "tears": 1
       }
     },
     {
@@ -77,7 +82,8 @@
       "values": {
         "browWorry": 1,
         "eyeWide": 0.8,
-        "brow": 0.15
+        "brow": 0.15,
+        "sweat": 1
       }
     },
     {

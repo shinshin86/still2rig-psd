@@ -346,6 +346,9 @@ const PARAMETER_LABELS: Partial<Record<PsdMotionParameterName, string>> = {
   eyeWinkL: '左目を閉じる',
   eyeWinkR: '右目を閉じる',
   blush: '頬の赤らみ',
+  tears: '涙',
+  sweat: '汗',
+  angerMark: '怒りマーク',
   eyeOpenL: '左目の開き',
   eyeOpenR: '右目の開き',
   eyeX: '視線の左右',
@@ -713,6 +716,9 @@ function setSelectedLayer(
   selectedProfile.parameters.eyeSmileL = selectedProfile.parameters.eyeSmileR = 0;
   selectedProfile.parameters.eyeSmile = selected.name.toLowerCase() === 'eye_smile' ? 1 : 0;
   selectedProfile.parameters.blush = selected.name.toLowerCase() === 'blush' ? 1 : 0;
+  selectedProfile.parameters.tears = selected.name.toLowerCase() === 'tears' ? 1 : 0;
+  selectedProfile.parameters.sweat = selected.name.toLowerCase() === 'sweat' ? 1 : 0;
+  selectedProfile.parameters.angerMark = selected.name.toLowerCase() === 'anger_mark' ? 1 : 0;
   avatar?.setMotionProfile(selectedProfile);
   avatar?.setMouthOpen(selected.name.toLowerCase() === requestedExpressions.find(item => item.registration === 'mouth')?.name ? 1 : 0);
   avatar?.setEyeOpen(selected.name.toLowerCase() === requestedExpressions.find(item => item.registration === 'eyes')?.name ? 0 : 1);
@@ -1939,7 +1945,7 @@ function setCameraConflicts(active: boolean): void {
     'eyeX', 'eyeY', 'mouthOpen',
   ]);
   for (const [name, control] of advancedControls) {
-    const part = name.startsWith('eyeSmile') ? 'eye_smile' : name === 'blush' ? 'blush' : null;
+    const part = name.startsWith('eyeSmile') ? 'eye_smile' : name === 'blush' || name === 'tears' || name === 'sweat' ? name : name === 'angerMark' ? 'anger_mark' : null;
     const missing = Boolean(part && !avatarParts.has(part));
     control.unavailable.hidden = !missing;
     control.unavailable.textContent = missing ? `このPSDには${PARAMETER_LABELS[name]}の絵がありません。` : '';

@@ -31,6 +31,9 @@ export interface PsdMotionParameters {
   eyeWinkL: number;
   eyeWinkR: number;
   blush: number;
+  tears: number;
+  sweat: number;
+  angerMark: number;
   eyeOpenL: number;
   eyeOpenR: number;
   eyeX: number;
@@ -112,6 +115,9 @@ export const PSD_MOTION_PARAMETER_DEFINITIONS: readonly PsdMotionParameterDefini
     { key: 'eyeNarrow', label: '下まぶたを上げる', group: 'eyes', min: 0, max: 1, step: 0.01 },
     { key: 'eyeWinkL', label: '左目を閉じる', group: 'eyes', min: 0, max: 1, step: 0.01 },
     { key: 'eyeWinkR', label: '右目を閉じる', group: 'eyes', min: 0, max: 1, step: 0.01 },
+    { key: 'tears', label: '涙', group: 'eyes', min: 0, max: 1, step: 0.01 },
+    { key: 'sweat', label: '汗', group: 'eyes', min: 0, max: 1, step: 0.01 },
+    { key: 'angerMark', label: '怒りマーク', group: 'eyes', min: 0, max: 1, step: 0.01 },
     { key: 'blush', label: '頬の赤らみ', group: 'eyes', min: 0, max: 1, step: 0.01 },
     { key: 'body', label: 'Body', group: 'face', min: -1, max: 1, step: 0.01 },
     { key: 'armY', label: 'Arm Y', group: 'face', min: -1, max: 1, step: 0.01 },
@@ -363,6 +369,9 @@ export const DEFAULT_PSD_MOTION_PARAMETERS: Readonly<PsdMotionParameters> = {
   eyeWinkL: 0,
   eyeWinkR: 0,
   blush: 0,
+  tears: 0,
+  sweat: 0,
+  angerMark: 0,
   eyeOpenL: 1,
   eyeOpenR: 1,
   eyeX: 0,
