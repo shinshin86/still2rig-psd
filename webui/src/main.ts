@@ -48,6 +48,7 @@ interface GeneratedPsd {
 
 interface RigQaApi {
   setVoiceMouth: (value: number | null) => void;
+  getMouthState: () => ReturnType<Anime25RigAvatar['getMouthState']> | null;
   getVoiceState: () => { state: string; active: boolean; liveTracks: number };
   setLiveEnabled: (enabled: boolean) => void;
   setTrackingInput: (input: Partial<TrackingInput> | null, weight: number) => void;
@@ -365,6 +366,8 @@ const PARAMETER_LABELS: Partial<Record<PsdMotionParameterName, string>> = {
   browAngSym: '眉の対称角度',
   mouthOpen: '口の開き',
   mouthForm: '口角',
+  mouthLaugh: '笑った口',
+  mouthRound: '丸く開いた口',
   mouthCY: '口の中心位置',
   mouthEase: '口の変形の滑らかさ',
   mouthCAng: '口の傾き',
@@ -487,7 +490,7 @@ function resetAdvancedProfileParameters(): void {
 
 function createAdvancedParameterControls(): void {
   const definitions = PSD_MOTION_PARAMETER_DEFINITIONS.filter(
-    (definition) => !BASIC_PARAMETER_KEYS.has(definition.key),
+    (definition) => !BASIC_PARAMETER_KEYS.has(definition.key) && !definition.hidden,
   );
   for (const group of ['face', 'eyes', 'mouth', 'physics'] as const) {
     const groupDefinitions = definitions.filter((definition) => definition.group === group);
@@ -716,6 +719,8 @@ function setSelectedLayer(
   selectedProfile.parameters.eyeSmileL = selectedProfile.parameters.eyeSmileR = 0;
   selectedProfile.parameters.eyeSmile = selected.name.toLowerCase() === 'eye_smile' ? 1 : 0;
   selectedProfile.parameters.blush = selected.name.toLowerCase() === 'blush' ? 1 : 0;
+  selectedProfile.parameters.mouthLaugh = selected.name.toLowerCase() === 'mouth_laugh' ? 1 : 0;
+  selectedProfile.parameters.mouthRound = selected.name.toLowerCase() === 'mouth_round' ? 1 : 0;
   selectedProfile.parameters.tears = selected.name.toLowerCase() === 'tears' ? 1 : 0;
   selectedProfile.parameters.sweat = selected.name.toLowerCase() === 'sweat' ? 1 : 0;
   selectedProfile.parameters.angerMark = selected.name.toLowerCase() === 'anger_mark' ? 1 : 0;
@@ -1447,6 +1452,7 @@ function setVoiceMouth(value: number | null): void {
 }
 
 const api: RigQaApi = {
+  getMouthState() { return avatar?.getMouthState() ?? null; },
   setVoiceMouth,
   getVoiceState() { return voiceControls?.getState() ?? { state: 'off', active: false, liveTracks: 0 }; },
   setLiveEnabled(enabled) { livePublisher?.enable(enabled); },
@@ -1945,7 +1951,7 @@ function setCameraConflicts(active: boolean): void {
     'eyeX', 'eyeY', 'mouthOpen',
   ]);
   for (const [name, control] of advancedControls) {
-    const part = name.startsWith('eyeSmile') ? 'eye_smile' : name === 'blush' || name === 'tears' || name === 'sweat' ? name : name === 'angerMark' ? 'anger_mark' : null;
+    const part = name.startsWith('eyeSmile') ? 'eye_smile' : name === 'blush' || name === 'tears' || name === 'sweat' ? name : name === 'angerMark' ? 'anger_mark' : name === 'mouthLaugh' ? 'mouth_laugh' : name === 'mouthRound' ? 'mouth_round' : null;
     const missing = Boolean(part && !avatarParts.has(part));
     control.unavailable.hidden = !missing;
     control.unavailable.textContent = missing ? `このPSDには${PARAMETER_LABELS[name]}の絵がありません。` : '';

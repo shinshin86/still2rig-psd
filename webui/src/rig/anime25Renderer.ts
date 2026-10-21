@@ -1,3 +1,4 @@
+import { createMouthController, mouthContour, mouthRestWeight, type MouthContour, type MouthFrame, type MouthSelection } from './mouthExpression.mjs';
 import { expressionParameterNames } from '../../../src/expressionPresets.mjs';
 import { composeTrackedExpression, morphClosedWink, shapeBrow, shapeUpperLid, shapeWink, smileForSide } from './expressionParts.mjs';
 /*!
@@ -105,6 +106,7 @@ interface MotionParams extends PsdMotionParameters {
 }
 
 interface AnimationState {
+  mouthSelection?: MouthSelection;
   current: MotionParams; blinkT: number; nextBlink: number; nextRandom: number;
   randomTarget: { ax: number; ay: number; az: number; bd: number; ex: number; ey: number };
   bounce: { x: number; v: number; dy: number };
@@ -113,6 +115,7 @@ interface AnimationState {
 
 export interface Anime25RigAvatar {
   setVoiceMouth: (value: number | null) => void;
+  getMouthState: () => MouthFrame & { visibleDrawings: number };
   setTrackingInput: (input: Partial<TrackingInput> | null, weight: number) => void;
   setMouthOpen: (value: number) => void;
   setEyeOpen: (value: number | null) => void;
@@ -169,8 +172,8 @@ const VERTEX_SHADER =
   'void main(){ vUV=aUV; vInk=aInk; vec2 p=(aPos-uRes*0.5)*uViewScale+uRes*0.5+uViewOffset; vec2 c=p/uRes*2.0-1.0; gl_Position=vec4(c.x,-c.y,0.0,1.0); }';
 
 const FRAGMENT_SHADER =
-  'precision mediump float; varying vec2 vUV; varying float vInk; uniform sampler2D uTex; uniform float uCut; uniform float uAlpha;' +
-  'void main(){ vec4 c=texture2D(uTex,vUV); if(c.a<uCut) discard; gl_FragColor=c*(uAlpha*vInk); }';
+  'precision mediump float; varying vec2 vUV; varying float vInk; uniform sampler2D uTex; uniform float uCut; uniform float uAlpha; uniform vec4 uMouthShade; uniform vec2 uResolveTexel;' +
+  'void main(){ vec4 c=texture2D(uTex,vUV); if(uResolveTexel.x>0.0){c=vec4(0.0);for(int y=-1;y<=1;y++){for(int x=-1;x<=1;x++){c+=texture2D(uTex,vUV+vec2(float(x),float(y))*uResolveTexel);}}c/=9.0;} if(c.a<uCut) discard; float cavity=smoothstep(0.35,0.7,c.r/max(c.a,0.001)); float pale=smoothstep(0.68,0.75,min(c.r,min(c.g,c.b))/max(c.a,0.001)); c.rgb=mix(c.rgb,uMouthShade.rgb*(1.0-0.18*cavity)*c.a,uMouthShade.a*(1.0-pale)); gl_FragColor=c*(uAlpha*vInk); }';
 
 function clamp(value: number, min: number, max: number): number {
   return value < min ? min : value > max ? max : value;
@@ -313,6 +316,7 @@ function fadeAlpha(
   params: MotionParams,
   hasEyeClose: Record<'L' | 'R', boolean>,
   hasEyeSmile: Record<'L' | 'R', boolean>,
+  mouthDrawing: string,
 ): number {
   const requestedWink = layer.side === 'L' ? params.eyeWinkL : params.eyeWinkR;
     const hasSmile = Boolean(layer.side && hasEyeSmile[layer.side as 'L'|'R']);
@@ -343,14 +347,7 @@ function fadeAlpha(
     const value = expression.eyeOpen;
     return originalAlpha * (1 - smooth((value - (0.1 + params.eyeEase * 0.45)) / 0.15));
   }
-  if (layer.fade === 'mouthOpen') {
-    return smooth((params.mouthOpen - (0.05 + params.mouthEase * 0.35)) / 0.12);
-  }
-  if (layer.fade === 'mouthClose') {
-    return (
-      1 - smooth((params.mouthOpen - (0.05 + params.mouthEase * 0.35)) / 0.12)
-    );
-  }
+  if (layer.bn.startsWith('mouth_')) return layer.bn === mouthDrawing ? 1 : 0;
   return 1;
 }
 
@@ -368,12 +365,13 @@ function createRenderLayer(
 
   const cell = (layer.phys ? 30 : 42) * Math.max(0.6, canvasWidth / 768);
   const eyeGrid = layer.fade === 'eyeOpen' || layer.fade === 'eyeClose' || layer.fade === 'eyeSmile' || layer.bn === 'eyebrow' || layer.fade === 'tears' ? 24 :
-    layer.fade === 'mouthOpen' || layer.fade === 'mouthClose' ? 8 : 2;
+    layer.bn.startsWith('mouth_') ? 40 : 2;
   const nx = Math.max(eyeGrid, Math.round(layer.w / cell));
   const ny = Math.max(eyeGrid, Math.round(layer.h / cell));
   const vertexCount = (nx + 1) * (ny + 1);
   const base = new Float32Array(vertexCount * 2);
   const uv = new Float32Array(vertexCount * 2);
+  const lipContour = layer.bn.startsWith('mouth_') ? mouthContour(layer,layer.bn!=='mouth_close') : null;
   let offset = 0;
 
   for (let j = 0; j <= ny; j += 1) {
@@ -382,6 +380,16 @@ function createRenderLayer(
       base[offset + 1] = layer.y + (layer.h * j) / ny;
       uv[offset] = i / nx;
       uv[offset + 1] = j / ny;
+      if (lipContour) {
+        const column = (lipContour.top.length-1)*i/nx;
+        const lo=Math.floor(column),hi=Math.min(lo+1,lipContour.top.length-1),t=column-lo;
+        const top=Math.max(layer.y,lipContour.top[lo]+(lipContour.top[hi]-lipContour.top[lo])*t-1);
+        const bottom=Math.min(layer.y+layer.h,lipContour.bottom[lo]+(lipContour.bottom[hi]-lipContour.bottom[lo])*t+1);
+        base[offset]=lipContour.left+(lipContour.right-lipContour.left)*i/nx;
+        base[offset+1]=top+(bottom-top)*j/ny;
+        uv[offset]=(base[offset]-layer.x)/layer.w;
+        uv[offset+1]=(base[offset+1]-layer.y)/layer.h;
+      }
       offset += 2;
     }
   }
@@ -519,6 +527,8 @@ export function createAnime25RigAvatar(
   const locViewScale = getUniformLocation(gl, program, 'uViewScale');
   const locCut = getUniformLocation(gl, program, 'uCut');
   const locAlpha = getUniformLocation(gl, program, 'uAlpha');
+  const locMouthShade = getUniformLocation(gl, program, 'uMouthShade');
+  const locResolveTexel = getUniformLocation(gl, program, 'uResolveTexel');
 
   gl.enableVertexAttribArray(locPos);
   gl.enableVertexAttribArray(locUV);
@@ -543,6 +553,42 @@ export function createAnime25RigAvatar(
   const layers = rig.layers
     .map((layer) => createRenderLayer(gl, layer, canvasWidth, anchors))
     .filter((layer): layer is RenderLayer => Boolean(layer));
+  const mouthContours: Record<string, MouthContour> = {};
+  for (const layer of layers) if (layer.bn.startsWith('mouth_')) {
+    const contour = mouthContour(layer,true,layer.bn==='mouth_close');
+    if (contour) mouthContours[layer.bn] = contour;
+  }
+  const closedMouth = layers.find(layer=>layer.bn==='mouth_close');
+  const mouthInk=[0,0,0];let inkWeight=0;
+  if(closedMouth)for(let i=0;i<closedMouth.img.data.length;i+=4) {
+    const data=closedMouth.img.data,a=data[i+3];
+    if(a<128 || Math.min(data[i],data[i+1],data[i+2])>=160)continue;
+    inkWeight+=a;for(let c=0;c<3;c++)mouthInk[c]+=data[i+c]*a;
+  }
+  for(let c=0;c<3;c++)mouthInk[c]=inkWeight?mouthInk[c]/inkWeight/255:[.3,.18,.12][c];
+  const mouthController = createMouthController(mouthContours);
+  let mouthFrame = mouthController.resolve(DEFAULT_PSD_MOTION_PARAMETERS);
+  // Area-sample only the mouth. Narrow lips must retain fractional edge
+  // coverage rather than aliasing a tall mouth texture into a jagged line.
+  const sampleScale=Math.min(3,Math.floor(gl.getParameter(gl.MAX_TEXTURE_SIZE)/Math.max(canvasWidth,canvasHeight)));
+  const mouthTexture=sampleScale>=2&&Object.keys(mouthContours).length?gl.createTexture():null;
+  const mouthFramebuffer=mouthTexture?gl.createFramebuffer():null;
+  const mouthQuad=mouthFramebuffer?[createBuffer(gl),createBuffer(gl),createBuffer(gl)]:[];
+  if(mouthTexture&&mouthFramebuffer) {
+    gl.bindTexture(gl.TEXTURE_2D,mouthTexture);
+    gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,canvasWidth*sampleScale,canvasHeight*sampleScale,0,gl.RGBA,gl.UNSIGNED_BYTE,null);
+    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
+    gl.bindFramebuffer(gl.FRAMEBUFFER,mouthFramebuffer);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,mouthTexture,0);
+    if(gl.checkFramebufferStatus(gl.FRAMEBUFFER)!==gl.FRAMEBUFFER_COMPLETE)throw new Error('口を表示する準備ができませんでした。ページを開き直してください。');
+    gl.bindFramebuffer(gl.FRAMEBUFFER,null);
+    const values=[new Float32Array([0,0,canvasWidth,0,0,canvasHeight,0,canvasHeight,canvasWidth,0,canvasWidth,canvasHeight]),
+      new Float32Array([0,1,1,1,0,0,0,0,1,1,1,0]),new Float32Array(6).fill(1)];
+    mouthQuad.forEach((buffer,i)=>{gl.bindBuffer(gl.ARRAY_BUFFER,buffer);gl.bufferData(gl.ARRAY_BUFFER,values[i],gl.STATIC_DRAW);});
+  }
   const hasEyeSmile = {
     L: layers.some(layer => layer.bn === 'eye_smile' && layer.side === 'L'),
     R: layers.some(layer => layer.bn === 'eye_smile' && layer.side === 'R'),
@@ -715,7 +761,9 @@ export function createAnime25RigAvatar(
         }
       }
 
-      if (layer.bn === 'mouth_open' || layer.bn === 'mouth_close') {
+      if (layer.bn.startsWith('mouth_')) {
+        const shaped = mouthController.warp(x,y,layer.bn,mouthFrame);
+        x=shaped.x; y=shaped.y; layer.inkVisibility[vertex]=shaped.visibility;
         if (params.mouthScale !== 1) {
           x = anchors.mouth.cx + (x - anchors.mouth.cx) * params.mouthScale;
           y = anchors.mouth.cy + (y - anchors.mouth.cy) * params.mouthScale;
@@ -788,17 +836,14 @@ export function createAnime25RigAvatar(
         }
       }
 
-      if (layer.fade === 'mouthOpen' || layer.fade === 'mouthClose') {
-        if (layer.fade === 'mouthOpen') y =
-          anchors.mouth.y0 +
-          (y - anchors.mouth.y0) * (0.5 + 0.5 * params.mouthOpen);
+      if (layer.bn.startsWith('mouth_')) {
         const q = Math.abs(x - anchors.mouth.cx) / (mouthHalfWidth + 4);
-        const formAmplitude = 12 * faceScale + (layer.fade === 'mouthClose' && params.mouthForm < 0
-          ? (anchors.mouth.closedHeight || 0) * 0.5 : 0);
-        y -= params.mouthForm * formAmplitude * (q ** 1.5 - 0.35);
+        const form = params.mouthForm * mouthFrame.weights.base;
+        const formAmplitude = 12 * faceScale + (form < 0 ? (anchors.mouth.closedHeight || 0) * 0.5 : 0);
+        y -= form * formAmplitude * (q ** 1.5 - 0.35);
       }
 
-      if (layer.fade === 'mouthOpen' || layer.fade === 'mouthClose') {
+      if (layer.bn.startsWith('mouth_')) {
         y += params.mouthCY * 14 * faceScale;
         const mouthAngle = params.mouthCAng * 0.35;
         if (mouthAngle) {
@@ -1042,7 +1087,7 @@ export function createAnime25RigAvatar(
       current[key] += (target[key] - current[key]) * alpha;
       // A discrete expression handoff must reach an exact slider threshold,
       // rather than approach it forever from one side through smoothing.
-      if ((key.startsWith('eyeSmile') || key.startsWith('eyeWink')) && Math.abs(target[key] - current[key]) < 0.001) current[key] = target[key];
+      if ((key.startsWith('eyeSmile') || key.startsWith('eyeWink') || key === 'mouthLaugh' || key === 'mouthRound') && Math.abs(target[key] - current[key]) < 0.001) current[key] = target[key];
     }
 
     const dragStiffness = dragInertia.active ? 90 : 34;
@@ -1055,6 +1100,8 @@ export function createAnime25RigAvatar(
     dragInertia.y += dragInertia.vy * dt;
 
     const params = { ...current };
+    mouthFrame = mouthController.resolve(params,mouthRestWeight(trackingInput?.mouthOpen,trackingWeight));
+    params.mouthOpen = mouthFrame.openness;
     const dragPhysics = clamp(
       Math.hypot(dragInertia.x, dragInertia.y) * 1.05 * motionTuning.dragScale,
       0,
@@ -1127,7 +1174,7 @@ export function createAnime25RigAvatar(
     gl.uniform2f(locViewOffset, viewOffsetX, viewOffsetY);
     gl.uniform1f(locViewScale, viewScale);
     for (const layer of layers) {
-      const alpha = fadeAlpha(layer, params, hasEyeClose, hasEyeSmile);
+      const alpha = fadeAlpha(layer, params, hasEyeClose, hasEyeSmile, mouthFrame.drawing);
       if (
         alpha < 0.004 &&
         !(layer.fade === 'eyeOpen' && layer.name.startsWith('eyewhite'))
@@ -1135,9 +1182,17 @@ export function createAnime25RigAvatar(
         continue;
       }
       deform(layer, params);
+      const sampledMouth=Boolean(mouthFramebuffer&&layer.bn.startsWith('mouth_'));
+      if(sampledMouth) {
+        gl.bindFramebuffer(gl.FRAMEBUFFER,mouthFramebuffer);
+        gl.viewport(0,0,canvasWidth*sampleScale,canvasHeight*sampleScale);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+      }
       const focusAlpha =
         focusedLayer && layer.bn !== focusedLayer ? 0.2 : 1;
       gl.uniform1f(locAlpha, alpha * focusAlpha);
+      const mouthShade=layer.bn.startsWith('mouth_')&&layer.bn!=='mouth_close' ? 1-smooth((mouthFrame.progress-.05)/.28) : 0;
+      gl.uniform4f(locMouthShade,mouthInk[0],mouthInk[1],mouthInk[2],mouthShade);
       gl.bindBuffer(gl.ARRAY_BUFFER, layer.vboPos);
       gl.bufferData(gl.ARRAY_BUFFER, layer.cur, gl.DYNAMIC_DRAW);
       gl.vertexAttribPointer(locPos, 2, gl.FLOAT, false, 0, 0);
@@ -1166,6 +1221,18 @@ export function createAnime25RigAvatar(
       } else {
         gl.drawElements(gl.TRIANGLES, layer.nIdx, gl.UNSIGNED_SHORT, 0);
       }
+      if(sampledMouth) {
+        gl.bindFramebuffer(gl.FRAMEBUFFER,null);
+        gl.viewport(0,0,canvasWidth,canvasHeight);
+        [locPos,locUV,locInk].forEach((location,i)=>{gl.bindBuffer(gl.ARRAY_BUFFER,mouthQuad[i]);gl.vertexAttribPointer(location,i===2?1:2,gl.FLOAT,false,0,0);});
+        gl.bindTexture(gl.TEXTURE_2D,mouthTexture);
+        gl.uniform2f(locViewOffset,0,0);gl.uniform1f(locViewScale,1);
+        gl.uniform1f(locAlpha,1);gl.uniform1f(locCut,0);gl.uniform4f(locMouthShade,0,0,0,0);
+        gl.uniform2f(locResolveTexel,1/(3*canvasWidth),1/(3*canvasHeight));
+        gl.drawArrays(gl.TRIANGLES,0,6);
+        gl.uniform2f(locResolveTexel,0,0);
+        gl.uniform2f(locViewOffset,viewOffsetX,viewOffsetY);gl.uniform1f(locViewScale,viewScale);
+      }
     }
 
     fpsFrames += 1;
@@ -1179,6 +1246,11 @@ export function createAnime25RigAvatar(
   animationFrame = requestAnimationFrame(tick);
 
   return {
+    getMouthState() {
+      return { ...mouthFrame, weights: { ...mouthFrame.weights },
+        sampleScale:mouthFramebuffer?sampleScale:1,
+        visibleDrawings: layers.filter(layer=>layer.bn.startsWith('mouth_') && layer.bn===mouthFrame.drawing).length };
+    },
     setVoiceMouth(value) {
       voiceMouth = value !== null && Number.isFinite(value) ? clamp(value, 0, 1) : null;
     },
@@ -1283,18 +1355,19 @@ export function createAnime25RigAvatar(
       const matches: string[] = [];
       for (let index = layers.length - 1; index >= 0; index -= 1) {
         const layer = layers[index]!;
-        if (fadeAlpha(layer, current, hasEyeClose, hasEyeSmile) < 0.08) continue;
+        if (fadeAlpha(layer, current, hasEyeClose, hasEyeSmile, mouthFrame.drawing) < 0.08) continue;
         if (!layerContainsPoint(layer, modelX, modelY)) continue;
         if (!matches.includes(layer.bn)) matches.push(layer.bn);
       }
       return matches;
     },
     getAnimationState() {
-      return { current: { ...current }, blinkT, nextBlink, nextRandom,
+      return { current: { ...current }, blinkT, nextBlink, nextRandom, mouthSelection:mouthController.getState(),
         randomTarget: { ...randomTarget }, bounce: { ...bounce },
         springs: new Map(layers.map(layer => [layer.name, structuredClone(layer.spr ?? [])])) };
     },
     setAnimationState(state) {
+      if(state.mouthSelection)mouthController.setState(state.mouthSelection);
       Object.assign(current, state.current); Object.assign(randomTarget, state.randomTarget); Object.assign(bounce, state.bounce);
       blinkT = state.blinkT; nextBlink = state.nextBlink; nextRandom = state.nextRandom;
       for (const layer of layers) {
@@ -1315,6 +1388,8 @@ export function createAnime25RigAvatar(
         gl.deleteBuffer(layer.ibo);
       }
       gl.deleteProgram(program);
+      gl.deleteTexture(mouthTexture);gl.deleteFramebuffer(mouthFramebuffer);
+      mouthQuad.forEach(buffer=>gl.deleteBuffer(buffer));
     },
   };
 }

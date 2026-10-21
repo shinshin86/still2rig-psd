@@ -50,6 +50,9 @@ export interface PsdMotionParameters {
   browAngSym: number;
   mouthOpen: number;
   mouthForm: number;
+  mouthLaugh: number;
+  mouthRound: number;
+  expressionMouthOpen: number;
   mouthCY: number;
   mouthEase: number;
   mouthCAng: number;
@@ -75,6 +78,7 @@ export interface PsdMotionParameterDefinition {
   min: number;
   max: number;
   step: number;
+  hidden?: boolean;
 }
 
 export const PSD_MOTION_PARAMETER_DEFINITIONS: readonly PsdMotionParameterDefinition[] =
@@ -235,6 +239,8 @@ export const PSD_MOTION_PARAMETER_DEFINITIONS: readonly PsdMotionParameterDefini
       max: 1,
       step: 0.01,
     },
+    {key:'expressionMouthOpen',label:'Expression mouth opening',group:'mouth',min:0,max:1,step:0.01,hidden:true},
+    ...(['mouthLaugh','mouthRound'] as const).map(key => ({key,label:key,group:'mouth' as const,min:0,max:1,step:0.01})),
     {
       key: 'mouthForm',
       label: 'Mouth form',
@@ -388,6 +394,9 @@ export const DEFAULT_PSD_MOTION_PARAMETERS: Readonly<PsdMotionParameters> = {
   browAngSym: 0,
   mouthOpen: 0,
   mouthForm: 0,
+  mouthLaugh: 0,
+  mouthRound: 0,
+  expressionMouthOpen: 0,
   mouthCY: 0,
   mouthEase: 0.45,
   mouthCAng: 0,

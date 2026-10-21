@@ -37,6 +37,8 @@
     'facedetail':  { depth: 1.02, group: 'head' },
     'headwear':    { depth: 1.20, group: 'head' },
     'mouth_close': { depth: 1.08, group: 'head', fade: 'mouthClose' },
+    'mouth_laugh': { depth: 1.08, group: 'head', fade: 'mouthLaugh' },
+    'mouth_round': { depth: 1.08, group: 'head', fade: 'mouthRound' },
     'mouth_open':  { depth: 1.08, group: 'head', fade: 'mouthOpen' },
     'nose':        { depth: 1.15, group: 'head' },
     'eyewhite':    { depth: 1.06, group: 'head', split: true, fade: 'eyeOpen' },

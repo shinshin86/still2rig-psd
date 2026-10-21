@@ -18,7 +18,10 @@
     "eyeWinkR",
     "tears",
     "sweat",
-    "angerMark"
+    "angerMark",
+    "mouthLaugh",
+    "mouthRound",
+    "expressionMouthOpen"
   ],
   "presets": [
     {
@@ -33,7 +36,8 @@
         "eyeSmile": 1,
         "mouthForm": 0.65,
         "brow": 0.18,
-        "blush": 0.25
+        "blush": 0.25,
+        "mouthLaugh": 1
       }
     },
     {
@@ -73,7 +77,8 @@
       "label": "驚き",
       "values": {
         "brow": 0.55,
-        "eyeWide": 1
+        "eyeWide": 1,
+        "mouthRound": 1
       }
     },
     {
