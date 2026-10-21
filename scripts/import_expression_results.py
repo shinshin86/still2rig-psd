@@ -12,6 +12,7 @@ from PIL import Image, ImageChops, ImageFilter
 
 from expression_definitions import load_expressions, CONFIG_ROOT
 from soft_expression import extract_soft_artwork
+from expression_seam import check_seam, feather_artwork
 from expression_requests_common import file_hash, layer_hash
 
 
@@ -271,6 +272,7 @@ def import_results(args, report):
     definitions = [item for name, item in available.items() if name in requests["variants"]]
     soft_maximum = json.loads((CONFIG_ROOT / "default.json").read_text(encoding="utf-8"))["quality"]["softExpressionMaximumAlpha"]
     outputs = {}
+    previews = {}
     extractors = {"diff": extract_artwork, "soft": lambda *values: extract_soft_artwork(*values, maximum_alpha=soft_maximum)}
     for definition in definitions:
         name = definition["name"]
@@ -317,12 +319,20 @@ def import_results(args, report):
         if not details["alignment"]["pass"]:
             alignment = details["alignment"]
             raise ValueError(f"{name}: global image misalignment: shift=({alignment['dx']}, {alignment['dy']}), scale={alignment['scale']}.")
-        if details["meanMatchedDiff"] > args.max_outside_mean or details["p99MatchedDiff"] > args.max_outside_p99:
-            raise ValueError(f"{name}: pixels outside the mask changed: mean={details['meanMatchedDiff']}, "
-                             f"p99={details['p99MatchedDiff']} (limits {args.max_outside_mean}, {args.max_outside_p99}).")
-        if details["maxLocalMeanDiff"] > args.max_band_local_mean or details["maxFlatMeanDiff"] > args.max_band_flat_mean:
-            raise ValueError(f"{name}: local pixels outside the mask changed: local={details['maxLocalMeanDiff']}, "
-                             f"flat={details['maxFlatMeanDiff']} (limits {args.max_band_local_mean}, {args.max_band_flat_mean}).")
+        mode = args.protected_check or definition["protectedCheck"]
+        if args.protected_check is not None or mode == "seam":
+            details["protectedCheck"] = mode
+        if mode == "seam":
+            details["seam"] = check_seam(reference, result, editable, pixel_scale, underlay)
+            if not details["seam"]["pass"]:
+                raise ValueError(f"{name}: seam check failed: " + ", ".join(details["seam"]["failedChecks"]) + ".")
+        else:
+            if details["meanMatchedDiff"] > args.max_outside_mean or details["p99MatchedDiff"] > args.max_outside_p99:
+                raise ValueError(f"{name}: pixels outside the mask changed: mean={details['meanMatchedDiff']}, "
+                                 f"p99={details['p99MatchedDiff']} (limits {args.max_outside_mean}, {args.max_outside_p99}).")
+            if details["maxLocalMeanDiff"] > args.max_band_local_mean or details["maxFlatMeanDiff"] > args.max_band_flat_mean:
+                raise ValueError(f"{name}: local pixels outside the mask changed: local={details['maxLocalMeanDiff']}, "
+                                 f"flat={details['maxFlatMeanDiff']} (limits {args.max_band_local_mean}, {args.max_band_flat_mean}).")
         result, extraction = extractors[definition["extraction"]](result, underlay, editable, args.artwork_threshold, args.minimum_component_pixels * pixel_scale * pixel_scale)
         details.update(extraction)
         result = result.resize(crop_size, Image.Resampling.LANCZOS)
@@ -331,6 +341,12 @@ def import_results(args, report):
         result.putalpha(ImageChops.multiply(result.getchannel("A"), editable))
         if definition["extraction"] == "soft":
             result.putalpha(result.getchannel("A").point(lambda value: min(round(soft_maximum * 255), value)))
+        if mode == "seam":
+            result = feather_artwork(result, editable)
+        if args.preview_dir is not None:
+            base = underlay.resize(crop_size, Image.Resampling.LANCZOS)
+            previews[name] = {"input": reference.resize(crop_size, Image.Resampling.LANCZOS),
+                              "artwork": result.copy(), "composite": Image.alpha_composite(base, result)}
         canvas = Image.new("RGBA", tuple(requests["canvas"]))
         canvas.alpha_composite(result, (box[0], box[1]))
         outputs[name] = canvas
@@ -348,6 +364,19 @@ def import_results(args, report):
                 outputs[name].save(destination)
             elif destination.exists():
                 destination.unlink()
+    if args.preview_dir is not None:
+        # Refuse output aliases before any diagnostic image is written.
+        if any((args.preview_dir / f"{name}-{label}.png").is_symlink()
+               for name, images in previews.items() for label in (*images, "canvas-artwork")):
+            raise ValueError("Preview images must not be symlinks.")
+        args.preview_dir.mkdir(parents=True, exist_ok=True)
+        for name, images in previews.items():
+            files = {}
+            for label, image in {**images, "canvas-artwork": outputs[name]}.items():
+                file = args.preview_dir / f"{name}-{label}.png"
+                image.save(file)
+                files[label] = file.relative_to(Path.cwd()).as_posix()
+            report["variants"][name]["preview"] = files
     report["accepted"] = list(outputs)
     report["ok"] = True
 
@@ -372,6 +401,8 @@ def main():
     parser.add_argument("--max-alignment-shift", type=float, default=12)
     parser.add_argument("--max-alignment-scale", type=float, default=0.03)
     parser.add_argument("--read-only", action="store_true")
+    parser.add_argument("--protected-check", choices=("strict", "seam"))
+    parser.add_argument("--preview-dir", type=Path)
     parser.add_argument("--artwork-threshold", type=float, default=8)
     parser.add_argument("--minimum-component-pixels", type=int, default=4)
     args = parser.parse_args()
@@ -382,6 +413,13 @@ def main():
                              "artworkThreshold": args.artwork_threshold, "minimumComponentPixels": args.minimum_component_pixels},
               "note": "Import only restores masked artwork. Existing expression QA and visual review are still required."}
     try:
+        if args.preview_dir is not None:
+            preview = args.preview_dir.resolve()
+            state = (Path.cwd() / ".still2rig-psd").resolve()
+            job = args.output_dir.parent.resolve()
+            if not args.read_only or not preview.is_relative_to(state) or preview.is_relative_to(job):
+                raise ValueError("Preview directory needs --read-only and must stay under .still2rig-psd outside this job.")
+            args.preview_dir = preview
         if any(not math.isfinite(value) or value < 0 or value > 255
                for value in (args.max_outside_mean, args.max_outside_p99, args.max_band_local_mean, args.max_band_flat_mean)):
             raise ValueError("Outside-mask thresholds must be finite numbers from 0 to 255.")

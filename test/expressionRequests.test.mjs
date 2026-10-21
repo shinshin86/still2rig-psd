@@ -309,6 +309,9 @@ for (const mode of ['shifted', 'scaled']) {
     assert.match(result.stderr, /global image misalignment|outside the mask changed/);
     const report = JSON.parse(fs.readFileSync(path.join(f.root, 'generated-expressions', 'report.json')));
     if (mode === 'shifted') assert.equal(report.variants.eye_close.alignment.pass, false);
+    const seam = run('import-expressions', f.id, '--protected-check', 'seam', '--read-only');
+    assert.notEqual(seam.status, 0);
+    if (mode === 'shifted') assert.equal(JSON.parse(seam.stdout).variants.eye_close.alignment.pass, false);
   });
 }
 

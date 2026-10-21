@@ -21,7 +21,8 @@
       "registration": "eyes",
       "split": true,
       "placeholderFrom": null,
-      "checkFrontHair": true
+      "checkFrontHair": true,
+      "protectedCheck": "strict"
     },
     {
       "name": "mouth_open",
@@ -41,7 +42,8 @@
       "registration": "mouth",
       "split": false,
       "placeholderFrom": "mouth_close",
-      "checkFrontHair": false
+      "checkFrontHair": false,
+      "protectedCheck": "strict"
     },
     {
       "name": "mouth_close",
@@ -54,7 +56,8 @@
       "registration": "none",
       "split": false,
       "placeholderFrom": null,
-      "checkFrontHair": true
+      "checkFrontHair": true,
+      "protectedCheck": "strict"
     },
     {
       "name": "eye_smile",
@@ -77,7 +80,8 @@
       "registration": "eyes",
       "split": true,
       "placeholderFrom": null,
-      "checkFrontHair": true
+      "checkFrontHair": true,
+      "protectedCheck": "seam"
     },
     {
       "name": "blush",
@@ -98,7 +102,8 @@
       "registration": "face",
       "split": false,
       "placeholderFrom": null,
-      "checkFrontHair": true
+      "checkFrontHair": true,
+      "protectedCheck": "seam"
     }
   ]
 }

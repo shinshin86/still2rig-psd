@@ -148,13 +148,31 @@ drift may be compensated only within a 12-pixel displacement magnitude and 3%
 uniform scale error; the original result is sampled once. Read the applied
 transform as well as the estimate. Shared-white-background RGB comparison avoids
 false differences from near-opaque alpha encoding. Symmetric 2-pixel color
-matching keeps the mean/p99 limits at 6/20; direct errors remain in the report.
+matching in `strict` mode keeps the mean/p99 limits at 6/20; direct errors remain in the report.
 Face-interior 4x4 tiles add local/flat limits of 24/12 to catch missing ink or
 painted patches. Outer hair contours use the global band check. Two character
 samples passed; synthetic removed/moved brows, patches and excessive drift must
 fail. See `docs/quality-gates.md` for metric boundaries and calibration.
 `--read-only` evaluates recorded provenance without changing files; use
 `--request-dir DIR` with it to inspect archived requests.
+
+Expression definitions select `protectedCheck`: `eye_close` and `mouth_open`
+use `strict`, while `eye_smile` and `blush` use `seam`. Use
+`import-expressions JOB [DIR] --protected-check strict|seam` for a temporary
+override. Alignment and provenance remain mandatory. In `seam`, whole-outside
+mean/p99 limits are 18/80. Both 3-native-pixel boundary bands use radius-1 blurred
+RGB residuals against the original outside and the PSD underlay inside (source
+eye/mouth removal is intentional), with mean/p95 limits 6/20 and 4x4 tile mean limit 12. Adjacent
+inside/outside residual jumps have p95 limit 12. Only opaque reference pixels
+are sampled; missing band support fails. Reports identify failed bands and tiles.
+After restoration, the first three inside pixels fade from one-third to full
+extracted alpha, including soft blush; no outside pixels are imported.
+
+Use `--read-only` to evaluate archived results without changing job files.
+Optional `--preview-dir .still2rig-psd/review` writes accepted input/art/composite
+crops and full-canvas artwork outside the source job. Inspect these crops before
+repair. Do not relax limits solely to force an import pass. No import pass
+establishes natural expression art or motion quality.
 
 Import removes matching skin using the same RGB comparison where both result
 and underlay are nearly opaque, and premultiplied RGBA elsewhere. It removes

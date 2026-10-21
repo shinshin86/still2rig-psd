@@ -11,7 +11,7 @@ function run(...args) {
 }
 function ok(...args) {
   const result = run(...args);
-  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.status, 0, result.stderr + (result.status === 0 ? "" : result.stdout));
   return JSON.parse(result.stdout);
 }
 function python(...args) {
@@ -63,7 +63,7 @@ test('additional imports keep the original artwork and thin blush survives repai
   const baseRepair = ok('repair', f.id, '--expressions', original.outputDir);
   assert.equal(baseRepair.qa.productionReady, true);
   ok('expression-requests', f.id, '--only', 'eye_smile,blush'); edit(f, 'additional-faint');
-  const imported = ok('import-expressions', f.id);
+  const imported = ok('import-expressions', f.id, '--protected-check', 'strict');
   assert.deepEqual(imported.accepted, ['eye_smile', 'blush']);
   assert.deepEqual(['eye_close.png', 'mouth_open.png'].map(name => sha256File(path.join(directory, name))), before);
   const partial = path.join(f.root, 'additional-only'); fs.mkdirSync(partial);
@@ -113,9 +113,9 @@ test('soft import rejects protected edits and caps opacity without affecting bas
   const original = ok('import-expressions', f.id);
   ok('repair', f.id, '--expressions', original.outputDir);
   ok('expression-requests', f.id, '--only', 'blush'); edit(f, 'additional-outside');
-  assert.notEqual(run('import-expressions', f.id).status, 0);
+  assert.notEqual(run('import-expressions', f.id, '--protected-check', 'strict').status, 0);
   edit(f, 'additional-strong');
-  const imported = ok('import-expressions', f.id);
+  const imported = ok('import-expressions', f.id, '--protected-check', 'strict');
   assert.ok(Math.max(...nativeAlpha(path.join(PROJECT_ROOT, imported.outputDir, 'blush.png'))) <= 153);
   const bad = path.join(f.root, 'bad-art'); fs.mkdirSync(bad);
   python('-c', 'from PIL import Image; import sys; im=Image.new("RGBA",(96,96)); im.putpixel((0,0),(255,0,0,255)); im.putpixel((35,34),(255,0,0,255)); im.save(sys.argv[1])', path.join(bad, 'blush.png'));
@@ -145,4 +145,43 @@ print(json.dumps({"alpha":[art.getpixel((x,0))[3] for x in range(3)],"error":max
   assert.deepEqual(result.alpha.slice(1), [0, 0]);
   assert.ok(Math.abs(result.error) <= 1);
   assert.equal(result.maximum, 0.6);
+});
+
+
+test('seam defaults and strict overrides export read-only previews without changing job files', () => {
+  const f = fixture();
+  ok('expression-requests', f.id, '--only', 'blush'); edit(f, 'additional-faint');
+  const protectedFiles = ['job.json', 'output/' + f.id + '.psd', 'expression-requests/requests.json'];
+  const before = protectedFiles.map(file => sha256File(path.join(f.jobRoot, file)));
+  const preview = path.join(f.root, 'preview');
+  const seam = ok('import-expressions', f.id, '--read-only', '--preview-dir', preview);
+  assert.equal(seam.variants.blush.protectedCheck, 'seam');
+  assert.equal(seam.variants.blush.seam.pass, true);
+  assert.equal(seam.variants.blush.status, 'accepted');
+  assert.ok(fs.existsSync(path.join(PROJECT_ROOT, seam.variants.blush.preview.composite)));
+  assert.ok(!fs.existsSync(path.join(f.jobRoot, 'generated-expressions')));
+  const strict = run('import-expressions', f.id, '--read-only', '--protected-check', 'strict');
+  assert.equal(strict.status, 0, strict.stderr + strict.stdout);
+  assert.equal(JSON.parse(strict.stdout).variants.blush.protectedCheck, 'strict');
+  assert.deepEqual(protectedFiles.map(file => sha256File(path.join(f.jobRoot, file))), before);
+  for (const args of [['--protected-check', 'other'], ['--preview-dir', preview],
+    ['--read-only', '--preview-dir', f.jobRoot]]) assert.notEqual(run('import-expressions', f.id, ...args).status, 0);
+});
+
+
+test('smiling eyes contained inside the boundary bands pass the default seam check', () => {
+  const f = fixture();
+  ok('expression-requests', f.id, '--only', 'eye_smile');
+  python('-c', `import json,sys
+from pathlib import Path
+from PIL import Image, ImageDraw
+root=Path(sys.argv[1]); item=json.loads((root/'requests.json').read_text())['variants']['eye_smile']
+s=item['scale']; left,top,_,_=item['cropBox']
+im=Image.open(root/'eye_smile/underlay.png').convert('RGBA'); d=ImageDraw.Draw(im)
+for cx in (37,59):
+    d.line([((cx-3-left)*s,(35-top)*s),((cx-left)*s,(33-top)*s),((cx+3-left)*s,(35-top)*s)],fill=(80,30,25,255),width=s)
+(root/'results').mkdir(exist_ok=True); im.save(root/'results/eye_smile.png')`, f.requests);
+  const report = ok('import-expressions', f.id, '--read-only');
+  assert.equal(report.variants.eye_smile.seam.pass, true);
+  assert.ok(report.variants.eye_smile.artworkPixels > 0);
 });

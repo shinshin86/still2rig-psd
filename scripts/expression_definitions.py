@@ -8,7 +8,7 @@ from pathlib import Path
 
 CONFIG_ROOT = Path(__file__).resolve().parent.parent / "configs"
 KEYS = {"name", "label", "requestLabel", "prompt", "editableLayers", "mask", "extraction",
-        "registration", "split", "placeholderFrom", "checkFrontHair"}
+        "registration", "split", "placeholderFrom", "checkFrontHair", "protectedCheck"}
 MASK_KEYS = {"dilationRatio", "minimumDilation", "fillBounds", "mouthLimits"}
 
 
@@ -35,6 +35,7 @@ def validate_expressions(config, layer_map):
                 or not isinstance(item["editableLayers"], list)
                 or any(not isinstance(value, str) or value not in targets for value in item["editableLayers"])
                 or len(set(item["editableLayers"])) != len(item["editableLayers"])
+                or item["protectedCheck"] not in ("strict", "seam")
                 or item["registration"] not in ("eyes", "mouth", "face", "none")
                 or type(item["split"]) is not bool or type(item["checkFrontHair"]) is not bool
                 or not (item["placeholderFrom"] is None or (isinstance(item["placeholderFrom"], str)

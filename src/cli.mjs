@@ -10,6 +10,7 @@ import { listJobs, loadJob, prepareJob, updateJob } from './job.mjs';
 import { runQa } from './qa.mjs';
 import {
   PROJECT_ROOT,
+  STATE_ROOT,
   jobRoot,
   loadDefaults,
   loadLayerMap,
@@ -37,7 +38,7 @@ Usage:
     [--max-band-local-mean 24] [--max-band-flat-mean 12]
     [--protected-band 8] [--alignment-radius 24] [--max-alignment-shift 12] [--max-alignment-scale 0.03]
     [--artwork-threshold 8] [--minimum-component-pixels 4]
-    [--read-only [--request-dir DIR]]
+    [--protected-check strict|seam] [--read-only [--request-dir DIR] [--preview-dir DIR]]
   still2rig-psd motion-qa JOB [--negative-fixture]
   still2rig-psd status [JOB] [--json]
   still2rig-psd self-test
@@ -496,6 +497,17 @@ function importExpressions(jobId, directory, options) {
     '--output-dir', outputDir, '--report', reportFile,
   ];
   if (options['read-only']) args.push('--read-only');
+  if (options['protected-check'] !== undefined) {
+    if (!['strict', 'seam'].includes(options['protected-check'])) throw new Error('--protected-check must be strict or seam.');
+    args.push('--protected-check', options['protected-check']);
+  }
+  if (options['preview-dir'] !== undefined) {
+    const preview = path.resolve(options['preview-dir']);
+    if (!options['read-only'] || !preview.startsWith(`${STATE_ROOT}${path.sep}`) || (preview === root || preview.startsWith(`${root}${path.sep}`))) {
+      throw new Error('--preview-dir needs --read-only and a directory under .still2rig-psd outside this job.');
+    }
+    args.push('--preview-dir', preview);
+  }
   for (const key of ['max-outside-mean', 'max-outside-p99', 'max-band-local-mean', 'max-band-flat-mean', 'artwork-threshold', 'minimum-component-pixels', 'protected-band', 'alignment-radius', 'max-alignment-shift', 'max-alignment-scale']) {
     if (options[key] !== undefined) args.push(`--${key}`, options[key]);
   }

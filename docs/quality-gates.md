@@ -121,9 +121,9 @@ radius is 24 pixels (`--alignment-radius`). The original generator output is
 sampled once with the estimated affine transform before extraction. Distances
 use original PSD pixels, independently of request enlargement.
 
-Comparisons use RGB on a shared white background: alpha 248–249 on almost opaque
+The `strict` and `seam` modes both use RGB on a shared white background: alpha 248–249 on almost opaque
 skin must not introduce a dark premultiplication error. Reports retain direct
-channel-wise mean/p99 for diagnosis. The gate uses symmetric nearest-color
+channel-wise mean/p99 for diagnosis. The `strict` gate uses symmetric nearest-color
 matching within two native pixels, excluding editable and translucent input
 pixels; its outer support extends two pixels beyond the measured band. The
 mean/p99 of these per-pixel RGB errors must be at most 6/20
@@ -138,12 +138,44 @@ face interior, inset two pixels from its contour. Their maximum mean is 24
 at most 24 (`--max-band-flat-mean`). Positive samples measured maxima below 8;
 removed/moved brows, painted skin patches and excessive shifts must still fail.
 Outer hair silhouettes retain the global band check, but are excluded from face
-interior tiles. Far context is neither measured nor imported. These checks do
+interior tiles. In `strict` mode, far context is neither measured nor imported. These checks do
 not cover every drawing defect; visual review remains required.
+
+`configs/expressions.json` selects `protectedCheck` per expression: `eye_close`
+and `mouth_open` use `strict`; `eye_smile` and `blush` use `seam`.
+`import-expressions JOB [DIR] --protected-check strict|seam` overrides that
+choice for the supplied results. Alignment and provenance checks are identical
+in both modes. The outside/band CLI thresholds above apply only to `strict`.
+
+`seam` evaluates the entire non-editable region for large changes: mean RGB
+error must be at most 18 and its 99th percentile at most 80. It then checks both
+sides of the edit boundary in native PSD pixels. The inner and outer bands are
+3 pixels wide; only reference pixels with alpha at least 240 are measured.
+A Gaussian blur of radius 1 removes pixel texture before comparing the RGB
+residual (generated minus base). The base keeps the original outside the mask
+and uses the PSD underlay inside, so intentionally removing the source eye or
+mouth is not classified as a seam. Each band's mean must be at most 6,
+95th percentile at most 20, and maximum mean of 4x4 tiles with at least 4 band
+pixels at most 12. For adjoining opaque pixels across the boundary, the 95th
+percentile of the difference between residuals must be at most 12. This
+subtracts gradients already present in the original. Empty bands or a boundary
+without opaque sample pairs fail explicitly. Reports include each band, sample
+count, worst tile, limits, and failed checks under `variants.NAME.seam`.
+
+Extraction still uses only editable pixels. After restoring native dimensions,
+`seam` fades the first three pixels inside the mask to one-third, two-thirds,
+and full extracted alpha; it never extends artwork outside the mask. This also
+applies to soft blush and retains its opacity cap. A passing import cannot
+establish whether an expression is natural or hide edits that cut through the
+boundary; inspect the composite before using it.
 
 Reports record direct/matched errors and estimated/applied transforms, including
 failures. `--read-only` validates recorded request layers and hashes without
-changing files; `--request-dir DIR` with that flag can evaluate archived requests.
+changing job files; `--request-dir DIR` with that flag can evaluate archived requests.
+With `--read-only --preview-dir .still2rig-psd/review`, accepted results also
+write diagnostic input, extracted artwork, and composited crops, plus full-canvas
+artwork. The preview directory must be under `.still2rig-psd/` outside this job;
+existing outputs and the job manifest remain untouched.
 Changed layers require new requests and new generated results.
 
 Inside the editable area, import compares against the underlay. Where both

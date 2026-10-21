@@ -1,7 +1,7 @@
 import definitions from '../configs/expressions.json' with { type: 'json' };
 import layerMap from '../configs/layer-map.json' with { type: 'json' };
 
-const keys = ['name', 'label', 'requestLabel', 'prompt', 'editableLayers', 'mask', 'extraction', 'registration', 'split', 'placeholderFrom', 'checkFrontHair'];
+const keys = ['name', 'label', 'requestLabel', 'prompt', 'editableLayers', 'mask', 'extraction', 'registration', 'split', 'placeholderFrom', 'checkFrontHair', 'protectedCheck'];
 const maskKeys = ['dilationRatio', 'minimumDilation', 'fillBounds', 'mouthLimits'];
 const record = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const exactKeys = (value, expected) => record(value) && Object.keys(value).length === expected.length && expected.every(key => Object.hasOwn(value, key));
@@ -16,7 +16,7 @@ export function validateExpressions(config, map) {
     if (!exactKeys(item, keys) || !text(item.name) || !/^[a-z][a-z0-9_]*$/.test(item.name) || !targets.has(item.name) || names.has(item.name)
         || !text(item.label) || !Array.isArray(item.editableLayers) || item.editableLayers.some(name => !targets.has(name))
         || new Set(item.editableLayers).size !== item.editableLayers.length || !['eyes', 'mouth', 'face', 'none'].includes(item.registration)
-        || typeof item.split !== 'boolean' || typeof item.checkFrontHair !== 'boolean'
+        || !['strict', 'seam'].includes(item.protectedCheck) || typeof item.split !== 'boolean' || typeof item.checkFrontHair !== 'boolean'
         || !(item.placeholderFrom === null || (targets.has(item.placeholderFrom) && item.placeholderFrom !== item.name))) fail();
     if (item.prompt === null) {
       if (item.requestLabel !== null || item.mask !== null || item.extraction !== null || item.editableLayers.length) fail();

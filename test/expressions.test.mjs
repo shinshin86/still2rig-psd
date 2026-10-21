@@ -37,7 +37,7 @@ test('both readers reject unknown fields, missing fields, unsafe names and inval
     c => { c.expressions[0].editableLayers = ['unknown']; }, c => { c.expressions[0].editableLayers = [1]; },
     c => { c.expressions[0].editableLayers = ['face', 'face']; },
     c => { c.expressions[0].extraction = 'thin'; }, c => { c.expressions[0].registration = 'unknown'; },
-    c => { c.expressions[0].split = 1; }, c => { c.expressions[0].checkFrontHair = 1; },
+    c => { c.expressions[0].protectedCheck = 'unknown'; }, c => { delete c.expressions[0].protectedCheck; }, c => { c.expressions[0].split = 1; }, c => { c.expressions[0].checkFrontHair = 1; },
     c => { c.expressions[0].placeholderFrom = 'unknown'; }, c => { c.expressions[0].placeholderFrom = 'eye_close'; },
     c => { c.expressions[0].mask.unknown = true; }, c => { c.expressions[0].mask.dilationRatio = '0.04'; },
     c => { c.expressions[0].mask.dilationRatio = true; }, c => { c.expressions[0].mask.dilationRatio = -0.1; },
