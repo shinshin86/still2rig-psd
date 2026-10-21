@@ -1,3 +1,4 @@
+import { expressionPresets, expressionPresetValues } from '../../src/expressionPresets.mjs';
 import path from 'node:path';
 
 export async function runExpressionQa({ browser, baseUrl, fixtureFile, expressionFile, expressionWithoutClose, qaRoot }) {
@@ -190,6 +191,35 @@ export async function runExpressionQa({ browser, baseUrl, fixtureFile, expressio
   const streamAfter = await streamCapture();
   const streamChanged = streamBefore.some((value, index) => Math.abs(value - streamAfter[index]) > 1);
   const streamSettings = await receiver.evaluate(() => window.streamQa.state().settings.parameters);
+  const presetChecks = [];
+  for (const preset of expressionPresets) {
+    await page.locator(`[data-expression-preset="${preset.id}"]`).click();
+    await page.waitForTimeout(650);
+    const values = await page.evaluate(() => window.rigQa.getProfileParameters());
+    const expected = expressionPresetValues(preset.id, ['eye_smile','blush']);
+    presetChecks.push(Object.entries(expected).every(([key,value]) => Math.abs(values[key]-value)<0.001));
+    await capture(`preset-${preset.id}`);
+    await page.locator('#rig-canvas').screenshot({ path: path.join(qaRoot, `preset-${preset.id}.png`) });
+  }
+  const winkOtherEye = await difference('preset-neutral','preset-wink',[130,55,180,100]);
+  await receiver.waitForFunction(() => window.streamQa.state().settings?.parameters.eyeSmileL === 1 && window.streamQa.state().settings?.parameters.eyeSmile === 0);
+  const presetStream = await receiver.evaluate(() => window.streamQa.state().settings.parameters);
+  await page.locator('#parameter-mouthForm-number').evaluate(e=>{e.closest('details').open=true;});
+  await page.locator('#parameter-mouthForm-number').fill('0.25');
+  await page.locator('#parameter-mouthForm-number').dispatchEvent('change');
+  const manualExpressionLabel = await page.locator('#expression-status').textContent();
+  await page.setViewportSize({width:375,height:812});
+  await page.locator('.expression-panel').scrollIntoViewIfNeeded();
+  await page.screenshot({path:path.join(qaRoot,'expression-presets-mobile.png')});
+  const presetMobileFit = await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth && [...document.querySelectorAll('[data-expression-preset]')].every(b=>b.getBoundingClientRect().right<=innerWidth));
+  await page.setViewportSize({width:1440,height:900});
+  await page.locator('[data-expression-preset="neutral"]').click(); await page.waitForTimeout(500);
+  await page.evaluate(() => window.rigQa.setProfileParameter('eyeWinkL',0.85)); await page.waitForTimeout(500);
+  await page.evaluate(() => window.rigQa.setProfileParameter('eyeWinkL',0.9)); await capture('wink-up-0.9');
+  await page.evaluate(() => window.rigQa.setProfileParameter('eyeWinkL',1)); await page.waitForTimeout(500);
+  await page.evaluate(() => window.rigQa.setProfileParameter('eyeWinkL',0.9)); await capture('wink-down-0.9');
+  const winkHandoffStable = await difference('wink-up-0.9','wink-down-0.9',[70,55,130,100]);
+  await page.evaluate(() => window.rigQa.setProfileParameter('eyeWinkL',0)); await page.waitForTimeout(500);
   await page.evaluate(() => window.rigQa.setLiveEnabled(false));
   await load(expressionWithoutClose);
   const withoutCloseParts = await page.evaluate(() => window.rigQa.summary.partsFound);
@@ -202,12 +232,26 @@ export async function runExpressionQa({ browser, baseUrl, fixtureFile, expressio
   const noCloseThreshold = await difference('no-close-0.48', 'no-close-0.5');
   const noCloseAfter = await difference('no-close-0.52', 'smile-0.52-blink-1');
   const noCloseBlink = await difference('no-close-0.5', 'no-close-blink');
+  await page.locator('[data-expression-preset="joy"]').click(); await page.waitForTimeout(600);
+  await page.evaluate(()=>{window.rigQa.ready=false;});
+  await page.setInputFiles('#psd-file-input',fixtureFile);
+  await page.waitForFunction(()=>window.rigQa.ready); await page.waitForTimeout(600);
+  const missingJoy = await page.evaluate(()=>window.rigQa.getProfileParameters());
+  await page.locator('[data-expression-preset="wink"]').click(); await page.waitForTimeout(600);
+  const missingWink = await page.evaluate(()=>window.rigQa.getProfileParameters());
   await context.close();
 
   return { missing, available, absentPixels, neutralMatchesLegacy, zeroSmileBlinks, lowerLid, thresholdSwitch, thresholdBefore, thresholdAfter, smile, smileHalf, smileBlink, blush, blushHalf,
     eyeTransforms, restored, sliders, mobile, selections, afterSelection, streamSettings,
-    withoutCloseParts, noCloseSwitch, noCloseThreshold, noCloseAfter, noCloseBlink, errors, external,
+    presetChecks, missingJoy, missingWink, winkHandoffStable, winkOtherEye, presetStream, manualExpressionLabel, presetMobileFit, withoutCloseParts, noCloseSwitch, noCloseThreshold, noCloseAfter, noCloseBlink, errors, external,
     checks: {
+      expressionsAdaptToMissingArtwork: missingJoy.eyeSmile === 0 && missingJoy.eyeNarrow === 0.9 && missingWink.eyeSmileL === 0 && missingWink.eyeWinkL === 1,
+      allExpressionButtonsReachTheirValues: presetChecks.every(Boolean),
+      winkHandoffStableInBothDirections: winkHandoffStable.inside === 0,
+      winkKeepsOtherEyeNeutral: winkOtherEye.inside === 0,
+      expressionPresetReachesStream: presetStream.eyeSmileL === 1 && presetStream.eyeSmileR === 0 && presetStream.mouthForm === 0.5,
+      customExpressionExplained: manualExpressionLabel === '自分で調整中',
+      expressionButtonsFitMobile: presetMobileFit,
       missingExpressionsDisabledWithReasons: Object.values(missing).every(item => item.disabled && item.numberDisabled && !item.reasonHidden && item.reason.includes('絵がありません')),
       absentExpressionsPreservePixels: absentPixels.inside === 0 && neutralMatchesLegacy.inside === 0,
       zeroSmilePreservesLegacyBlinks: zeroSmileBlinks.every(diff => diff.totalDelta === 0),

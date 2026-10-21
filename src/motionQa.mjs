@@ -303,7 +303,7 @@ const round = (value, digits = 3) => Number(value.toFixed(digits));
  * @param {Uint8Array} input.hairTipMask  hair tip band in frame coordinates
  * @param {object} input.contract
  */
-export function evaluateMotionQa({ reference, captures, hairTipMask, visibleHairMask = null, expressionMasks = {}, contract }) {
+export function evaluateMotionQa({ reference, captures, hairTipMask, visibleHairMask = null, expressionMasks = {}, expressionSetRequired = false, contract }) {
   const { width, height } = reference.frame;
   const anchors = reference.anchors;
   const missingFeatures = ['eyeL', 'eyeR', 'mouth'].filter((name) => {
@@ -410,6 +410,7 @@ export function evaluateMotionQa({ reference, captures, hairTipMask, visibleHair
   };
   const expressions = evaluateExpressionCaptures(captures, expressionMasks);
   Object.assign(checks, expressions.checks);
+  if (expressionSetRequired) Object.assign(checks, evaluateExpressionSetCaptures(captures, anchors));
   return {
     pass: Object.values(checks).every(Boolean),
     missingCaptures,
@@ -530,4 +531,21 @@ export function evaluateExpressionCaptures(captures, masks) {
     }
   }
   return { checks, metrics };
+}
+
+/** Coverage and unilateral-eye checks; naturalness still needs visual review. */
+export function evaluateExpressionSetCaptures(captures, anchors) {
+  const has = (name, labels) => labels.every(label => (captures[name] || []).some(item => item.label === label));
+  const parts = ['browWorry','browAngry','browFlat','upperLid','eyeWide','eyeNarrow','eyeWinkL','eyeWinkR','eyeSmileL','eyeSmileR','lidTilt-inward','lidTilt-outward','mouth-up','mouth-down'];
+  const presets = ['neutral','joy','shy','angry','sad','surprised','flustered','unamused','wink'];
+  const pairs = ['neutral-joy','joy-neutral','joy-angry','sad-surprised','wink-joy','unamused-surprised'];
+  const neutral = captures['preset-neutral']?.find(item => item.label === 'eye-1.00')?.frame;
+  const wink = captures['preset-wink']?.find(item => item.label === 'eye-1.00')?.frame;
+  const mask = neutral && anchors.eyeR ? boxMask(neutral.width, neutral.height, [anchors.eyeR]) : null;
+  return {
+    expressionPartsCaptured: parts.every(id=>has(`part-${id}`,['strength-0.00','strength-0.50','strength-1.00'])),
+    expressionPresetsCaptured: presets.every(id=>has(`preset-${id}`,['eye-1.00','eye-0.50','eye-0.00'])),
+    expressionTransitionsCaptured: pairs.every(id=>has(`transition-${id}`,['progress-0.00','progress-0.25','progress-0.50','progress-0.75','progress-1.00'])),
+    winkKeepsOtherEye: Boolean(neutral && wink && mask) && changedPixels(neutral, wink, mask, 1) === 0,
+  };
 }

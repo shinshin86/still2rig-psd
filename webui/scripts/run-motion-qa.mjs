@@ -1,3 +1,4 @@
+import { captureExpressionSet } from './expression-set-captures.mjs';
 // Renderer adapter for configs/motion-qa-contract.json.
 //
 // Loads a PSD into the built-in preview renderer, records every required
@@ -245,6 +246,15 @@ async function main() {
     }
     await setMode('static');
 
+    // Keep the legacy motion sequence before added expression captures: wind
+    // follows elapsed time, so an earlier capture changes its sampled phase.
+    // Reload to remove drag inertia before checking expression isolation.
+    await loadPsd(page, psdFile);
+    Object.assign(captures, await captureExpressionSet({ page, capture,
+      parts: info.summary.partsFound, partSteps: 2, settleMs: 500,
+      pairs: [['neutral','joy'],['joy','neutral'],['joy','angry'],['sad','surprised'],['wink','joy'],['unamused','surprised']],
+    }));
+
     const psd = inspectPsd(referencePsd);
     const hairTipMask = hairTipMaskFromLayers(psd.layers, info.canvas.width, info.canvas.height);
     const visibleHairMask = visibleHairMaskFromLayers(psd.layers, info.canvas.width, info.canvas.height);
@@ -254,6 +264,7 @@ async function main() {
       hairTipMask,
       visibleHairMask,
       expressionMasks,
+      expressionSetRequired: true,
       contract,
     });
     const dragPeak = Math.max(...dragMotion.map((value) => Math.hypot(value.x, value.y)));
