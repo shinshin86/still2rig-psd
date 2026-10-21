@@ -108,6 +108,14 @@ Each variant also has a local `underlay.png` containing the face without that
 variant's source eyes or mouth. This reference is used only for extraction;
 do not edit it or send it to the generator.
 
+The expanded smiling-eye mask protects eyebrows and front hair with a
+4-native-pixel margin. The original eye alpha union, including thin eyelash
+tips, retains at least 4 pixels of lateral margin (or the larger configured
+dilation). This eye envelope takes precedence over front-hair protection so
+that a hair cutout cannot slice through the original lashes; eyebrow protection
+still takes precedence. The cheek mask stops 4 native pixels inside the face
+alpha contour. Request metadata records these distances.
+
 Ask the image owner before sending these crops to a generation service. Save
 the returned images as `expression-requests/results/eye_close.png` and
 `mouth_open.png`. `import-expressions JOB [DIR]` accepts another results directory
@@ -154,13 +162,31 @@ sides of the edit boundary in native PSD pixels. The inner and outer bands are
 A Gaussian blur of radius 1 removes pixel texture before comparing the RGB
 residual (generated minus base). The base keeps the original outside the mask
 and uses the PSD underlay inside, so intentionally removing the source eye or
-mouth is not classified as a seam. Each band's mean must be at most 6,
-95th percentile at most 20, and maximum mean of 4x4 tiles with at least 4 band
-pixels at most 12. For adjoining opaque pixels across the boundary, the 95th
+mouth is not classified as a seam. Each band's mean must be at most 6 and
+95th percentile at most 20. Inside the mask, the maximum mean of 4x4 tiles with
+at least 4 band pixels must be at most 12. Outside tile means and their worst
+location remain diagnostic values only: pixels outside the mask retain the
+original artwork during extraction. `diagnostics.outerTiles` records whether
+the diagnostic limit of 12 is exceeded, without affecting the import decision.
+For adjoining opaque pixels across the boundary, the 95th
 percentile of the difference between residuals must be at most 12. This
 subtracts gradients already present in the original. Empty bands or a boundary
 without opaque sample pairs fail explicitly. Reports include each band, sample
 count, worst tile, limits, and failed checks under `variants.NAME.seam`.
+
+When the finalized PSD matches the requested layer snapshot, `seam` excludes
+pixels completely covered by permanent layers in front of the expression.
+Coverage uses the PSD's actual layer order, offsets, and alpha exactly 255;
+an expression absent from the PSD uses its insertion position in the layer map.
+Hidden, translucent, clipped, masked, non-normal, and animated expression
+layers do not establish coverage. Grouped PSDs are unsupported. Covered
+pixels contribute neither outside error nor boundary samples, and their
+residual is zeroed before blurring so hidden differences do not bleed into
+visible samples. Both pixels of a boundary pair must remain visible.
+Reports record the PSD hash, contributing layers, sample counts, and ignored
+boundary fraction. More than half of the opaque boundary pairs being covered
+fails `boundaryVisibility`; empty bands still fail. Historical requests for
+other layer snapshots keep the full check without occlusion exclusions.
 
 Extraction still uses only editable pixels. After restoring native dimensions,
 `seam` fades the first three pixels inside the mask to one-third, two-thirds,
@@ -273,20 +299,35 @@ background, and writes frames and `motion-qa.json` under
 result under `result.motionQa`.
 
 When visible `eye_smile` or `blush` artwork is present, the adapter also records
-strengths 0, 0.5, and 1. Smiling eyes include a fully closed blink at strength 1;
-its pixels must match the open-eye state at that strength. Each expression must
-change pixels in its own region while the rest stays stable. These comparisons
-use an RGB delta greater than 1 to retain faint blush (the regular eye/mouth
-checks use 24). Missing optional artwork adds no capture requirement and does
-not affect `productionReady`.
+strengths 0, 0.5, and 1. Smiling eyes require every 0.05 step from 0 to 1,
+plus 0.48 and 0.52, and half and fully closed blinks at strength 1.
+At strengths 0.5, 0.75, and 0.95, pixels in the eye region must still differ
+from strength 1 to detect an immediate jump to the final drawing. Both
+full-strength blinks must match strength 1. Each expression must change pixels in its own
+region while the rest stays stable. These comparisons use an RGB delta greater
+than 1 to retain faint blush (the regular eye/mouth checks use 24). Missing
+optional artwork adds no capture requirement and does not affect `productionReady`.
+The captures still need visual inspection: pixel checks alone do not establish
+that every intermediate face looks natural or that the drawing switch is unobtrusive.
 
 In the preview, open **細かい設定** and **目・眉** to adjust **笑い目** and
 **頬の赤らみ** from 0 to 1 (default 0). Missing artwork disables its control
-and displays a reason. Smile strength fades out both ordinary open and closed
-eyes, follows eye size/position/angle and head movement, and does not change the
-closed-eye anchor. Blush follows the head and changes opacity only. The same
-values reach the stream page. Selecting either part in **重なりを直す** reveals
-its artwork.
+and displays a reason. Below strength 0.5, the lower lid rises toward a shallow
+smile contour detected separately for each eye at PSD load. The upper lash
+retains its ink band, lower-lash fragments are suppressed before they collapse,
+and the rising white-eye mask hides the iris from below. Closed-eye artwork is
+hidden throughout this transition. At 0.5, only the smiling-eye drawing appears,
+matched to the narrowed eye's position and width with a thin, shallow curve.
+Its mesh then continuously returns to the original artwork at strength 1.
+The crease above the lash keeps its separation; detached outer marks are hidden
+while the artwork is displaced. There is no opacity overlap between drawings,
+including when closed-eye artwork is absent. Small differences in eyelash tips
+or highlights can remain between distinct source drawings; inspect adjacent
+captures before accepting an expression set. Blink-driven brow
+motion decreases toward the threshold. Smiling eyes follow eye size/position/angle
+and head movement without changing the closed-eye anchor. Blush follows the head
+and changes opacity only. The same values reach the stream page. Selecting either
+part in **重なりを直す** reveals its artwork.
 
 | Check | How it is measured |
 | --- | --- |
