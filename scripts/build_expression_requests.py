@@ -11,7 +11,7 @@ from pathlib import Path
 from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
 from expression_definitions import load_expressions
-from expression_masks import alpha_union, cheek_mask, expand_up, exclude_eye_obstacles, expand_eye_sides
+from expression_masks import alpha_union, cheek_mask, overlay_mask, expand_up, exclude_eye_obstacles, expand_eye_sides
 from expression_requests_common import composite_layers, file_hash, layer_hash, mouth_limits, neutral_layers
 
 
@@ -26,7 +26,8 @@ def build_requests(job_id: str, layer_dir: Path, layer_map: Path, output_dir: Pa
         requested = [item for item in available if item["name"] in names]
     else:
         requested = [item for item in available if item["requiredForProduction"]]
-    composite, layers = neutral_layers(layer_dir, mapping, definitions)
+    overlays = any(item["extraction"] == "overlay" for item in requested)
+    composite, layers = neutral_layers(layer_dir, mapping, definitions, include_front=overlays)
     quality = json.loads((Path(__file__).resolve().parent.parent / "configs" / "default.json").read_text(encoding="utf-8"))["quality"]
     limits = mouth_limits(layers["face"], quality)
     face = alpha_union(layers, ["face", *[name for item in requested for name in item["editableLayers"]]], composite.size)
@@ -36,6 +37,12 @@ def build_requests(job_id: str, layer_dir: Path, layer_map: Path, output_dir: Pa
     margin = max(4, round(max(box[2] - box[0], box[3] - box[1]) * 0.12))
     crop_box = [max(0, box[0] - margin), max(0, box[1] - margin),
                 min(composite.width, box[2] + margin), min(composite.height, box[3] + margin)]
+    if overlays:
+        side = min(max(crop_box[2]-crop_box[0],crop_box[3]-crop_box[1]),composite.width,composite.height)
+        cx, cy = (box[0]+box[2])/2, (box[1]+box[3])/2
+        left = max(0,min(composite.width-side,round(cx-side/2)))
+        top = max(0,min(composite.height-side,round(cy-side/2)))
+        crop_box = [left,top,left+side,top+side]
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "results").mkdir(exist_ok=True)
     variants = {}
@@ -44,7 +51,10 @@ def build_requests(job_id: str, layer_dir: Path, layer_map: Path, output_dir: Pa
     request_size = (crop_size[0] * scale, crop_size[1] * scale)
     for definition in requested:
         name, targets, mask_options = definition["name"], definition["editableLayers"], definition["mask"]
-        editable = cheek_mask(layers, composite.size) if mask_options.get("region") == "cheeks" else alpha_union(layers, targets, composite.size)
+        variant_layers = layers if definition["extraction"] == "overlay" else {key:value for key,value in layers.items() if key not in ("front hair","headwear")}
+        variant_composite = composite_layers(variant_layers,definitions=definitions)
+        region = mask_options.get("region")
+        editable = overlay_mask(layers,composite.size,region) if definition["extraction"] == "overlay" else cheek_mask(layers, composite.size) if region == "cheeks" else alpha_union(layers, targets, composite.size)
         editable_box = editable.getbbox()
         if not editable_box:
             raise ValueError(f"Cannot prepare {name}: the relevant layers are empty.")
@@ -77,8 +87,8 @@ def build_requests(job_id: str, layer_dir: Path, layer_map: Path, output_dir: Pa
         editable = editable.crop(crop_box).resize(request_size, Image.Resampling.NEAREST)
         variant_dir = output_dir / name
         variant_dir.mkdir(exist_ok=True)
-        composite.crop(crop_box).resize(request_size, Image.Resampling.LANCZOS).save(variant_dir / "input.png")
-        composite_layers(layers, [] if mask_options.get("region") == "cheeks" else targets, definitions).crop(crop_box).resize(request_size, Image.Resampling.LANCZOS).save(variant_dir / "underlay.png")
+        variant_composite.crop(crop_box).resize(request_size, Image.Resampling.LANCZOS).save(variant_dir / "input.png")
+        composite_layers(variant_layers, [] if region == "cheeks" or definition["extraction"] == "overlay" else targets, definitions).crop(crop_box).resize(request_size, Image.Resampling.LANCZOS).save(variant_dir / "underlay.png")
         mask = Image.new("RGBA", editable.size, (255, 255, 255, 255))
         mask.putalpha(ImageChops.invert(editable))
         mask.save(variant_dir / "mask.png")
@@ -88,6 +98,12 @@ def build_requests(job_id: str, layer_dir: Path, layer_map: Path, output_dir: Pa
                   "Do not change any pixels outside the editable mask. "
                   "Front hair and head accessories are intentionally hidden to keep expression layers separate. "
                   "Do not add hair or accessories.\n")
+        if definition["extraction"] == "overlay":
+            prompt = (definition["prompt"] + " input.png is a placement and style reference only. "
+                      "mask.png is a placement guide: draw only within its transparent region. "
+                      "Everything else, including the character, must be alpha=0 in the returned PNG. "
+                      f"Keep the square canvas and exact reference positions; target size {request_size[0]}x{request_size[1]}. "
+                      "Never draw a checkerboard or white background. Do not crop or center the small artwork.\n")
         (variant_dir / "prompt.txt").write_text(prompt, encoding="utf-8")
         variants[name] = {
             "cropBox": crop_box, "scale": scale, "size": list(editable.size),
@@ -96,6 +112,7 @@ def build_requests(job_id: str, layer_dir: Path, layer_map: Path, output_dir: Pa
             "inputSha256": file_hash(variant_dir / "input.png"),
             "maskSha256": file_hash(variant_dir / "mask.png"),
             "underlaySha256": file_hash(variant_dir / "underlay.png"),
+            **({"outputMode": "transparent-overlay"} if definition["extraction"] == "overlay" else {}),
             "result": f"results/{name}.png", "dilationPx": dilation,
             "editableBox": list(editable_box),
             **({"protectedFeatures": {"layers": ["eyebrow", "front hair"], "paddingPx": 4}} if protect_eye_features else {}),

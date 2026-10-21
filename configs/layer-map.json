@@ -21,8 +21,11 @@
     { "source": "mouth_open.png", "target": "mouth_open", "requiredForProduction": true },
     { "source": "eye_close.png", "target": "eye_close", "requiredForProduction": true },
     { "source": "eye_smile.png", "target": "eye_smile", "required": false },
+    { "source": "tears.png", "target": "tears", "required": false },
     { "source": "front hair.png", "target": "front hair", "required": false },
-    { "source": "headwear.png", "target": "headwear", "required": false }
+    { "source": "headwear.png", "target": "headwear", "required": false },
+    { "source": "sweat.png", "target": "sweat", "required": false },
+    { "source": "anger_mark.png", "target": "anger_mark", "required": false }
   ],
   "drop": [
     "*_depth.png",

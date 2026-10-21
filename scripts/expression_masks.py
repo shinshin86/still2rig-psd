@@ -80,3 +80,40 @@ def exclude_eye_obstacles(editable, layer_dir, layer_map, padding=4, eye_support
     if not result.getbbox():
         raise ValueError("No editable eye pixels remain after protecting eyebrows and front hair.")
     return result
+
+
+def overlay_mask(layers, size, region):
+    """Bound additive water/ink while keeping existing facial features intact."""
+    face = alpha_union(layers, ["face"], size)
+    box = face.getbbox()
+    if not box:
+        raise ValueError("A visible face is required for overlay artwork.")
+    x0, y0, x1, y1 = box
+    width, height = x1-x0, y1-y0
+    eye_box = alpha_union(layers,["eyewhite","irides","eyelash"],size).getbbox()
+    if not eye_box:
+        raise ValueError("Visible eyes are required to place overlay artwork.")
+    eye_top, eye_height = eye_box[1], eye_box[3]-eye_box[1]
+    mask = Image.new("L", size)
+    draw = ImageDraw.Draw(mask)
+    if region == "tears":
+        eyes = alpha_union(layers, ["eyewhite", "irides", "eyelash"], size)
+        for left, right in [(0, round((x0+x1)/2)), (round((x0+x1)/2), size[0])]:
+            side = eyes.crop((left, 0, right, size[1])).getbbox()
+            if not side:
+                raise ValueError("Both visible eyes are required for tears.")
+            ex0, ey0, ex1, ey1 = side
+            ex0 += left; ex1 += left
+            draw.rounded_rectangle((ex0+(ex1-ex0)*.08, ey1-2, ex1-(ex1-ex0)*.08,
+                                    min(y1-height*.18,ey1+height*.22)), radius=max(2,round(width*.025)), fill=255)
+        protected = alpha_union(layers, ["eyewhite", "irides", "eyelash", "eyebrow", "front hair"], size, threshold=0).filter(ImageFilter.MaxFilter(3))
+        mask = ImageChops.multiply(ImageChops.multiply(mask,face.filter(ImageFilter.MinFilter(9))),ImageChops.invert(protected))
+    elif region == "temple":
+        draw.ellipse((x0+width*.86,eye_top-eye_height*.35,x1+width*.06,eye_top+eye_height*.9),fill=255)
+    elif region == "forehead":
+        draw.ellipse((x0+width*.63,eye_top-eye_height*1.9,x0+width*.90,eye_top-eye_height*.85),fill=255)
+    else:
+        raise ValueError("Unknown overlay region.")
+    if not mask.getbbox():
+        raise ValueError("No editable overlay region remains.")
+    return mask

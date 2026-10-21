@@ -40,7 +40,7 @@ def layer_hash(layer_dir: Path, layer_map: Path) -> str:
     return digest.hexdigest()
 
 
-def neutral_layers(layer_dir: Path, layer_map: dict, definitions=None):
+def neutral_layers(layer_dir: Path, layer_map: dict, definitions=None, include_front=False):
     definitions = load_expressions(layer_map) if definitions is None else definitions
     selected = selected_layers(layer_dir, layer_map)
     if not selected:
@@ -48,7 +48,8 @@ def neutral_layers(layer_dir: Path, layer_map: dict, definitions=None):
     order = list(dict.fromkeys(entry["target"] for entry in layer_map["layers"]))
     # Expressions must stay independent of hair/accessories animated above them.
     allowed = set(order[:max(order.index(item["name"]) for item in definitions) + 1])
-    layers = {name: Image.open(file).convert("RGBA") for name, file in selected if name in allowed}
+    layers = {name: Image.open(file).convert("RGBA") for name, file in selected
+              if name in allowed and (include_front or name not in ("front hair", "headwear"))}
     size = next(iter(layers.values())).size
     if any(image.size != size for image in layers.values()):
         raise ValueError("Current PSD layers have different canvas sizes.")

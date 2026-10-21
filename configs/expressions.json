@@ -104,6 +104,72 @@
       "placeholderFrom": null,
       "checkFrontHair": true,
       "protectedCheck": "seam"
+    },
+    {
+      "name": "tears",
+      "label": "涙",
+      "requestLabel": "涙",
+      "prompt": "Add delicate translucent pale-blue tears just under both lower eyelids, flowing a short way down the upper cheeks. Match the existing fine anime line weight with white water highlights. Output ONLY the added artwork on a genuinely transparent background, in exactly the same canvas coordinates as the reference. Do not render the face, skin, hair, eyes, mouth, any background, text or checkerboard. Do not move, redraw or reproduce any reference feature.",
+      "editableLayers": [
+        "face"
+      ],
+      "mask": {
+        "dilationRatio": 0,
+        "minimumDilation": 0,
+        "fillBounds": false,
+        "mouthLimits": false,
+        "region": "tears"
+      },
+      "extraction": "overlay",
+      "registration": "face",
+      "split": true,
+      "placeholderFrom": null,
+      "checkFrontHair": true,
+      "protectedCheck": "overlay"
+    },
+    {
+      "name": "sweat",
+      "label": "汗",
+      "requestLabel": "汗",
+      "prompt": "Add one small anime sweat droplet at the screen-right temple over the hair, pale blue translucent water with a white highlight and a fine soft outline. Match the existing anime line weight. Output ONLY the added artwork on a genuinely transparent background, in exactly the same canvas coordinates as the reference. Do not render the face, skin, hair, eyes, mouth, any background, text or checkerboard. Do not move, redraw or reproduce any reference feature.",
+      "editableLayers": [
+        "face"
+      ],
+      "mask": {
+        "dilationRatio": 0,
+        "minimumDilation": 0,
+        "fillBounds": false,
+        "mouthLimits": false,
+        "region": "temple"
+      },
+      "extraction": "overlay",
+      "registration": "face",
+      "split": false,
+      "placeholderFrom": null,
+      "checkFrontHair": false,
+      "protectedCheck": "overlay"
+    },
+    {
+      "name": "anger_mark",
+      "label": "怒りマーク",
+      "requestLabel": "怒りマーク",
+      "prompt": "Add one small clean red four-pronged anime anger symbol on the screen-right upper forehead over the hair. Use a few curved red strokes matching the existing anime line weight, with transparent gaps between strokes. Output ONLY the added artwork on a genuinely transparent background, in exactly the same canvas coordinates as the reference. Do not render the face, skin, hair, eyes, mouth, any background, text or checkerboard. Do not move, redraw or reproduce any reference feature.",
+      "editableLayers": [
+        "face"
+      ],
+      "mask": {
+        "dilationRatio": 0,
+        "minimumDilation": 0,
+        "fillBounds": false,
+        "mouthLimits": false,
+        "region": "forehead"
+      },
+      "extraction": "overlay",
+      "registration": "face",
+      "split": false,
+      "placeholderFrom": null,
+      "checkFrontHair": false,
+      "protectedCheck": "overlay"
     }
   ]
 }

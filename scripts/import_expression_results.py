@@ -13,6 +13,7 @@ from pathlib import Path
 from PIL import Image, ImageChops, ImageFilter
 
 from expression_definitions import load_expressions, CONFIG_ROOT
+from overlay_expression import validate_overlay_artwork
 from soft_expression import extract_soft_artwork
 from expression_seam import check_seam, feather_artwork
 from expression_requests_common import file_hash, layer_hash
@@ -309,45 +310,59 @@ def import_results(args, report):
                 or list(reference.size) != item["size"]
                 or reference.size != (crop_size[0] * pixel_scale, crop_size[1] * pixel_scale)):
             raise ValueError(f"{name}: invalid crop or scale metadata. Rerun expression-requests.")
-        protected_editable = editable.point(lambda value: 255 if value > 0 else 0) if definition["extraction"] == "soft" else editable
-        band = protected_band(reference, protected_editable, args.protected_band * pixel_scale)
-        details["alignment"] = alignment_check(reference, result, band, args.alignment_radius, pixel_scale,
-                                               args.max_alignment_shift, args.max_alignment_scale)
-        result = compensate_result(reference, result, details["alignment"], pixel_scale)
-        details.update(protected_diff(reference, result, band))
-        support = protected_band(reference, protected_editable, (args.protected_band + 2) * pixel_scale)
-        face_core = Image.open(args.layer_dir / "face.png").convert("RGBA").getchannel("A").crop(item["cropBox"])
-        face_core = face_core.point(lambda value: 255 if value >= 240 else 0).filter(ImageFilter.MinFilter(5))
-        details.update(local_band_diff(reference, result, band, pixel_scale, support, face_core))
-        if not details["alignment"]["pass"]:
-            alignment = details["alignment"]
-            raise ValueError(f"{name}: global image misalignment: shift=({alignment['dx']}, {alignment['dy']}), scale={alignment['scale']}.")
-        mode = args.protected_check or definition["protectedCheck"]
-        if args.protected_check is not None or mode == "seam":
-            details["protectedCheck"] = mode
-        if mode == "seam":
-            coverage = None
-            visibility = None
-            if occlusion is not None:
-                entry = occlusion["variants"][name]
-                if (entry["width"], entry["height"]) != crop_size:
-                    raise ValueError("PSD visibility must match the native request crop.")
-                coverage = Image.frombytes("L", crop_size, base64.b64decode(entry["alpha"], validate=True))
-                visibility = {key: occlusion[key] for key in ("source", "psdSha256")}
-                visibility.update({"layers": entry["layers"], "targetPresent": entry["targetPresent"]})
-            details["seam"] = check_seam(reference, result, editable, pixel_scale, underlay, coverage)
-            details["seam"]["occlusion"].update(visibility or {"source": "unavailable; all pixels checked"})
-            if not details["seam"]["pass"]:
-                raise ValueError(f"{name}: seam check failed: " + ", ".join(details["seam"]["failedChecks"]) + ".")
+        if definition["extraction"] == "overlay":
+            if item.get("outputMode") != "transparent-overlay":
+                raise ValueError(f"{name}: regenerate transparent overlay requests.")
+            if args.protected_check is not None:
+                raise ValueError("Transparent overlays use alpha/placement checks, not a background seam override.")
+            source = Image.open(result_file)
+            if "A" not in source.getbands() and "transparency" not in source.info:
+                raise ValueError(f"{name}: a PNG with genuine alpha transparency is required.")
+            result = result.resize(reference.size,Image.Resampling.LANCZOS)
+            details["protectedCheck"] = "overlay"
+            details["overlay"] = validate_overlay_artwork(result,editable,name)
+            details["resizedProportionally"] = source.size != reference.size
+            mode = "overlay"
         else:
-            if details["meanMatchedDiff"] > args.max_outside_mean or details["p99MatchedDiff"] > args.max_outside_p99:
-                raise ValueError(f"{name}: pixels outside the mask changed: mean={details['meanMatchedDiff']}, "
-                                 f"p99={details['p99MatchedDiff']} (limits {args.max_outside_mean}, {args.max_outside_p99}).")
-            if details["maxLocalMeanDiff"] > args.max_band_local_mean or details["maxFlatMeanDiff"] > args.max_band_flat_mean:
-                raise ValueError(f"{name}: local pixels outside the mask changed: local={details['maxLocalMeanDiff']}, "
-                                 f"flat={details['maxFlatMeanDiff']} (limits {args.max_band_local_mean}, {args.max_band_flat_mean}).")
-        result, extraction = extractors[definition["extraction"]](result, underlay, editable, args.artwork_threshold, args.minimum_component_pixels * pixel_scale * pixel_scale)
-        details.update(extraction)
+            protected_editable = editable.point(lambda value: 255 if value > 0 else 0) if definition["extraction"] == "soft" else editable
+            band = protected_band(reference, protected_editable, args.protected_band * pixel_scale)
+            details["alignment"] = alignment_check(reference, result, band, args.alignment_radius, pixel_scale,
+                                                   args.max_alignment_shift, args.max_alignment_scale)
+            result = compensate_result(reference, result, details["alignment"], pixel_scale)
+            details.update(protected_diff(reference, result, band))
+            support = protected_band(reference, protected_editable, (args.protected_band + 2) * pixel_scale)
+            face_core = Image.open(args.layer_dir / "face.png").convert("RGBA").getchannel("A").crop(item["cropBox"])
+            face_core = face_core.point(lambda value: 255 if value >= 240 else 0).filter(ImageFilter.MinFilter(5))
+            details.update(local_band_diff(reference, result, band, pixel_scale, support, face_core))
+            if not details["alignment"]["pass"]:
+                alignment = details["alignment"]
+                raise ValueError(f"{name}: global image misalignment: shift=({alignment['dx']}, {alignment['dy']}), scale={alignment['scale']}.")
+            mode = args.protected_check or definition["protectedCheck"]
+            if args.protected_check is not None or mode == "seam":
+                details["protectedCheck"] = mode
+            if mode == "seam":
+                coverage = None
+                visibility = None
+                if occlusion is not None:
+                    entry = occlusion["variants"][name]
+                    if (entry["width"], entry["height"]) != crop_size:
+                        raise ValueError("PSD visibility must match the native request crop.")
+                    coverage = Image.frombytes("L", crop_size, base64.b64decode(entry["alpha"], validate=True))
+                    visibility = {key: occlusion[key] for key in ("source", "psdSha256")}
+                    visibility.update({"layers": entry["layers"], "targetPresent": entry["targetPresent"]})
+                details["seam"] = check_seam(reference, result, editable, pixel_scale, underlay, coverage)
+                details["seam"]["occlusion"].update(visibility or {"source": "unavailable; all pixels checked"})
+                if not details["seam"]["pass"]:
+                    raise ValueError(f"{name}: seam check failed: " + ", ".join(details["seam"]["failedChecks"]) + ".")
+            else:
+                if details["meanMatchedDiff"] > args.max_outside_mean or details["p99MatchedDiff"] > args.max_outside_p99:
+                    raise ValueError(f"{name}: pixels outside the mask changed: mean={details['meanMatchedDiff']}, "
+                                     f"p99={details['p99MatchedDiff']} (limits {args.max_outside_mean}, {args.max_outside_p99}).")
+                if details["maxLocalMeanDiff"] > args.max_band_local_mean or details["maxFlatMeanDiff"] > args.max_band_flat_mean:
+                    raise ValueError(f"{name}: local pixels outside the mask changed: local={details['maxLocalMeanDiff']}, "
+                                     f"flat={details['maxFlatMeanDiff']} (limits {args.max_band_local_mean}, {args.max_band_flat_mean}).")
+            result, extraction = extractors[definition["extraction"]](result, underlay, editable, args.artwork_threshold, args.minimum_component_pixels * pixel_scale * pixel_scale)
+            details.update(extraction)
         result = result.resize(crop_size, Image.Resampling.LANCZOS)
         # Enforce the boundary after resampling too: no skin outside editable pixels.
         editable = editable.resize(crop_size, Image.Resampling.NEAREST)
