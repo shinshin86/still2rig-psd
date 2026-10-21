@@ -252,6 +252,11 @@
       .camera-check { display: flex; align-items: center; gap: 8px; font-size: 13px; min-height: 32px; }
       .camera-controls video { width: 100%; max-width: 240px; border-radius: 8px; justify-self: center; }
       .camera-controls [hidden] { display: none; }
+      .expression-panel { margin: 14px 0; padding: 12px; border: 1px solid #495570; border-radius: 10px; background: #171e2b; }
+      .expression-panel h3 { margin: 0 0 10px; font-size: 13px; }
+      .expression-buttons { display: flex; flex-wrap: wrap; gap: 7px; }
+      .expression-buttons button { flex: 1 0 28%; min-height: 36px; }
+      .expression-buttons button[aria-pressed="true"] { border-color: #7de1ff; background: #284858; color: #e9fbff; }
     </style>
   </head>
   <body data-avatar-ready="false" data-file-load-state="waiting">
@@ -468,8 +473,14 @@
             </details>
             <p class="tuning-note">プリセットを選んだあと、必要な項目だけ微調整できます。0%でその成分を止められます。</p>
           </div>
+          <section class="expression-panel" aria-labelledby="expression-heading">
+            <h3 id="expression-heading">表情</h3>
+            <div id="expression-buttons" class="expression-buttons" role="group" aria-label="表情を選ぶ"></div>
+            <p id="expression-status" class="tuning-note" role="status">いつもの顔</p>
+            <p class="tuning-note">この絵でできる動きに合わせて表情を変えます。選んだあと「細かい設定」で調整できます。</p>
+          </section>
           <details id="advanced-parameters" class="advanced-panel">
-            <summary><span>細かい設定</span><span class="parameter-count">34項目</span></summary>
+            <summary><span>細かい設定</span><span class="parameter-count">45項目</span></summary>
             <div class="advanced-content">
               <div class="advanced-intro">
                 <p>顔や体の向き、目・口・髪の動き方を項目ごとに調整できます。目と口の開閉は上の操作が優先されます。</p>

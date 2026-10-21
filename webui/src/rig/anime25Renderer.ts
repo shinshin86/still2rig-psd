@@ -1,3 +1,5 @@
+import { expressionParameterNames } from '../../../src/expressionPresets.mjs';
+import { composeTrackedExpression, morphClosedWink, shapeBrow, shapeUpperLid, shapeWink, smileForSide } from './expressionParts.mjs';
 /*!
  * Based on Anime2.5DRig (https://github.com/852wa/Anime2.5DRig)
  * by 852wa (hakoniwa), MIT License.
@@ -32,7 +34,11 @@ interface EyeAnchor {
   icx: number;
   icy: number;
   closeY: number;
+  closedBounds?: { x0: number; x1: number; y0: number; y1: number } | null;
+  closedCurve?: { x: number; y: number }[] | null;
   smileY?: number;
+  browCurve?: { x: number; y: number }[];
+  browBounds?: { x0: number; x1: number; y0: number; y1: number } | null;
   smileInkBounds?: { x0: number; x1: number; y0: number; y1: number };
   upperLid?: { x: number; y: number }[];
   smileLid?: { x: number; y: number }[];
@@ -42,7 +48,7 @@ interface RigAnchors {
   face: BoxAnchor;
   eyeL?: EyeAnchor;
   eyeR?: EyeAnchor;
-  mouth: BoxAnchor;
+  mouth: BoxAnchor & { closedHeight?: number };
   neckPivot: Point;
   neckTop: number;
   neckBottom: number;
@@ -187,7 +193,14 @@ export function resolveBasePsdMotionParameters(
   ttsInput: number,
   motionEnabled: boolean,
 ): PsdMotionParameters {
-  if (!motionEnabled) return { ...DEFAULT_PSD_MOTION_PARAMETERS, eyeSmile: profile.parameters.eyeSmile, blush: profile.parameters.blush };
+  if (!motionEnabled) {
+    const values = { ...DEFAULT_PSD_MOTION_PARAMETERS };
+    for (const name of expressionParameterNames) {
+      const key = name as keyof PsdMotionParameters;
+      values[key] = profile.parameters[key];
+    }
+    return values;
+  }
   return {
     ...profile.parameters,
     mouthOpen: composePsdMotionMouthOpen(
@@ -301,14 +314,18 @@ function fadeAlpha(
   hasEyeClose: Record<'L' | 'R', boolean>,
   hasEyeSmile: Record<'L' | 'R', boolean>,
 ): number {
-  const expression = resolveEyeExpression(layer.side === 'L' ? params.eyeOpenL : params.eyeOpenR,
-    params.eyeSmile, Boolean(layer.side && hasEyeSmile[layer.side as 'L' | 'R']));
+  const requestedWink = layer.side === 'L' ? params.eyeWinkL : params.eyeWinkR;
+    const hasSmile = Boolean(layer.side && hasEyeSmile[layer.side as 'L'|'R']);
+    const wink = hasSmile ? 0 : requestedWink;
+  const expression = resolveEyeExpression(Math.min(layer.side === 'L' ? params.eyeOpenL : params.eyeOpenR, 1 - wink),
+    Math.max(smileForSide(params, layer.side), hasSmile ? requestedWink : 0), hasSmile);
   const originalAlpha = 1 - expression.smileAlpha;
   if (!layer.fade) return 1;
   if (layer.fade === 'eyeSmile') return expression.smileAlpha;
   if (layer.fade === 'blush') return params.blush;
   if (layer.fade === 'eyeOpen') {
     const value = expression.eyeOpen;
+    if (wink > 0 && !expression.smileProgress && layer.side && hasEyeClose[layer.side as 'L'|'R']) return value <= 0.1 ? 0 : 1;
     if (expression.smileProgress > 0 && layer.bn === 'eyelash') return originalAlpha;
     if (
       (layer.side === 'L' || layer.side === 'R') &&
@@ -320,6 +337,7 @@ function fadeAlpha(
     return originalAlpha * smooth((value - (0.1 + params.eyeEase * 0.45)) / 0.15);
   }
   if (layer.fade === 'eyeClose') {
+    if (wink > 0 && !expression.smileProgress) return expression.eyeOpen <= 0.1 ? 1 : 0;
     if (expression.smileProgress > 0) return 0;
     const value = expression.eyeOpen;
     return originalAlpha * (1 - smooth((value - (0.1 + params.eyeEase * 0.45)) / 0.15));
@@ -348,7 +366,8 @@ function createRenderLayer(
   layer.bn = baseRigName(layer.name);
 
   const cell = (layer.phys ? 30 : 42) * Math.max(0.6, canvasWidth / 768);
-  const eyeGrid = layer.fade === 'eyeOpen' || layer.fade === 'eyeSmile' ? 24 : 2;
+  const eyeGrid = layer.fade === 'eyeOpen' || layer.fade === 'eyeClose' || layer.fade === 'eyeSmile' || layer.bn === 'eyebrow' ? 24 :
+    layer.fade === 'mouthOpen' || layer.fade === 'mouthClose' ? 8 : 2;
   const nx = Math.max(eyeGrid, Math.round(layer.w / cell));
   const ny = Math.max(eyeGrid, Math.round(layer.h / cell));
   const vertexCount = (nx + 1) * (ny + 1);
@@ -631,9 +650,16 @@ export function createAnime25RigAvatar(
         : layer.side === 'R'
           ? anchors.eyeR
           : null;
-    const expression = resolveEyeExpression(layer.side === 'L' ? params.eyeOpenL : params.eyeOpenR,
-      params.eyeSmile, Boolean(layer.side && hasEyeSmile[layer.side as 'L' | 'R']));
+    const requestedWink = layer.side === 'L' ? params.eyeWinkL : params.eyeWinkR;
+    const hasSmile = Boolean(layer.side && hasEyeSmile[layer.side as 'L'|'R']);
+    const wink = hasSmile ? 0 : requestedWink;
+    const expression = resolveEyeExpression(Math.min(layer.side === 'L' ? params.eyeOpenL : params.eyeOpenR, 1 - wink),
+      Math.max(smileForSide(params, layer.side), hasSmile ? requestedWink : 0), hasSmile);
     const eyeOpen = expression.eyeOpen;
+    const lowerProgress = Math.max(expression.smileProgress, params.eyeNarrow * 0.8 * (1 - Math.min(1, wink / 0.9)));
+    const winkClosure = wink > 0 ? Math.max(Math.min(1, wink / 0.9), 1 - (layer.side === 'L' ? params.eyeOpenL : params.eyeOpenR)) : 0;
+    const lidParameters = { upperLid: params.upperLid, eyeWide: params.eyeWide,
+      lidTilt: params.lidTilt, faceCenterX: anchors.face.cx };
     const mouthHalfWidth = (anchors.mouth.x1 - anchors.mouth.x0) / 2;
     const strandCount = layer.strands?.length || 0;
     const centerX = layer.x + layer.w / 2;
@@ -648,13 +674,13 @@ export function createAnime25RigAvatar(
       if (layer.fade === 'eyeSmile' && eyeAnchor) {
         layer.inkVisibility[vertex] = smileInkVisibility(x, y, eyeAnchor, expression.smileRestore);
       }
-      if (layer.bn === 'eyelash' && eyeAnchor && expression.smileProgress > 0) {
+      if (layer.bn === 'eyelash' && eyeAnchor && Math.max(lowerProgress, winkClosure) > 0) {
         // Remove the lower-lash fringe before it collapses into isolated dots.
         // This clips one drawing; it never blends two different eye drawings.
         const upper = upperLidY(eyeAnchor.upperLid, x, eyeAnchor.y0);
         const band = (eyeAnchor.y1 - eyeAnchor.y0) * 0.12;
         const lowerInk = smooth((y - upper - band) / Math.max(1, band));
-        layer.inkVisibility[vertex] = 1 - lowerInk * smooth((expression.smileProgress - 0.45) / 0.4);
+        layer.inkVisibility[vertex] = 1 - lowerInk * smooth((Math.max(lowerProgress, winkClosure) - 0.45) / 0.4);
       }
 
       const isEyePart =
@@ -682,26 +708,36 @@ export function createAnime25RigAvatar(
       }
 
       if (layer.fade === 'eyeOpen' && eyeAnchor) {
+        const shaped = shapeUpperLid(x, y, eyeAnchor, lidParameters,
+          layer.bn === 'eyelash', layer.bn === 'irides', lowerProgress);
+        x = shaped.x; y = shaped.y;
+
         if (layer.bn === 'irides') {
           x = eyeAnchor.icx + (x - eyeAnchor.icx) * params.irisScale;
           y = eyeAnchor.icy + (y - eyeAnchor.icy) * params.irisScale;
           x += params.eyeX * 11 * faceScale;
           y += params.eyeY * 6 * faceScale;
-          const tuck = smooth((0.32 - eyeOpen) / 0.32);
-          y = eyeAnchor.closeY + (y - eyeAnchor.closeY) * (1 - 0.8 * tuck);
+          if (winkClosure > 0) {
+            const shaped = shapeWink(x, y, eyeAnchor, winkClosure, false, true); y = shaped.y;
+          } else {
+            const tuck = smooth((0.32 - eyeOpen) / 0.32);
+            y = eyeAnchor.closeY + (y - eyeAnchor.closeY) * (1 - 0.8 * tuck);
+          }
+        } else if (winkClosure > 0) {
+          const shaped = shapeWink(x, y, eyeAnchor, winkClosure, layer.bn === 'eyelash'); x = shaped.x; y = shaped.y;
         } else {
           y =
             eyeAnchor.closeY +
             (y - eyeAnchor.closeY) * (1 - 0.85 * (1 - eyeOpen));
         }
-        if (expression.smileProgress > 0) {
+        if (lowerProgress > 0) {
           if (layer.bn === 'irides') {
             // The rising white-of-eye stencil hides the lower iris first.
-            const tuck = smooth((expression.smileProgress - 0.5) / 0.5);
+            const tuck = smooth((lowerProgress - 0.5) / 0.5);
             const pivot = eyeAnchor.smileY ?? eyeAnchor.y0;
             y = pivot + (y - pivot) * (1 - 0.4 * tuck);
           } else {
-            y = raiseLowerLid(y, x, eyeAnchor, expression.smileProgress, layer.bn === 'eyelash');
+            y = raiseLowerLid(y, x, eyeAnchor, lowerProgress, layer.bn === 'eyelash');
           }
         }
       }
@@ -712,10 +748,15 @@ export function createAnime25RigAvatar(
       }
 
       if (layer.fade === 'eyeClose' && eyeAnchor) {
-        y -= eyeOpen * 3;
+        if (wink > 0) {
+          const shaped = morphClosedWink(x,y,eyeAnchor,Math.max(0,Math.min(1,(wink-0.9)/0.1)));
+          x=shaped.x; y=shaped.y;
+        } else y -= eyeOpen * 3;
       }
 
       if (layer.bn === 'eyebrow' && eyeAnchor) {
+        const shaped = shapeBrow(x, y, eyeAnchor, layer.side, params);
+        x = shaped.x; y = shaped.y;
         y += (-params.brow * 9 + expression.blinkBrow * 3.5) * faceScale;
         const sideAngle =
           layer.side === 'L' ? params.browAngL : params.browAngR;
@@ -732,12 +773,14 @@ export function createAnime25RigAvatar(
         }
       }
 
-      if (layer.fade === 'mouthOpen') {
-        y =
+      if (layer.fade === 'mouthOpen' || layer.fade === 'mouthClose') {
+        if (layer.fade === 'mouthOpen') y =
           anchors.mouth.y0 +
           (y - anchors.mouth.y0) * (0.5 + 0.5 * params.mouthOpen);
         const q = Math.abs(x - anchors.mouth.cx) / (mouthHalfWidth + 4);
-        y -= params.mouthForm * 6 * faceScale * (q ** 1.5 - 0.35);
+        const formAmplitude = 12 * faceScale + (layer.fade === 'mouthClose' && params.mouthForm < 0
+          ? (anchors.mouth.closedHeight || 0) * 0.5 : 0);
+        y -= params.mouthForm * formAmplitude * (q ** 1.5 - 0.35);
       }
 
       if (layer.fade === 'mouthOpen' || layer.fade === 'mouthClose') {
@@ -971,7 +1014,7 @@ export function createAnime25RigAvatar(
     if (trackingInput && trackingWeight > 0) {
       for (const key of Object.keys(trackingInput) as (keyof TrackingInput)[]) {
         const value = trackingInput[key];
-        if (value !== undefined) target[key] += (value - target[key]) * trackingWeight;
+        if (value !== undefined) target[key] = composeTrackedExpression(key, target[key], value, trackingWeight);
       }
     }
     if (voiceMouth !== null) target.mouthOpen = Math.max(target.mouthOpen, voiceMouth);
@@ -984,7 +1027,7 @@ export function createAnime25RigAvatar(
       current[key] += (target[key] - current[key]) * alpha;
       // A discrete expression handoff must reach an exact slider threshold,
       // rather than approach it forever from one side through smoothing.
-      if (key === 'eyeSmile' && Math.abs(target[key] - current[key]) < 0.001) current[key] = target[key];
+      if ((key.startsWith('eyeSmile') || key.startsWith('eyeWink')) && Math.abs(target[key] - current[key]) < 0.001) current[key] = target[key];
     }
 
     const dragStiffness = dragInertia.active ? 90 : 34;

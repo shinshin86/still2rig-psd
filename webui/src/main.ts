@@ -1,3 +1,4 @@
+import { expressionPresets, expressionParameterNames, expressionPresetValues } from '../../src/expressionPresets.mjs';
 import { requestedExpressions, generatableExpressions } from '../../src/expressions.mjs';
 import { installVoiceControls } from './voice/controls';
 import { createLivePublisher } from './live/publisher';
@@ -55,7 +56,8 @@ interface RigQaApi {
   error: string | null;
   summary: unknown;
   anchors: Record<string, unknown>;
-  setState: (eyeOpen: number, mouthOpen: number, expressions?: { eyeSmile?: number; blush?: number }) => void;
+  setState: (eyeOpen: number, mouthOpen: number, expressions?: Partial<PsdMotionParameters>) => void;
+  setExpression: (id: string) => void;
   setMode: (mode: QaMode) => void;
   setAutoBlink: (enabled: boolean) => void;
   getAutoBlink: () => boolean;
@@ -332,6 +334,17 @@ const PARAMETER_LABELS: Partial<Record<PsdMotionParameterName, string>> = {
   armY: '腕の上下',
   armPos: '腕の位置',
   eyeSmile: '笑い目',
+  eyeSmileL: '左目の笑い目',
+  eyeSmileR: '右目の笑い目',
+  browWorry: '困り眉',
+  browAngry: '怒り眉',
+  browFlat: '眉を平らにする',
+  upperLid: '上まぶたを下げる',
+  lidTilt: 'まぶたの傾き',
+  eyeWide: '目を見開く',
+  eyeNarrow: '下まぶたを上げる',
+  eyeWinkL: '左目を閉じる',
+  eyeWinkR: '右目を閉じる',
   blush: '頬の赤らみ',
   eyeOpenL: '左目の開き',
   eyeOpenR: '右目の開き',
@@ -348,7 +361,7 @@ const PARAMETER_LABELS: Partial<Record<PsdMotionParameterName, string>> = {
   browAngR: '右眉の角度',
   browAngSym: '眉の対称角度',
   mouthOpen: '口の開き',
-  mouthForm: '口の形',
+  mouthForm: '口角',
   mouthCY: '口の中心位置',
   mouthEase: '口の変形の滑らかさ',
   mouthCAng: '口の傾き',
@@ -408,11 +421,43 @@ function syncAdvancedParameterControl(name: PsdMotionParameterName): void {
   control.number.value = formatted;
 }
 
+let expressionAnimation = 0;
+let selectedExpressionId: string | null = 'neutral';
+function syncExpressionSelection(id: string | null): void {
+  selectedExpressionId = id;
+  for (const button of document.querySelectorAll<HTMLButtonElement>('[data-expression-preset]')) {
+    button.setAttribute('aria-pressed', String(button.dataset.expressionPreset === id));
+  }
+  requireElement<HTMLElement>('#expression-status').textContent =
+    expressionPresets.find(item => item.id === id)?.label ?? '自分で調整中';
+}
+
+function selectExpression(id: string): void {
+  cancelAnimationFrame(expressionAnimation);
+  const start = { ...profileParameters };
+  const values = expressionPresetValues(id, avatarParts);
+  const began = performance.now();
+  syncExpressionSelection(id);
+  const advance = (now: number) => {
+    const t = Math.min(1, (now - began) / 250), eased = t * t * (3 - 2 * t);
+    for (const name of expressionParameterNames) {
+      const key = name as PsdMotionParameterName;
+      profileParameters[key] = start[key] + (values[key] - start[key]) * eased;
+      syncAdvancedParameterControl(key);
+    }
+    applyAvatarMotionMode(currentMode);
+    if (t < 1) expressionAnimation = requestAnimationFrame(advance);
+  };
+  expressionAnimation = requestAnimationFrame(advance);
+}
+
 function applyProfileParameter(
   definition: PsdMotionParameterDefinition,
   value: number,
   announce = true,
 ): void {
+  cancelAnimationFrame(expressionAnimation);
+  if (expressionParameterNames.includes(definition.key)) syncExpressionSelection(null);
   profileParameters = {
     ...profileParameters,
     [definition.key]: normalizeParameterValue(definition, value),
@@ -429,6 +474,8 @@ function applyProfileParameter(
 }
 
 function resetAdvancedProfileParameters(): void {
+  cancelAnimationFrame(expressionAnimation);
+  syncExpressionSelection('neutral');
   profileParameters = { ...DEFAULT_PSD_MOTION_PARAMETERS };
   for (const name of advancedControls.keys()) syncAdvancedParameterControl(name);
   applyAvatarMotionMode(currentMode);
@@ -497,6 +544,10 @@ function createAdvancedParameterControls(): void {
       inputRow.append(range, number);
       item.htmlFor = range.id;
       item.append(heading, inputRow, unavailable);
+      if (definition.key === 'lidTilt') {
+        const help = document.createElement('span'); help.className = 'tuning-note';
+        help.textContent = '＋で目頭、−で目尻を下げます。'; item.append(help);
+      }
       grid.append(item);
     }
     details.append(summary, grid);
@@ -659,6 +710,7 @@ function setSelectedLayer(
   selectedPartBadge.hidden = workspaceMode !== 'layers';
   avatar?.setMotionEnabled(false);
   const selectedProfile = createDefaultPsdMotionProfile();
+  selectedProfile.parameters.eyeSmileL = selectedProfile.parameters.eyeSmileR = 0;
   selectedProfile.parameters.eyeSmile = selected.name.toLowerCase() === 'eye_smile' ? 1 : 0;
   selectedProfile.parameters.blush = selected.name.toLowerCase() === 'blush' ? 1 : 0;
   avatar?.setMotionProfile(selectedProfile);
@@ -1404,8 +1456,9 @@ const api: RigQaApi = {
   anchors: {},
   setState(nextEyeOpen, nextMouthOpen, expressions) {
     if (expressions) {
-      for (const name of ['eyeSmile', 'blush'] as const) if (expressions[name] !== undefined) {
-        const definition = PSD_MOTION_PARAMETER_DEFINITIONS.find(item => item.key === name)!;
+      for (const name of Object.keys(expressions) as PsdMotionParameterName[]) if (expressions[name] !== undefined) {
+        const definition = PSD_MOTION_PARAMETER_DEFINITIONS.find(item => item.key === name);
+        if (!definition) continue;
         profileParameters[name] = normalizeParameterValue(definition, expressions[name]!);
         syncAdvancedParameterControl(name);
       }
@@ -1421,6 +1474,7 @@ const api: RigQaApi = {
     }
     avatar?.setMouthOpen(mouthOpen);
   },
+  setExpression: selectExpression,
   setMode(mode) {
     currentMode = mode;
     applyAvatarMotionMode(mode);
@@ -1534,6 +1588,11 @@ async function activatePsd(
   voiceControls?.stop();
   avatar = nextAvatar;
   avatarParts = new Set(detection.summary.partsFound);
+  cancelAnimationFrame(expressionAnimation);
+  if (!options.editorRefresh && selectedExpressionId) {
+    Object.assign(profileParameters, expressionPresetValues(selectedExpressionId, avatarParts));
+    for (const key of expressionParameterNames) syncAdvancedParameterControl(key as PsdMotionParameterName);
+  }
   previousAvatar?.dispose();
 
   viewOffsetX = options.preserveView ? previousView.offsetX : 0;
@@ -1848,6 +1907,7 @@ function setAvatarControlsDisabled(disabled: boolean): void {
     viewReset,
     ...modeButtons,
     ...presetButtons,
+    ...document.querySelectorAll<HTMLButtonElement>('[data-expression-preset]'),
     ...Object.values(tuningInputs),
     ...[...advancedControls.values()].flatMap((control) => [control.range, control.number]),
     advancedReset,
@@ -1876,10 +1936,10 @@ function setCameraConflicts(active: boolean): void {
   advancedReset.disabled = anyActive || !avatar;
   const trackedParameters = new Set<PsdMotionParameterName>([
     'angleX', 'angleY', 'angleZ', 'body', 'eyeOpenL', 'eyeOpenR',
-    'eyeX', 'eyeY', 'mouthOpen', 'mouthForm', 'brow',
+    'eyeX', 'eyeY', 'mouthOpen',
   ]);
   for (const [name, control] of advancedControls) {
-    const part = name === 'eyeSmile' ? 'eye_smile' : name === 'blush' ? 'blush' : null;
+    const part = name.startsWith('eyeSmile') ? 'eye_smile' : name === 'blush' ? 'blush' : null;
     const missing = Boolean(part && !avatarParts.has(part));
     control.unavailable.hidden = !missing;
     control.unavailable.textContent = missing ? `このPSDには${PARAMETER_LABELS[name]}の絵がありません。` : '';
@@ -1892,6 +1952,13 @@ function setCameraConflicts(active: boolean): void {
 
 function installEventListeners(): void {
   createAdvancedParameterControls();
+  const expressionButtons = requireElement<HTMLElement>('#expression-buttons');
+  for (const preset of expressionPresets) {
+    const button = document.createElement('button'); button.type = 'button';
+    button.dataset.expressionPreset = preset.id; button.textContent = preset.label;
+    button.setAttribute('aria-pressed', String(preset.id === 'neutral'));
+    button.addEventListener('click', () => selectExpression(preset.id)); expressionButtons.append(button);
+  }
   cameraControls = installCameraControls({
     input(input, weight) { api.setTrackingInput(input, weight); },
     active(active) { setCameraConflicts(active); if (active) livePublisher?.enable(); },

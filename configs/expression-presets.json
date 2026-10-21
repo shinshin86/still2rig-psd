@@ -1,0 +1,100 @@
+{
+  "schemaVersion": 1,
+  "parameters": [
+    "eyeSmile",
+    "eyeSmileL",
+    "eyeSmileR",
+    "blush",
+    "browWorry",
+    "browAngry",
+    "browFlat",
+    "upperLid",
+    "lidTilt",
+    "eyeWide",
+    "mouthForm",
+    "brow",
+    "eyeNarrow",
+    "eyeWinkL",
+    "eyeWinkR"
+  ],
+  "presets": [
+    {
+      "id": "neutral",
+      "label": "いつもの顔",
+      "values": {}
+    },
+    {
+      "id": "joy",
+      "label": "笑顔",
+      "values": {
+        "eyeSmile": 1,
+        "mouthForm": 0.65,
+        "brow": 0.18,
+        "blush": 0.25
+      }
+    },
+    {
+      "id": "shy",
+      "label": "照れ",
+      "values": {
+        "blush": 1,
+        "upperLid": 0.25,
+        "browWorry": 0.35,
+        "mouthForm": 0.3
+      }
+    },
+    {
+      "id": "angry",
+      "label": "怒り",
+      "values": {
+        "browAngry": 1,
+        "upperLid": 0.7,
+        "lidTilt": 1,
+        "mouthForm": -0.9
+      }
+    },
+    {
+      "id": "sad",
+      "label": "悲しみ",
+      "values": {
+        "browWorry": 1,
+        "upperLid": 0.55,
+        "lidTilt": -1,
+        "mouthForm": -0.8
+      }
+    },
+    {
+      "id": "surprised",
+      "label": "驚き",
+      "values": {
+        "brow": 0.55,
+        "eyeWide": 1
+      }
+    },
+    {
+      "id": "flustered",
+      "label": "焦り",
+      "values": {
+        "browWorry": 1,
+        "eyeWide": 0.8,
+        "brow": 0.15
+      }
+    },
+    {
+      "id": "unamused",
+      "label": "ジト目",
+      "values": {
+        "upperLid": 1,
+        "browFlat": 1
+      }
+    },
+    {
+      "id": "wink",
+      "label": "ウィンク",
+      "values": {
+        "eyeSmileL": 1,
+        "mouthForm": 0.5
+      }
+    }
+  ]
+}

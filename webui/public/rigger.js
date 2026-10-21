@@ -542,6 +542,23 @@
       return curve.length ? curve : null;
     }
 
+    function browCenterCurve(alpha) {
+      var box = alpha ? bboxOf(alpha, W, H, 8) : null;
+      if (!box) return null;
+      var curve = [];
+      for (var bin = 0; bin < 17; bin++) {
+        var x0 = Math.floor(box.x0 + (box.x1 - box.x0 + 1) * bin / 17);
+        var x1 = Math.floor(box.x0 + (box.x1 - box.x0 + 1) * (bin + 1) / 17);
+        var weight = 0, sum = 0;
+        for (var y = box.y0; y <= box.y1; y++) for (var x = x0; x < x1; x++) {
+          var a = alpha[y * W + x]; if (a < 8) continue;
+          weight += a; sum += y * a;
+        }
+        if (weight) curve.push({ x: (x0 + x1 - 1) / 2, y: sum / weight });
+      }
+      return curve;
+    }
+
     // anchors
     var anchors = { face: FACE };
     ['l', 'r'].forEach(function (s) {
@@ -554,7 +571,12 @@
         a.icx = ic.cx; a.icy = ic.cy;
         var cc = ec ? centroidOf(ec, W, H) : null;
         a.closeY = cc ? cc.cy : (b.y0 + (b.y1 - b.y0) * 0.62);
+        a.closedBounds = ec ? bboxOf(ec, W, H, 8) : null;
+        a.closedCurve = browCenterCurve(ec);
         var ink = smileInk(byName['eye_smile'], sided['eye_smile|' + s], a);
+        a.browBounds = sided['eyebrow|' + s] ? bboxOf(sided['eyebrow|' + s], W, H, 8) : null;
+        a.browCurve = browCenterCurve(sided['eyebrow|' + s]);
+        a.upperLid = upperLidCurve(byName['eyelash'] || byName['eyewhite'], sided['eyelash|' + s] || ew, a);
         var smileY = smileHeight(byName['eye_smile'], ink, a);
         if (smileY !== null) {
           a.smileY = smileY;
@@ -572,6 +594,8 @@
     if (mSrc) {
       var mb = bboxOf(mSrc.alpha, W, H, 8), mc = centroidOf(mSrc.alpha, W, H);
       anchors.mouth = { x0: mb.x0, x1: mb.x1, y0: mb.y0, y1: mb.y1, cx: mc.cx, cy: mc.cy };
+      var closedMouth = byName['mouth_close'] ? bboxOf(byName['mouth_close'].alpha, W, H, 8) : null;
+      anchors.mouth.closedHeight = closedMouth ? closedMouth.y1 - closedMouth.y0 : 0;
     } else {
       warnings.push('mouth_open / mouth_close がありません');
       anchors.mouth = { x0: FACE.cx - 20, x1: FACE.cx + 20, y0: FACE.cy + 40, y1: FACE.cy + 60, cx: FACE.cx, cy: FACE.cy + 50 };

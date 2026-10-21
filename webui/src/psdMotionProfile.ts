@@ -19,6 +19,17 @@ export interface PsdMotionParameters {
   armY: number;
   armPos: number;
   eyeSmile: number;
+  eyeSmileL: number;
+  eyeSmileR: number;
+  browWorry: number;
+  browAngry: number;
+  browFlat: number;
+  upperLid: number;
+  lidTilt: number;
+  eyeWide: number;
+  eyeNarrow: number;
+  eyeWinkL: number;
+  eyeWinkR: number;
   blush: number;
   eyeOpenL: number;
   eyeOpenR: number;
@@ -90,6 +101,17 @@ export const PSD_MOTION_PARAMETER_DEFINITIONS: readonly PsdMotionParameterDefini
       step: 0.01,
     },
     { key: 'eyeSmile', label: '笑い目', group: 'eyes', min: 0, max: 1, step: 0.01 },
+    { key: 'eyeSmileL', label: '左目の笑い目', group: 'eyes', min: 0, max: 1, step: 0.01 },
+    { key: 'eyeSmileR', label: '右目の笑い目', group: 'eyes', min: 0, max: 1, step: 0.01 },
+    { key: 'browWorry', label: '困り眉', group: 'eyes', min: 0, max: 1, step: 0.01 },
+    { key: 'browAngry', label: '怒り眉', group: 'eyes', min: 0, max: 1, step: 0.01 },
+    { key: 'browFlat', label: '眉を平らにする', group: 'eyes', min: 0, max: 1, step: 0.01 },
+    { key: 'upperLid', label: '上まぶたを下げる', group: 'eyes', min: 0, max: 1, step: 0.01 },
+    { key: 'lidTilt', label: 'まぶたの傾き', group: 'eyes', min: -1, max: 1, step: 0.01 },
+    { key: 'eyeWide', label: '目を見開く', group: 'eyes', min: 0, max: 1, step: 0.01 },
+    { key: 'eyeNarrow', label: '下まぶたを上げる', group: 'eyes', min: 0, max: 1, step: 0.01 },
+    { key: 'eyeWinkL', label: '左目を閉じる', group: 'eyes', min: 0, max: 1, step: 0.01 },
+    { key: 'eyeWinkR', label: '右目を閉じる', group: 'eyes', min: 0, max: 1, step: 0.01 },
     { key: 'blush', label: '頬の赤らみ', group: 'eyes', min: 0, max: 1, step: 0.01 },
     { key: 'body', label: 'Body', group: 'face', min: -1, max: 1, step: 0.01 },
     { key: 'armY', label: 'Arm Y', group: 'face', min: -1, max: 1, step: 0.01 },
@@ -329,6 +351,17 @@ export const DEFAULT_PSD_MOTION_PARAMETERS: Readonly<PsdMotionParameters> = {
   armY: 0,
   armPos: 0,
   eyeSmile: 0,
+  eyeSmileL: 0,
+  eyeSmileR: 0,
+  browWorry: 0,
+  browAngry: 0,
+  browFlat: 0,
+  upperLid: 0,
+  lidTilt: 0,
+  eyeWide: 0,
+  eyeNarrow: 0,
+  eyeWinkL: 0,
+  eyeWinkR: 0,
   blush: 0,
   eyeOpenL: 1,
   eyeOpenR: 1,
