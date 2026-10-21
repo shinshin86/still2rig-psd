@@ -133,6 +133,7 @@ async function main() {
 
     const canvas = page.locator('#rig-canvas');
     let frameCounter = 0;
+    const mouthStates = [];
     const capture = async (name, label) => {
       // Clip to an integer-aligned CSS box so the capture is exactly model scale.
       const rect = await canvas.boundingBox();
@@ -144,6 +145,8 @@ async function main() {
       if (frame.width !== probeInfo.canvas.width || frame.height !== probeInfo.canvas.height) {
         throw new Error(`Capture is ${frame.width}x${frame.height}, expected ${probeInfo.canvas.width}x${probeInfo.canvas.height}.`);
       }
+      const mouthState = await page.evaluate(() => window.rigQa.getMouthState());
+      mouthStates?.push({name,label,...mouthState});
       frameCounter += 1;
       const file = path.join(framesDir, `${String(frameCounter).padStart(3, '0')}-${name}-${label}.png`);
       await fs.writeFile(file, buffer);
@@ -188,7 +191,7 @@ async function main() {
 
     const expressionMasks = expressionMasksFromLayers(inspectPsd(psdFile).layers,
       info.canvas.width, info.canvas.height, info.anchors);
-    for (const name of Object.keys(expressionMasks).filter(name=>!['tears','sweat','anger_mark'].includes(name))) {
+    for (const name of Object.keys(expressionMasks).filter(name=>!['tears','sweat','anger_mark','mouth_laugh','mouth_round'].includes(name))) {
       captures[name] = [];
       const key = name === 'eye-smile' ? 'eyeSmile' : name === 'anger_mark' ? 'angerMark' : name;
       for (const strength of name === 'eye-smile' ? [...Array.from({ length: 21 }, (_, i) => i / 20), 0.48, 0.52] : ['tears','sweat','anger_mark'].includes(name) ? Array.from({length:21},(_,i)=>i/20) : [0, 0.5, 1]) {
@@ -250,11 +253,11 @@ async function main() {
     // follows elapsed time, so an earlier capture changes its sampled phase.
     // Reload to remove drag inertia before checking expression isolation.
     await loadPsd(page, psdFile);
-    for (const name of ['tears','sweat','anger_mark'].filter(name=>expressionMasks[name])) {
-      const key = name === 'anger_mark' ? 'angerMark' : name;
+    for (const name of ['tears','sweat','anger_mark','mouth_laugh','mouth_round'].filter(name=>expressionMasks[name])) {
+      const key = name === 'anger_mark' ? 'angerMark' : name === 'mouth_laugh' ? 'mouthLaugh' : name === 'mouth_round' ? 'mouthRound' : name;
       captures[name] = [];
       for (let step=0;step<=20;step++) {
-        await setState(1,0,{eyeSmile:0,blush:0,tears:0,sweat:0,angerMark:0,[key]:step/20});
+        await setState(1,0,{eyeSmile:0,blush:0,tears:0,sweat:0,angerMark:0,mouthLaugh:0,mouthRound:0,expressionMouthOpen:0,[key]:step/20});
         await sleep(500);
         captures[name].push(await capture(name,`strength-${(step/20).toFixed(2)}`));
       }
@@ -262,6 +265,12 @@ async function main() {
         await setState(eye,0,{[key]:1});await sleep(500);
         captures[name].push(await capture(name,`strength-1.00-blink-${eye}`));
       }
+    }
+    captures['mouth-fine-opening'] = [];
+    for (let i=0;i<=30;i++) {
+      await setState(1,i/100,{mouthLaugh:0,mouthRound:0,expressionMouthOpen:0});
+      await sleep(350);
+      captures['mouth-fine-opening'].push(await capture('mouth-fine-opening',`open-${(i/100).toFixed(2)}`));
     }
     Object.assign(captures, await captureExpressionSet({ page, capture,
       parts: info.summary.partsFound, partSteps: 2, settleMs: 500,
@@ -280,6 +289,9 @@ async function main() {
       expressionSetRequired: true,
       contract,
     });
+    evaluation.checks.mouthSingleDrawing = mouthStates.every(state=>state.visibleDrawings===1);
+    evaluation.checks.mouthFineOpeningCaptured = captures['mouth-fine-opening'].length===31;
+    evaluation.pass = Object.values(evaluation.checks).every(Boolean);
     const dragPeak = Math.max(...dragMotion.map((value) => Math.hypot(value.x, value.y)));
     const report = {
       schemaVersion: 1,
@@ -292,6 +304,7 @@ async function main() {
       drag: { peakMotion: Number(dragPeak.toFixed(4)), responded: dragPeak > 0.001, samples: dragMotion },
       captures: Object.fromEntries(Object.entries(captures).map(([name, items]) => [name, items.map((item) => item.file)])),
       consoleErrors,
+      mouthStates,
     };
     await fs.writeFile(path.join(outDir, 'motion-qa.json'), `${JSON.stringify(report, null, 2)}\n`);
     console.log(JSON.stringify({ pass: report.pass, metrics: report.metrics, checks: report.checks, report: path.join(outDir, 'motion-qa.json') }));

@@ -498,6 +498,14 @@ export function expressionMasksFromLayers(layers, width, height, anchors) {
     const alpha = layerAlphaMask(layers.find(layer=>layer.name===name),width,height,0);
     if(alpha.some(Boolean)) masks[name] = dilate(alpha,width,height,8);
   }
+  for (const name of ['mouth_laugh','mouth_round']) {
+    if (!layers.some(layer=>layer.name===name)) continue;
+    const union=new Uint8Array(width*height);
+    for(const layer of layers.filter(layer=>/^mouth_(close|open|laugh|round)$/.test(layer.name))) {
+      layerAlphaMask(layer,width,height,8).forEach((a,i)=>{if(a)union[i]=1;});
+    }
+    masks[name]=dilate(union,width,height,16);
+  }
   const blush = layerAlphaMask(layers.find(layer => layer.name === 'blush'), width, height, 0);
   if (blush.some(Boolean)) masks.blush = dilate(blush, width, height, 4);
   return masks;
@@ -519,7 +527,7 @@ export function evaluateExpressionCaptures(captures, masks) {
     metrics[name] = { changedPixels: changed, nonRegionMaePercent: round(nonRegion, 4), changeThreshold: 1 };
     checks[`${name}Changed`] = changed > 0;
     checks[`${name}RegionStable`] = nonRegion <= 0.35;
-    if (['tears','sweat','anger_mark'].includes(name)) {
+    if (['tears','sweat','anger_mark','mouth_laugh','mouth_round'].includes(name)) {
       checks[`${name}ProgressionCaptured`] = Array.from({length:21},(_,i)=>(i/20).toFixed(2))
         .every(strength=>frames.some(item=>item.label===`strength-${strength}`));
       checks[`${name}BlinkCaptured`] = ['strength-1.00-blink-0.5','strength-1.00-blink-0']
@@ -546,7 +554,7 @@ export function evaluateExpressionCaptures(captures, masks) {
 /** Coverage and unilateral-eye checks; naturalness still needs visual review. */
 export function evaluateExpressionSetCaptures(captures, anchors) {
   const has = (name, labels) => labels.every(label => (captures[name] || []).some(item => item.label === label));
-  const parts = ['browWorry','browAngry','browFlat','upperLid','eyeWide','eyeNarrow','eyeWinkL','eyeWinkR','eyeSmileL','eyeSmileR','lidTilt-inward','lidTilt-outward','mouth-up','mouth-down','tears','sweat','angerMark'];
+  const parts = ['browWorry','browAngry','browFlat','upperLid','eyeWide','eyeNarrow','eyeWinkL','eyeWinkR','eyeSmileL','eyeSmileR','lidTilt-inward','lidTilt-outward','mouth-up','mouth-down','tears','sweat','angerMark','mouthLaugh','mouthRound'];
   const presets = ['neutral','joy','shy','angry','sad','surprised','flustered','unamused','wink'];
   const pairs = ['neutral-joy','joy-neutral','joy-angry','sad-surprised','wink-joy','unamused-surprised'];
   const neutral = captures['preset-neutral']?.find(item => item.label === 'eye-1.00')?.frame;

@@ -276,3 +276,26 @@ details in the UI. Do not launch a browser automatically.
 For failure modes and the exact trust model, read
 `../../../docs/codex-workflow.md` and `../../../docs/security.md` only when they
 are relevant.
+
+## Optional mouth artwork
+
+`mouth_laugh` and `mouth_round` use the approved character's masked request and
+repair workflow. They are optional; never replace missing art with a claim of
+verified generated artwork. Transparent mouth results contain only lip ink,
+cavity and tongue. Import validates alpha/placement/skin contamination and
+registers their centroid to the closed mouth with a recorded translation of
+at most 12 native pixels. It rechecks the mask after registration.
+
+For an archived request, use `import-expressions JOB --read-only --preview-dir
+DIR` against its recorded layer snapshot. Inspect the isolated artwork and
+composite, retain the report, and pass the validated full-canvas mouth images
+with the preceding expression files to `repair JOB --expressions DIR`. Do not
+rewrite recorded hashes or silently attach a result to a newer request.
+
+Verify one visible mouth drawing, 0.05 shape steps, 0.01 opening steps around
+handoffs, resting/voice/camera opening, both transition directions and at least
+two seconds of 30fps speech. Keep pale skin/highlight pixels out of narrow-mouth
+recoloring. Test both artwork-present and artwork-missing PSDs and the stream
+view. The surprised fallback uses a separate resting-opening floor, not an
+overwrite of the speech slider. Neutral and camera closure clear/suppress the
+resting floor. Motion capture coverage alone does not establish naturalness.

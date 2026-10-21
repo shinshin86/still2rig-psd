@@ -402,3 +402,29 @@ sweat, and anger uses the symbol. Missing artwork keeps the previous face and
 disables the corresponding slider with a reason. No overlay changes production
 readiness. Review strengths every 0.05, blink states, head turns and transitions;
 a successful pixel check does not establish natural-looking artwork or motion.
+
+## Mouth shapes and speech
+
+`mouth_laugh` and `mouth_round` are optional mouth artwork. Their transparent
+requests contain only the outline, cavity and tongue. Import checks genuine
+alpha, placement, sparse artwork and contamination from the local skin color.
+It registers the alpha centroid to the existing closed mouth with at most
+12 native pixels of translation, records that translation, and checks the
+placement again. A historical request can be inspected with `import-expressions
+JOB --read-only --preview-dir DIR`; use the validated full-canvas artwork with
+`repair JOB --expressions DIR` and retain its report alongside the inputs.
+
+The renderer displays one mouth drawing at a time. Contour meshes meet at a
+narrow lip shape, with a small hysteresis band to resist noisy inputs. Narrow
+openings use dark lip/cavity colors; tongue color returns as the opening grows.
+Shape controls and speech opening remain separate. Laughing and round mouths
+have resting opening floors of 0.22 and 0.40 at full strength. If round artwork
+is absent, the surprised expression uses a separate 0.75 floor with the existing
+open mouth; it never rewrites the speech slider. Neutral clears these floors,
+and camera closure suppresses them. Microphone opening still combines by max.
+
+Inspect 0.05 strength steps, 0.01 opening steps near handoffs, both directions,
+and at least two seconds of 30fps speech with fixed and changing shapes. Verify
+one visible drawing, retained lip weight, missing-art behavior, camera closure
+and the stream view. Motion QA records the mouth parts and fine opening strip;
+frame coverage and numerical checks do not establish natural facial motion.
