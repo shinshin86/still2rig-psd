@@ -1,3 +1,4 @@
+import { expressions } from '../../src/expressions.mjs';
 import {
   readPsd,
   writePsd,
@@ -37,9 +38,7 @@ const LAYER_LABELS: Record<string, string> = {
   eyebrow: '眉',
   nose: '鼻',
   facedetail: '顔の細部',
-  mouth_close: '閉じた口',
-  mouth_open: '開いた口',
-  eye_close: '閉じた目',
+  ...Object.fromEntries(expressions.map(item => [item.name, item.label])),
   'front hair': '前髪',
   headwear: '髪飾り・帽子',
 };

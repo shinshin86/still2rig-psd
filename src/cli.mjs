@@ -3,6 +3,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { readPsd, writePsdBuffer } from 'ag-psd';
 import { ensureFaceModel } from './face-model.mjs';
+import { expressions } from './expressions.mjs';
 import { buildPsd } from './psd.mjs';
 import { colabBridgePaths, colabConnectionInfo } from './colab.mjs';
 import { listJobs, loadJob, prepareJob, updateJob } from './job.mjs';
@@ -181,11 +182,7 @@ function assembleArtifacts({ jobId, root, options, outputPsd, layerDir, reportsR
   return { build, qa, outputPsd, qaReportFile, contactSheet, buildReportFile, inspectionReport };
 }
 
-const EXPRESSION_TARGETS = {
-  'mouth_open.png': 'mouth_open',
-  'mouth_close.png': 'mouth_close',
-  'eye_close.png': 'eye_close',
-};
+const EXPRESSION_TARGETS = Object.fromEntries(expressions.map(item => [`${item.name}.png`, item.name]));
 
 function previewExpressionTargets(inspectionReport) {
   const report = JSON.parse(fs.readFileSync(inspectionReport, 'utf8'));
@@ -533,7 +530,7 @@ function selfTest() {
     armsBehindTopwear: index('handwear') < index('topwear'),
     neckBeforeFace: index('neck') < index('face'),
     faceBeforeEyes: index('face') < index('eyewhite'),
-    expressionsBeforeFrontHair: index('eye_close') < index('front hair'),
+    expressionsBeforeFrontHair: expressions.filter(item => item.checkFrontHair).every(item => index(item.name) < index('front hair')),
     pinnedRevision: /^[0-9a-f]{40}$/.test(loadDefaults().seeThrough.revision),
     privateStateIgnored: fs.readFileSync(path.join(PROJECT_ROOT, '.gitignore'), 'utf8').split(/\r?\n/).includes('.still2rig-psd/'),
   };

@@ -10,6 +10,7 @@ from pathlib import Path
 
 from PIL import Image, ImageChops, ImageFilter
 
+from expression_definitions import load_expressions
 from expression_requests_common import file_hash, layer_hash
 
 
@@ -263,8 +264,11 @@ def import_results(args, report):
             or requests["layerDir"] != args.layer_dir.relative_to(Path.cwd()).as_posix()):
         raise ValueError("Current layers changed. Rerun expression-requests and generate new results.")
     report["layerSha256"] = current_hash
+    definitions = [item for item in load_expressions(json.loads(args.layer_map.read_text(encoding="utf-8"))) if item["prompt"] is not None]
     outputs = {}
-    for name in ("eye_close", "mouth_open"):
+    extractors = {"diff": extract_artwork}
+    for definition in definitions:
+        name = definition["name"]
         result_file = args.result_dir / f"{name}.png"
         if not result_file.is_file():
             report["variants"][name] = {"status": "missing"}
@@ -313,7 +317,7 @@ def import_results(args, report):
         if details["maxLocalMeanDiff"] > args.max_band_local_mean or details["maxFlatMeanDiff"] > args.max_band_flat_mean:
             raise ValueError(f"{name}: local pixels outside the mask changed: local={details['maxLocalMeanDiff']}, "
                              f"flat={details['maxFlatMeanDiff']} (limits {args.max_band_local_mean}, {args.max_band_flat_mean}).")
-        result, extraction = extract_artwork(result, underlay, editable, args.artwork_threshold, args.minimum_component_pixels * pixel_scale * pixel_scale)
+        result, extraction = extractors[definition["extraction"]](result, underlay, editable, args.artwork_threshold, args.minimum_component_pixels * pixel_scale * pixel_scale)
         details.update(extraction)
         result = result.resize(crop_size, Image.Resampling.LANCZOS)
         # Enforce the boundary after resampling too: no skin outside editable pixels.
@@ -325,11 +329,12 @@ def import_results(args, report):
         details["status"] = "accepted"
         details["canvas"] = requests["canvas"]
     if not outputs:
-        raise ValueError("No results found. Save eye_close.png or mouth_open.png in the results directory.")
+        raise ValueError("No results found. Save " + " or ".join(f"{item['name']}.png" for item in definitions) + " in the results directory.")
     # Validate every supplied variant before replacing any previously imported art.
     if not args.read_only:
         args.output_dir.mkdir(parents=True, exist_ok=True)
-        for name in ("eye_close", "mouth_open"):
+        for definition in definitions:
+            name = definition["name"]
             destination = args.output_dir / f"{name}.png"
             if name in outputs:
                 outputs[name].save(destination)

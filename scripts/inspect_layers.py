@@ -13,8 +13,11 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFilter
 
 
+from expression_definitions import load_expressions
+
+
 OPTIONAL_DROP = {"bottomwear.png", "handwear.png", "earwear.png", "headwear.png"}
-EXPRESSION_FILES = {"mouth_open.png", "mouth_close.png", "eye_close.png"}
+EXPRESSION_FILES = {f"{item['name']}.png" for item in load_expressions()}
 # Layers drawn above the neck in the PSD; where they cover the source, it says nothing about the collar.
 NECK_ABOVE_LAYERS = ("ears.png", "face.png", "front hair.png", "headwear.png")
 

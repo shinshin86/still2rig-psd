@@ -1,3 +1,4 @@
+import { requestedExpressions } from '../../src/expressions.mjs';
 import { installVoiceControls } from './voice/controls';
 import { createLivePublisher } from './live/publisher';
 import { installStreamControls } from './live/controls';
@@ -645,8 +646,8 @@ function setSelectedLayer(
   selectedPartBadge.textContent = `選択中：${selected.label}`;
   selectedPartBadge.hidden = workspaceMode !== 'layers';
   avatar?.setMotionEnabled(false);
-  avatar?.setMouthOpen(selected.name.toLowerCase() === 'mouth_open' ? 1 : 0);
-  avatar?.setEyeOpen(selected.name.toLowerCase() === 'eye_close' ? 0 : 1);
+  avatar?.setMouthOpen(selected.name.toLowerCase() === requestedExpressions.find(item => item.registration === 'mouth')?.name ? 1 : 0);
+  avatar?.setEyeOpen(selected.name.toLowerCase() === requestedExpressions.find(item => item.registration === 'eyes')?.name ? 0 : 1);
   flashLayerFocus(selected.name.toLowerCase());
   announceLayerEdit(`${selected.label}を選びました。水色の印と、明るく表示された部分を確認してください。`);
   if (layerOrderDetails.open) {
@@ -1683,7 +1684,8 @@ function expressionRequestMessage(item: GeneratedPsd, id: string): string {
   const root = `.still2rig-psd/jobs/${id}`;
   const target = `対象: ${item.name}（変換の識別名: ${id}）。`;
   const prepare = `まず npm run still2rig-psd -- expression-requests ${id} を実行してください。`;
-  const results = `${root}/expression-requests/results/eye_close.png と mouth_open.png`;
+  const names = requestedExpressions.map(item => item.name).join(' と ');
+  const results = `${root}/expression-requests/results/${requestedExpressions.map(item => `${item.name}.png`).join(' と ')}`;
   const finish = [
     `npm run still2rig-psd -- import-expressions ${id} を実行し、取り込みが通ったら npm run still2rig-psd -- repair ${id} --expressions ${root}/generated-expressions を実行してください。`,
     '前回の修復で使った差し替え画像は自動で引き継がれます。引き継いだ内容も実行結果で確認してください。',
@@ -1699,7 +1701,7 @@ function expressionRequestMessage(item: GeneratedPsd, id: string): string {
       `${target}リポジトリの AGENTS.md とスキルの「Image-generated expressions」の手順に従ってください。`,
       prepare,
       'ユーザーはこの画面で、顔の切り抜き画像を Codex の組み込みの画像生成（imagegen）に送ることに同意済みです。ほかの外部サービスは使わないでください。',
-      `eye_close と mouth_open それぞれの input.png、mask.png、prompt.txt を使って画像を生成し、${results} に保存してください。`,
+      `${names} それぞれの input.png、mask.png、prompt.txt を使って画像を生成し、${results} に保存してください。`,
       ...finish,
       ...common,
     ].join('\n');
@@ -1709,7 +1711,7 @@ function expressionRequestMessage(item: GeneratedPsd, id: string): string {
     target,
     prepare,
     'Claude Code は画像を生成できません。画像の生成や外部サービスへの送信はしないでください。',
-    `eye_close と mouth_open それぞれについて、画像生成に渡すファイル（input.png と mask.png の場所、prompt.txt の内容）と、結果を保存するファイル名（${results}）を具体的に案内して、そこで止まってください。`,
+    `${names} それぞれについて、画像生成に渡すファイル（input.png と mask.png の場所、prompt.txt の内容）と、結果を保存するファイル名（${results}）を具体的に案内して、そこで止まってください。`,
     '私が結果を保存したと伝えたら、続きを進めてください。',
     ...finish,
     ...common,

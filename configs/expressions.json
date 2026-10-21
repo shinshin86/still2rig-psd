@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "expressions": [
+    {
+      "name": "eye_close",
+      "label": "閉じた目",
+      "requestLabel": "closed eyes",
+      "prompt": "Close both eyes with natural anime eyelid lines matching the existing line art and skin. Remove the open eyes inside the editable areas. Keep the same face, pose, hair, lighting and colors.",
+      "editableLayers": ["eyewhite", "irides", "eyelash"],
+      "mask": { "dilationRatio": 0.04, "minimumDilation": 3, "fillBounds": false, "mouthLimits": false },
+      "extraction": "diff",
+      "registration": "eyes",
+      "split": true,
+      "placeholderFrom": null,
+      "checkFrontHair": true
+    },
+    {
+      "name": "mouth_open",
+      "label": "開いた口",
+      "requestLabel": "an open mouth",
+      "prompt": "Replace the closed mouth with a small natural open mouth saying Japanese \"あ\", matching the existing anime line art, position and colors. Keep the same face, eyes, pose, hair and lighting.",
+      "editableLayers": ["mouth_close"],
+      "mask": { "dilationRatio": 0.2, "minimumDilation": 3, "fillBounds": true, "mouthLimits": true },
+      "extraction": "diff",
+      "registration": "mouth",
+      "split": false,
+      "placeholderFrom": "mouth_close",
+      "checkFrontHair": false
+    },
+    {
+      "name": "mouth_close",
+      "label": "閉じた口",
+      "requestLabel": null,
+      "prompt": null,
+      "editableLayers": [],
+      "mask": null,
+      "extraction": null,
+      "registration": "none",
+      "split": false,
+      "placeholderFrom": null,
+      "checkFrontHair": true
+    }
+  ]
+}

@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { expressions } from './expressions.mjs';
 import { inspectPsd, readPngRgba } from './psd.mjs';
 import { loadDefaults, readJson, relativeProjectPath, writeJson } from './utils.mjs';
 
@@ -61,9 +62,13 @@ function artworkStats(image, alphaThreshold) {
   };
 }
 
+const mouthDefinition = expressions.find(item => item.registration === 'mouth');
+const eyeDefinition = expressions.find(item => item.registration === 'eyes');
+const mouthReference = expressions.find(item => item.name === mouthDefinition.editableLayers[0]);
+
 function mouthArtworkQuality(layerDir, canvasWidth, canvasHeight, quality) {
-  const mouthOpenFile = findLayerFile(layerDir, ['mouth_open.png']);
-  const mouthCloseFile = findLayerFile(layerDir, ['mouth_close.png', 'mouth.png']);
+  const mouthOpenFile = findLayerFile(layerDir, mouthDefinition.sources);
+  const mouthCloseFile = findLayerFile(layerDir, mouthReference.sources);
   const open = mouthOpenFile ? artworkStats(readPngRgba(mouthOpenFile), quality.alphaThreshold) : null;
   const close = mouthCloseFile ? artworkStats(readPngRgba(mouthCloseFile), quality.alphaThreshold) : null;
   const faceFile = findLayerFile(layerDir, ['face.png']);
@@ -107,11 +112,12 @@ function mouthArtworkQuality(layerDir, canvasWidth, canvasHeight, quality) {
   };
 }
 
-function expressionRegistration(layerDir, canvasWidth, tolerance) {
-  const mouthOpenFile = findLayerFile(layerDir, ['mouth_open.png']);
-  const mouthCloseFile = findLayerFile(layerDir, ['mouth_close.png', 'mouth.png']);
+function expressionRegistration(layerDir, canvasWidth, tolerance, mouthTarget = mouthDefinition, eyeTarget = eyeDefinition) {
+  const mouthOpenFile = findLayerFile(layerDir, mouthTarget.sources);
+  const reference = expressions.find(item => item.name === mouthTarget.editableLayers[0]);
+  const mouthCloseFile = findLayerFile(layerDir, reference.sources);
   const iridesFile = findLayerFile(layerDir, ['irides.png']);
-  const eyeCloseFile = findLayerFile(layerDir, ['eye_close.png']);
+  const eyeCloseFile = findLayerFile(layerDir, eyeTarget.sources);
   const mouthOpen = mouthOpenFile ? centroid(readPngRgba(mouthOpenFile)) : null;
   const mouthClose = mouthCloseFile ? centroid(readPngRgba(mouthCloseFile)) : null;
   const mouthError = distance(mouthOpen, mouthClose);
@@ -159,7 +165,7 @@ export function runQa({ psdFile, layerDir, buildReportFile, reportFile }) {
   const psd = inspectPsd(psdFile);
   const names = psd.layers.map((layer) => layer.name);
   const positions = new Map(names.map((name, index) => [name, index]));
-  const required = ['face', 'eyewhite', 'irides', 'mouth_close'];
+  const required = ['face', 'eyewhite', 'irides', mouthReference.name];
   const before = (back, front) => !positions.has(back) || !positions.has(front) || positions.get(back) < positions.get(front);
   const visible = psd.layers.every((layer) => {
     if (!layer.imageData) return false;
@@ -167,6 +173,17 @@ export function runQa({ psdFile, layerDir, buildReportFile, reportFile }) {
     return false;
   });
   const registration = expressionRegistration(layerDir, psd.width, defaults.quality.registrationTolerancePixels);
+  for (const definition of expressions) {
+    if (definition.registration === 'none' || definition === mouthDefinition || definition === eyeDefinition
+        || !findLayerFile(layerDir, definition.sources)) continue;
+    const isMouth = definition.registration === 'mouth';
+    const detail = expressionRegistration(layerDir, psd.width, defaults.quality.registrationTolerancePixels,
+      isMouth ? definition : mouthDefinition, isMouth ? eyeDefinition : definition);
+    const checks = Object.fromEntries(Object.entries(detail.checks).filter(([name]) => isMouth ? name.startsWith('mouth') : name.startsWith('eyes')));
+    registration.additionalExpressions ??= {};
+    registration.additionalExpressions[definition.name] = { ...detail, checks };
+    registration.checks[`${definition.name}Registered`] = Object.values(checks).every(Boolean);
+  }
   const mouthArtwork = mouthArtworkQuality(layerDir, psd.width, psd.height, defaults.quality);
   const checks = {
     requiredLayers: required.every((name) => positions.has(name)),
@@ -175,8 +192,8 @@ export function runQa({ psdFile, layerDir, buildReportFile, reportFile }) {
     armsBehindTopwear: before('handwear', 'topwear'),
     bodyBehindNeck: before('topwear', 'neck') && before('handwear', 'neck'),
     neckBehindFace: before('neck', 'face'),
-    facePartsInFront: ['eyewhite', 'irides', 'eyelash', 'eyebrow', 'mouth_close', 'mouth_open', 'eye_close'].every((name) => before('face', name)),
-    frontHairInFront: ['face', 'eyewhite', 'irides', 'mouth_close', 'eye_close'].every((name) => before(name, 'front hair')),
+    facePartsInFront: ['eyewhite', 'irides', 'eyelash', 'eyebrow', ...expressions.map(item => item.name)].every((name) => before('face', name)),
+    frontHairInFront: ['face', 'eyewhite', 'irides', ...expressions.filter(item => item.checkFrontHair).map(item => item.name)].every((name) => before(name, 'front hair')),
     productionExpressions: build.missingProduction.length === 0 && build.placeholders.length === 0 && (build.previewExpressions || []).length === 0,
     expressionRegistration: Object.values(registration.checks).every(Boolean),
     expressionArtwork: Object.values(mouthArtwork.checks).every(Boolean),

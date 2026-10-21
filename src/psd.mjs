@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import { initializeCanvas, readPsd, writePsdBuffer } from 'ag-psd';
+import { expressions } from './expressions.mjs';
 import { loadLayerMap, relativeProjectPath, sha256File, writeJson } from './utils.mjs';
 
 function imageData(width, height) {
@@ -128,13 +129,16 @@ export function buildPsd({ layerDir, output, reportFile, previewPlaceholders = f
     if (!selected.has(entry.target) || entry.override) selected.set(entry.target, { ...entry, source });
   }
   const placeholders = [];
-  if (previewPlaceholders && !selected.has('mouth_open') && selected.has('mouth_close')) {
-    selected.set('mouth_open', { target: 'mouth_open', source: selected.get('mouth_close').source, placeholder: true });
-    placeholders.push({ layer: 'mouth_open', copiedFrom: 'mouth_close' });
+  if (previewPlaceholders) for (const definition of expressions) {
+    const { name, placeholderFrom } = definition;
+    if (placeholderFrom && !selected.has(name) && selected.has(placeholderFrom)) {
+      selected.set(name, { target: name, source: selected.get(placeholderFrom).source, placeholder: true });
+      placeholders.push({ layer: name, copiedFrom: placeholderFrom });
+    }
   }
 
   const requiredTargets = [...new Set(map.layers.filter((entry) => entry.required).map((entry) => entry.target))];
-  const productionTargets = [...new Set(map.layers.filter((entry) => entry.requiredForProduction).map((entry) => entry.target))];
+  const productionTargets = orderedTargets.filter(target => expressions.some(item => item.name === target && item.requiredForProduction));
   const missingRequired = requiredTargets.filter((target) => !selected.has(target));
   if (missingRequired.length) throw new Error(`Missing required layers: ${missingRequired.join(', ')}`);
 
