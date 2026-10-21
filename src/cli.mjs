@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { readPsd, writePsdBuffer } from 'ag-psd';
 import { ensureFaceModel } from './face-model.mjs';
 import { expressions } from './expressions.mjs';
-import { buildPsd } from './psd.mjs';
+import { buildPsd, expressionOcclusion } from './psd.mjs';
 import { colabBridgePaths, colabConnectionInfo } from './colab.mjs';
 import { listJobs, loadJob, prepareJob, updateJob } from './job.mjs';
 import { runQa } from './qa.mjs';
@@ -113,11 +113,12 @@ function doctor() {
   };
 }
 
-function runPython(script, args) {
+function runPython(script, args, input) {
   const result = spawnSync('python3', [path.join(PROJECT_ROOT, 'scripts', script), ...args], {
     cwd: PROJECT_ROOT,
     encoding: 'utf8',
     maxBuffer: 20 * 1024 * 1024,
+    input,
   });
   if (result.status !== 0) throw new Error((result.stderr || result.stdout || `${script} failed`).trim());
   return (result.stdout || '').trim();
@@ -512,14 +513,25 @@ function importExpressions(jobId, directory, options) {
     if (options[key] !== undefined) args.push(`--${key}`, options[key]);
   }
   let report;
+  const requests = JSON.parse(fs.readFileSync(path.join(requestDir, 'requests.json'), 'utf8'));
+  let visibility;
+  if (manifest.result?.psd && (options['protected-check'] === 'seam' || (!options['protected-check']
+      && expressions.some(item => item.protectedCheck === 'seam' && requests.variants[item.name])))) {
+    // Historical requests may describe a different repair. Do not borrow the
+    // current PSD's occlusion for those layers; retain the full check instead.
+    if (path.resolve(layerDir) === path.resolve(currentLayerDir(root, manifest))) {
+      visibility = JSON.stringify(expressionOcclusion(path.resolve(PROJECT_ROOT, manifest.result.psd), requests, loadLayerMap(), expressions));
+      args.push('--psd-occlusion-stdin');
+    }
+  }
   if (options['read-only']) {
-    const result = spawnSync('python3', [path.join(PROJECT_ROOT, 'scripts', 'import_expression_results.py'), ...args], { cwd: PROJECT_ROOT, encoding: 'utf8', maxBuffer: 20 * 1024 * 1024 });
+    const result = spawnSync('python3', [path.join(PROJECT_ROOT, 'scripts', 'import_expression_results.py'), ...args], { cwd: PROJECT_ROOT, encoding: 'utf8', maxBuffer: 20 * 1024 * 1024, input: visibility });
     report = JSON.parse(result.stdout || '{}');
     if (!report.schemaVersion) throw new Error((result.stderr || 'Expression evaluation failed.').trim());
     if (!report.ok) process.exitCode = 1;
     return report;
   }
-  report = JSON.parse(runPython('import_expression_results.py', args));
+  report = JSON.parse(runPython('import_expression_results.py', args, visibility));
   return {
     ...report,
     outputDir: relativeProjectPath(outputDir),

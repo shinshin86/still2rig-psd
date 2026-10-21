@@ -4,8 +4,10 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import math
+import sys
 from pathlib import Path
 
 from PIL import Image, ImageChops, ImageFilter
@@ -255,6 +257,7 @@ def extract_artwork(result, underlay, editable, noise_threshold, minimum_compone
 
 
 def import_results(args, report):
+    occlusion = json.load(sys.stdin) if args.psd_occlusion_stdin else None
     request_file = args.request_dir / "requests.json"
     if not request_file.is_file():
         raise ValueError("Run expression-requests before importing expressions.")
@@ -323,7 +326,17 @@ def import_results(args, report):
         if args.protected_check is not None or mode == "seam":
             details["protectedCheck"] = mode
         if mode == "seam":
-            details["seam"] = check_seam(reference, result, editable, pixel_scale, underlay)
+            coverage = None
+            visibility = None
+            if occlusion is not None:
+                entry = occlusion["variants"][name]
+                if (entry["width"], entry["height"]) != crop_size:
+                    raise ValueError("PSD visibility must match the native request crop.")
+                coverage = Image.frombytes("L", crop_size, base64.b64decode(entry["alpha"], validate=True))
+                visibility = {key: occlusion[key] for key in ("source", "psdSha256")}
+                visibility.update({"layers": entry["layers"], "targetPresent": entry["targetPresent"]})
+            details["seam"] = check_seam(reference, result, editable, pixel_scale, underlay, coverage)
+            details["seam"]["occlusion"].update(visibility or {"source": "unavailable; all pixels checked"})
             if not details["seam"]["pass"]:
                 raise ValueError(f"{name}: seam check failed: " + ", ".join(details["seam"]["failedChecks"]) + ".")
         else:
@@ -403,6 +416,7 @@ def main():
     parser.add_argument("--read-only", action="store_true")
     parser.add_argument("--protected-check", choices=("strict", "seam"))
     parser.add_argument("--preview-dir", type=Path)
+    parser.add_argument("--psd-occlusion-stdin", action="store_true")
     parser.add_argument("--artwork-threshold", type=float, default=8)
     parser.add_argument("--minimum-component-pixels", type=int, default=4)
     args = parser.parse_args()

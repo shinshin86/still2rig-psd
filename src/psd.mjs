@@ -14,6 +14,54 @@ initializeCanvas(
   imageData,
 );
 
+// PSD children use the builder's back-to-front order. Only permanent, fully
+// opaque normal layers can hide an expression throughout its animation.
+export function expressionOcclusion(psdFile, requests, map, definitions) {
+  const psd = readPsd(new Uint8Array(fs.readFileSync(psdFile)), {
+    useImageData: true, skipCompositeImageData: true, skipThumbnail: true,
+  });
+  const layers = psd.children || [];
+  if (requests.canvas && (psd.width !== requests.canvas[0] || psd.height !== requests.canvas[1])) {
+    throw new Error('PSD visibility canvas must match the expression request.');
+  }
+  if (layers.some(layer => layer.children)) throw new Error('Expression visibility requires a flat PSD.');
+  const order = [...new Set(map.layers.map(entry => entry.target))];
+  const dynamic = new Set(definitions.map(item => item.name));
+  const variants = {};
+  for (const [name, item] of Object.entries(requests.variants)) {
+    const targetIndex = layers.findIndex(layer => layer.name === name);
+    const targetOrder = order.indexOf(name);
+    if (targetOrder < 0) throw new Error('Unknown expression in PSD visibility request.');
+    const [left, top, right, bottom] = item.cropBox;
+    const width = right - left, height = bottom - top;
+    const mask = Buffer.alloc(width * height);
+    const contributors = [];
+    for (const [index, layer] of layers.entries()) {
+      const inFront = targetIndex >= 0 ? index > targetIndex : order.indexOf(layer.name) > targetOrder;
+      if (!inFront || dynamic.has(layer.name) || layer.hidden || (layer.opacity ?? 1) !== 1
+          || layer.blendMode !== 'normal' || layer.mask || layer.vectorMask || layer.clipping
+          || layer.effects || layer.adjustment || !layer.imageData) continue;
+      const image = layer.imageData;
+      let pixels = 0;
+      for (let y = 0; y < height; y += 1) {
+        const sy = top + y - (layer.top || 0);
+        if (sy < 0 || sy >= image.height) continue;
+        for (let x = 0; x < width; x += 1) {
+          const sx = left + x - (layer.left || 0);
+          if (sx >= 0 && sx < image.width && image.data[(sy * image.width + sx) * 4 + 3] === 255) {
+            mask[y * width + x] = 255;
+            pixels += 1;
+          }
+        }
+      }
+      if (pixels) contributors.push(layer.name);
+    }
+    variants[name] = { width, height, alpha: mask.toString('base64'), layers: contributors,
+      targetPresent: targetIndex >= 0 };
+  }
+  return { source: 'final PSD layer order and fully opaque alpha', psdSha256: sha256File(psdFile), variants };
+}
+
 function paeth(a, b, c) {
   const p = a + b - c;
   const pa = Math.abs(p - a);

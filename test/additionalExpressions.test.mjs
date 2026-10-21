@@ -26,6 +26,7 @@ function fixture() {
   const layers = path.join(root, 'layers');
   python('test/generate_fixture.py', '--output', layers, '--without-expressions');
   python('-c', 'from PIL import Image,ImageDraw; import sys; im=Image.new("RGBA",(96,96)); d=ImageDraw.Draw(im); d.rectangle((31,30,43,33),fill=(70,30,20,255)); d.rectangle((53,30,65,33),fill=(70,30,20,255)); im.save(sys.argv[1])', path.join(layers, 'eyelash.png'));
+  python('-c', 'from PIL import Image,ImageDraw; import sys; im=Image.new("RGBA",(96,96)); ImageDraw.Draw(im).rectangle((20,5,76,20),fill=(85,45,25,255)); im.save(sys.argv[1])', path.join(layers, 'front hair.png'));
   const id = `additional-${process.pid}-${Date.now()}`;
   const job = ok('prepare', path.join(layers, 'face.png'), '--name', id);
   const jobRoot = path.join(STATE_ROOT, 'jobs', id); roots.push(jobRoot);
@@ -46,6 +47,7 @@ test('requests preserve the default pair and select additional expressions with 
   ok('expression-requests', f.id, '--only', 'all');
   const variants = JSON.parse(fs.readFileSync(path.join(f.requests, 'requests.json'))).variants;
   assert.deepEqual(Object.keys(variants), ['eye_close', 'mouth_open', 'eye_smile', 'blush']);
+  assert.deepEqual(variants.eye_smile.protectedFeatures, { layers: ['eyebrow', 'front hair'], paddingPx: 4 });
   assert.ok(variants.eye_smile.editableBox[1] < variants.eye_close.editableBox[1]);
   const mask = readPngRgba(path.join(f.requests, 'blush/mask.png'));
   assert.ok(Array.from(mask.data).some((value, i) => i % 4 === 3 && value > 0 && value < 255));

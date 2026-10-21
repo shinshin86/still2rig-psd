@@ -11,7 +11,7 @@ from pathlib import Path
 from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
 from expression_definitions import load_expressions
-from expression_masks import alpha_union, cheek_mask, expand_up
+from expression_masks import alpha_union, cheek_mask, expand_up, exclude_eye_obstacles, expand_eye_sides
 from expression_requests_common import composite_layers, file_hash, layer_hash, mouth_limits, neutral_layers
 
 
@@ -67,6 +67,12 @@ def build_requests(job_id: str, layer_dir: Path, layer_map: Path, output_dir: Pa
             ), fill=255)
         upper = round((editable_box[2] - editable_box[0]) * mask_options.get("upperExpansionRatio", 0))
         editable = expand_up(editable, upper)
+        protect_eye_features = definition["registration"] == "eyes" and mask_options.get("upperExpansionRatio", 0) > 0
+        if protect_eye_features:
+            editable = expand_eye_sides(editable, layers, max(4, dilation))
+            editable = exclude_eye_obstacles(editable, layer_dir, mapping,
+                                             eye_support=alpha_union(layers, targets, composite.size, threshold=0),
+                                             eye_padding=max(4, dilation))
         editable_box = editable.getbbox()
         editable = editable.crop(crop_box).resize(request_size, Image.Resampling.NEAREST)
         variant_dir = output_dir / name
@@ -92,6 +98,9 @@ def build_requests(job_id: str, layer_dir: Path, layer_map: Path, output_dir: Pa
             "underlaySha256": file_hash(variant_dir / "underlay.png"),
             "result": f"results/{name}.png", "dilationPx": dilation,
             "editableBox": list(editable_box),
+            **({"protectedFeatures": {"layers": ["eyebrow", "front hair"], "paddingPx": 4}} if protect_eye_features else {}),
+            **({"eyeEnvelopeMarginPx": max(4, dilation)} if protect_eye_features else {}),
+            **({"faceContourInsetPx": 4} if mask_options.get("region") == "cheeks" else {}),
             **({"mouthLimits": limits} if mask_options["mouthLimits"] else {}),
         }
     report = {

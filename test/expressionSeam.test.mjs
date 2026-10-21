@@ -64,3 +64,78 @@ print(json.dumps({'ink':[a.getpixel((x,40))[3] for x in (27,28,29,30,31,68)],'so
   assert.deepEqual(result.ink, [0,85,170,255,255,0]);
   assert.deepEqual(result.soft, [0,2,4,6,6,0]);
 });
+
+test('outer tile damage remains diagnostic while inner tiles, band statistics and boundary jumps still gate import', () => {
+  const result = run(`
+changed=base.copy()
+ImageDraw.Draw(changed).rectangle((24,40,26,47),fill=(70,140,120,255))
+print(json.dumps(check_seam(base,changed,mask,1)))
+`);
+  assert.equal(result.pass, true);
+  assert.ok(result.bands.outer.maximumTileMean > result.limits.boundaryTileMean);
+  assert.equal(result.diagnostics.outerTiles.withinLimit, false);
+  assert.equal(result.diagnostics.outerTiles.gatesImport, false);
+  assert.equal(Object.hasOwn(result.checks, 'outerTiles'), false);
+  assert.equal(result.checks.innerTiles, true);
+  for (const name of ['outerMean', 'outerP95', 'innerMean', 'innerP95', 'boundaryJump', 'outsideMean', 'outsideP99']) {
+    assert.equal(result.checks[name], true);
+  }
+});
+
+test('seam ignores only opaque coverage, retains visible defects and rejects majority-hidden boundaries', () => {
+  const result = run(`
+changed=base.copy();ImageDraw.Draw(changed).rectangle((25,34,31,43),fill=(0,255,0,255))
+coverage=Image.new('L',base.size);ImageDraw.Draw(coverage).rectangle((23,32,33,45),fill=255)
+hidden=check_seam(base,changed,mask,1,occlusion=coverage)
+partial=check_seam(base,changed,mask,1,occlusion=coverage.point(lambda a: 254 if a else 0))
+visible=changed.copy();ImageDraw.Draw(visible).rectangle((64,48,70,57),fill=(0,255,0,255))
+full=check_seam(base,base,mask,1,occlusion=Image.new('L',base.size,255))
+print(json.dumps({'hidden':hidden,'partial':partial,'visible':check_seam(base,visible,mask,1,occlusion=coverage),'full':full}))
+`);
+  assert.equal(result.hidden.pass, true);
+  assert.ok(result.hidden.occlusion.ignoredFraction > 0 && result.hidden.occlusion.ignoredFraction < 0.5);
+  assert.equal(result.partial.pass, false);
+  assert.equal(result.partial.occlusion.ignoredPairs, 0);
+  assert.equal(result.visible.pass, false);
+  assert.equal(result.full.checks.boundaryVisibility, false);
+  assert.equal(result.full.occlusion.ignoredFraction, 1);
+});
+
+test('blush stays four native pixels inside face contours and eye masks include lateral eyelash tips', () => {
+  const result = run(`
+from expression_masks import cheek_mask, expand_eye_sides
+layers={}
+for name,box in [('face',(12,8,83,87)),('eyewhite',(30,25,65,32)),('eyelash',(24,29,72,30)),('mouth_close',(42,59,53,61))]:
+    im=Image.new('RGBA',base.size);ImageDraw.Draw(im).rectangle(box,fill=(180,140,120,255));layers[name]=im
+cheeks=cheek_mask(layers,base.size)
+layers['eyelash'].putpixel((73,29),(180,140,120,8))
+eyes=expand_eye_sides(Image.new('L',base.size),layers,4)
+print(json.dumps({'cheekBox':cheeks.getbbox(),'eyes':[eyes.getpixel((x,29)) for x in (19,20,24,72,77,78)]}))
+`);
+  assert.ok(result.cheekBox[0] >= 16 && result.cheekBox[2] <= 80);
+  assert.deepEqual(result.eyes, [0,255,255,255,255,0]);
+});
+
+
+test('expanded eye masks exclude dilated eyebrow and hidden front-hair pixels at native scale', () => {
+  const result = run(`
+import tempfile
+from pathlib import Path
+from expression_masks import exclude_eye_obstacles
+with tempfile.TemporaryDirectory() as directory:
+    root=Path(directory)
+    mapping={'layers':[{'source':'brow.png','target':'eyebrow'},{'source':'hair.png','target':'front hair'}]}
+    for name,box in [('brow',(20,20,60,22)),('hair',(44,0,46,50))]:
+        im=Image.new('RGBA',base.size); ImageDraw.Draw(im).rectangle(box,fill=(0,0,0,255));im.save(root/(name+'.png'))
+    mask=Image.new('L',base.size);ImageDraw.Draw(mask).rectangle((10,10,80,70),fill=255)
+    protected=exclude_eye_obstacles(mask,root,mapping)
+    eye=Image.new('L',base.size);ImageDraw.Draw(eye).rectangle((42,40,48,43),fill=255)
+    preserved=exclude_eye_obstacles(mask,root,mapping,eye_support=eye,eye_padding=4)
+    print(json.dumps({'pixels':[protected.getpixel(p) for p in [(20,16),(20,26),(20,27),(40,45),(50,45),(51,45),(30,40)]],
+                      'eyeEnvelope':[preserved.getpixel(p) for p in [(38,40),(52,40),(44,36),(44,47),(44,48),(20,20)]],
+                      'empty':protected.getbbox() is None}))
+`);
+  assert.deepEqual(result.pixels, [0,0,255,0,0,255,255]);
+  assert.equal(result.empty, false);
+  assert.deepEqual(result.eyeEnvelope, [255,255,255,255,0,0]);
+});

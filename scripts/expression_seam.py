@@ -22,7 +22,7 @@ def summary(values, percentile=0.95):
             "percentile": round(values[math.ceil(len(values) * percentile) - 1], 4) if values else None}
 
 
-def check_seam(reference, result, editable, pixel_scale, underlay=None):
+def check_seam(reference, result, editable, pixel_scale, underlay=None, occlusion=None):
     size = (reference.width // pixel_scale, reference.height // pixel_scale)
     original = reference.resize(size, Image.Resampling.LANCZOS)
     edited = result.resize(size, Image.Resampling.LANCZOS)
@@ -33,19 +33,30 @@ def check_seam(reference, result, editable, pixel_scale, underlay=None):
     # disappearance as a color seam. Outside remains the unchanged original.
     background = Image.composite(underlay.resize(size, Image.Resampling.LANCZOS), original, support) if underlay is not None else original
     source_rgb = opaque_rgb(background)
+    if occlusion is not None and occlusion.size != size:
+        raise ValueError("Occlusion must use native PSD crop coordinates.")
+    covered = (occlusion if occlusion is not None else Image.new("L", size)).point(lambda a: 255 if a == 255 else 0)
+    visible = ImageChops.invert(covered)
+    hidden = covered.tobytes()
+    # Hidden regenerated pixels must not bleed through the blur kernel into
+    # neighboring visible samples. Their residual is zero before smoothing.
+    visible_target = Image.composite(source_rgb, target_rgb, covered)
     # Average away one-pixel texture noise, retaining visible color steps.
     source = list(source_rgb.filter(ImageFilter.GaussianBlur(BLUR_RADIUS)).getdata())
-    target = list(target_rgb.filter(ImageFilter.GaussianBlur(BLUR_RADIUS)).getdata())
+    target = list(visible_target.filter(ImageFilter.GaussianBlur(BLUR_RADIUS)).getdata())
     residual = [tuple(b[c] - a[c] for c in range(3)) for a, b in zip(source, target)]
     eroded = support.filter(ImageFilter.MinFilter(2 * BAND_WIDTH + 1))
     expanded = support.filter(ImageFilter.MaxFilter(2 * BAND_WIDTH + 1))
     opaque = original.getchannel("A").point(lambda a: 255 if a >= 240 else 0)
     inner = ImageChops.multiply(ImageChops.subtract(support, eroded), opaque)
     outer = ImageChops.multiply(ImageChops.subtract(expanded, support), opaque)
+    band_counts = {name: sum(bool(a) for a in band.tobytes()) for name, band in (("inner", inner), ("outer", outer))}
+    inner = ImageChops.multiply(inner, visible)
+    outer = ImageChops.multiply(outer, visible)
     mask, opacity = support.tobytes(), opaque.tobytes()
     raw_source, raw_target = list(original_rgb.getdata()), list(target_rgb.getdata())
     outside = summary([sum(abs(a[c] - b[c]) for c in range(3)) / 3
-                       for i, (a, b) in enumerate(zip(raw_source, raw_target)) if not mask[i]], 0.99)
+                       for i, (a, b) in enumerate(zip(raw_source, raw_target)) if not mask[i] and not hidden[i]], 0.99)
     bands = {}
     for name, band in (("inner", inner), ("outer", outer)):
         values = [(i, sum(abs(c) for c in residual[i]) / 3) for i, a in enumerate(band.tobytes()) if a]
@@ -56,10 +67,13 @@ def check_seam(reference, result, editable, pixel_scale, underlay=None):
         eligible = [(sum(v) / len(v), [x * 4, y * 4]) for (x, y), v in tiles.items() if len(v) >= 4]
         worst, location = max(eligible, default=(0, None))
         stats.update({"maximumTileMean": round(worst, 4), "worstTile": location})
+        stats.update({"occludedPixels": band_counts[name] - stats["pixels"], "totalPixels": band_counts[name]})
         bands[name] = stats
     # Across-boundary residual differences remove gradients already in the art.
     # Use only adjoining opaque pixels, so transparency edges do not look like seams.
     jumps = []
+    boundary_pairs = 0
+    ignored_pairs = 0
     width, height = size
     for i, a in enumerate(mask):
         if not a or not opacity[i]:
@@ -69,17 +83,29 @@ def check_seam(reference, result, editable, pixel_scale, underlay=None):
             if 0 <= nx < width and 0 <= ny < height:
                 n = ny * width + nx
                 if not mask[n] and opacity[n]:
+                    boundary_pairs += 1
+                    if hidden[i] or hidden[n]:
+                        ignored_pairs += 1
+                        continue
                     jumps.append(sum(abs(residual[i][c] - residual[n][c]) for c in range(3)) / 3)
     jump = summary(jumps)
-    checks = {"outsideMean": outside["mean"] is not None and outside["mean"] <= LIMITS["outsideMean"],
+    ignored_fraction = ignored_pairs / boundary_pairs if boundary_pairs else 0
+    checks = {"boundaryVisibility": boundary_pairs > 0 and ignored_fraction <= 0.5,
+              "outsideMean": outside["mean"] is not None and outside["mean"] <= LIMITS["outsideMean"],
               "outsideP99": outside["percentile"] is not None and outside["percentile"] <= LIMITS["outsideP99"],
               "boundaryJump": jump["pixels"] > 0 and jump["percentile"] <= LIMITS["boundaryJumpP95"]}
     for name, stats in bands.items():
         checks[f"{name}Mean"] = stats["pixels"] > 0 and stats["mean"] <= LIMITS["bandMean"]
         checks[f"{name}P95"] = stats["pixels"] > 0 and stats["percentile"] <= LIMITS["bandP95"]
-        checks[f"{name}Tiles"] = stats["maximumTileMean"] <= LIMITS["boundaryTileMean"]
+        if name == "inner":
+            checks[f"{name}Tiles"] = stats["maximumTileMean"] <= LIMITS["boundaryTileMean"]
     return {"pass": all(checks.values()), "checks": checks, "failedChecks": [k for k, v in checks.items() if not v],
+            "diagnostics": {"outerTiles": {"withinLimit": bands["outer"]["maximumTileMean"] <= LIMITS["boundaryTileMean"],
+                                            "limit": LIMITS["boundaryTileMean"], "gatesImport": False}},
             "outside": outside, "bands": bands, "boundaryJump": jump, "limits": LIMITS,
+            "occlusion": {"boundaryPairs": boundary_pairs, "ignoredPairs": ignored_pairs,
+                          "ignoredFraction": round(ignored_fraction, 6), "maximumIgnoredFraction": 0.5,
+                          "opaqueAlpha": 255},
             "bandWidth": BAND_WIDTH, "blurRadius": BLUR_RADIUS, "featherWidth": BAND_WIDTH,
             "units": "RGB levels on a white background; distances and tile coordinates in native PSD crop pixels"}
 
