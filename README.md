@@ -143,6 +143,8 @@ sorting on phones is not supported.
 
 ### 5. Prepare closed-eye and open-mouth artwork
 
+In the preview, number keys 1–9 (including the numeric keypad) switch expressions in button order; each button shows its number.
+
 For a generated PSD, **表情の絵を作ってもらう** in the preview groups requests by
 expression button and shows which drawings are already present. Both the panel
 and its expression list start collapsed, with a count of expressions missing art.

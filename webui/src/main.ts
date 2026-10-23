@@ -1,6 +1,7 @@
 import { expressionPresets, expressionParameterNames, expressionPresetValues, expressionPresetAvailability } from '../../src/expressionPresets.mjs';
 import { expressionRequestGroups, expressionGroupState, selectedExpressionArtwork, expressionFlowRequest, expressionArtworkLabel } from '../../src/expressionFlow.mjs';
 import { requestedExpressions } from '../../src/expressions.mjs';
+import { expressionShortcut } from './expressionShortcuts.mjs';
 import { installVoiceControls } from './voice/controls';
 import { createLivePublisher } from './live/publisher';
 import { installStreamControls } from './live/controls';
@@ -1999,9 +2000,12 @@ function setCameraConflicts(active: boolean): void {
 function installEventListeners(): void {
   createAdvancedParameterControls();
   const expressionButtons = requireElement<HTMLElement>('#expression-buttons');
-  for (const preset of expressionPresets) {
+  for (const [index, preset] of expressionPresets.entries()) {
     const button = document.createElement('button'); button.type = 'button';
     button.dataset.expressionPreset = preset.id; button.textContent = preset.label;
+    const shortcut = document.createElement('kbd'); shortcut.className = 'expression-shortcut';
+    shortcut.textContent = String(index + 1); shortcut.setAttribute('aria-hidden', 'true');
+    button.append(shortcut); button.setAttribute('aria-keyshortcuts', String(index + 1));
     button.setAttribute('aria-pressed', String(preset.id === 'neutral'));
     button.addEventListener('click', () => selectExpression(preset.id));
     const option = document.createElement('span'); option.className = 'expression-option';
@@ -2098,6 +2102,10 @@ function installEventListeners(): void {
   });
   window.addEventListener('keydown', (event) => {
     if (event.key === 'Escape' && !canvasPickMenu.hidden) hideCanvasPickMenu();
+    const choices = [...document.querySelectorAll<HTMLButtonElement>('[data-expression-preset]')]
+      .map(button => ({id:button.dataset.expressionPreset!,disabled:button.disabled}));
+    const expression = expressionShortcut(event, choices);
+    if (expression) { event.preventDefault(); selectExpression(expression); }
   });
   window.addEventListener('resize', () => {
     if (layerProcessingActive) syncLayerProcessingBounds();

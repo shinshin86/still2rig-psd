@@ -264,7 +264,8 @@
       .expression-buttons { display: flex; flex-wrap: wrap; gap: 7px; }
       .expression-option { display: flex; flex: 1 0 28%; flex-direction: column; gap: 4px; }
       .expression-unavailable { color: #bbc5d8; font-size: 11px; line-height: 1.4; }
-      .expression-buttons button { flex: 1 0 28%; min-height: 36px; }
+      .expression-buttons button { position:relative; flex:1 0 28%; min-height:36px; padding-right:21px; }
+      .expression-shortcut { position:absolute; top:3px; right:4px; padding:1px 3px; border:1px solid currentColor; border-radius:3px; font:10px/1.1 ui-monospace, monospace; opacity:.7; }
       .expression-buttons button[aria-pressed="true"] { border-color: #7de1ff; background: #284858; color: #e9fbff; }
     </style>
   </head>
@@ -490,7 +491,7 @@
             <div id="expression-buttons" class="expression-buttons" role="group" aria-label="表情を選ぶ"></div>
             <p id="expression-status" class="tuning-note" role="status">いつもの顔</p>
             <p id="expression-add-hint" class="tuning-note" hidden>足りない絵は、上の<a href="#expression-request-control">「表情の絵を作ってもらう」</a>から依頼できます。</p>
-            <p class="tuning-note">この絵でできる動きに合わせて表情を変えます。選んだあと「細かい設定」で調整できます。</p>
+            <p class="tuning-note">数字キー1〜9でも切り替えられます。選んだあと「細かい設定」で調整できます。</p>
           </section>
           <details id="advanced-parameters" class="advanced-panel">
             <summary><span>細かい設定</span><span class="parameter-count">50項目</span></summary>
