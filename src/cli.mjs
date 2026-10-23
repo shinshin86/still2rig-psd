@@ -36,7 +36,7 @@ Usage:
   still2rig-psd expression-requests JOB [--only eye_smile,blush | all]
   still2rig-psd expression-candidates JOB [--only eyes_sad] [--request-dir DIR] [--preview-dir DIR]
   still2rig-psd import-expressions JOB [DIR] [--max-outside-mean 6] [--max-outside-p99 20]
-    [--pick eyes_sad=3,mouth_frown=1]
+    [--only eyes_sad,mouth_frown | --pick eyes_sad=3,mouth_frown=1]
     [--max-band-local-mean 24] [--max-band-flat-mean 12]
     [--protected-band 8] [--alignment-radius 24] [--max-alignment-shift 12] [--max-alignment-scale 0.03]
     [--artwork-threshold 8] [--minimum-component-pixels 4]
@@ -506,6 +506,7 @@ function importExpressions(jobId, directory, options) {
   ];
   if (options['read-only']) args.push('--read-only');
   if (options.pick !== undefined) args.push('--pick', options.pick);
+  if (options.only !== undefined && !options.candidateReview) args.push('--only', options.only);
   if (options['protected-check'] !== undefined) {
     if (!['strict', 'seam'].includes(options['protected-check'])) throw new Error('--protected-check must be strict or seam.');
     args.push('--protected-check', options['protected-check']);

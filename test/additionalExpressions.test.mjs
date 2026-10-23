@@ -216,3 +216,27 @@ for cx in (37,59):
   assert.equal(report.variants.eye_smile.seam.pass, true);
   assert.ok(report.variants.eye_smile.artworkPixels > 0);
 });
+
+test('named imports isolate failed drawings and preserve other art and selection history',()=>{
+  const f=fixture();ok('expression-requests',f.id,'--only','eye_smile,blush');edit(f,'additional');
+  const candidates=path.join(f.results,'candidates');fs.mkdirSync(candidates,{recursive:true});
+  fs.copyFileSync(path.join(f.results,'eye_smile.png'),path.join(candidates,'eye_smile-1.png'));
+  const first=ok('import-expressions',f.id,'--pick','eye_smile=1');
+  const output=path.join(PROJECT_ROOT,first.outputDir),selections=path.join(output,'selections.json');
+  ok('import-expressions',f.id,'--only','blush');
+  assert.equal(JSON.parse(fs.readFileSync(selections)).eye_smile.number,1);
+  const blushHash=sha256File(path.join(output,'blush.png')),smileHash=sha256File(path.join(output,'eye_smile.png'));
+  python('-c','from PIL import Image; import sys; p=sys.argv[1]; Image.open(p).resize((10,100)).save(p)',path.join(f.results,'blush.png'));
+  const before=sha256File(selections),review=ok('import-expressions',f.id,'--only','eye_smile','--read-only');
+  assert.deepEqual(review.accepted,['eye_smile']);assert.ok(!review.variants.blush);
+  assert.equal(sha256File(selections),before);assert.equal(sha256File(path.join(output,'eye_smile.png')),smileHash);
+  ok('import-expressions',f.id,'--only','eye_smile');
+  assert.equal(sha256File(path.join(output,'blush.png')),blushHash);
+  assert.ok(!JSON.parse(fs.readFileSync(selections)).eye_smile);
+  assert.notEqual(run('import-expressions',f.id,'--only','blush').status,0);
+  assert.equal(sha256File(path.join(output,'blush.png')),blushHash);
+  for(const args of [['--only','unknown'],['--only','eye_smile,eye_smile'],['--only','eye_smile','--pick','eye_smile=1']])assert.notEqual(run('import-expressions',f.id,...args).status,0);
+  fs.unlinkSync(path.join(f.results,'eye_smile.png'));
+  assert.notEqual(run('import-expressions',f.id,'--only','eye_smile').status,0);
+  assert.equal(sha256File(path.join(output,'eye_smile.png')),smileHash);
+});

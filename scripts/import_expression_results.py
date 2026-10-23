@@ -276,6 +276,11 @@ def import_results(args, report):
     if not isinstance(requests.get("variants"), dict) or not requests["variants"] or any(name not in available for name in requests["variants"]):
         raise ValueError("Unknown expression requests. Rerun expression-requests.")
     definitions = [item for name, item in available.items() if name in requests["variants"]]
+    if args.only is not None:
+        names = args.only.split(",")
+        if args.pick is not None or not names or len(names) != len(set(names)) or any(name not in requests["variants"] for name in names):
+            raise ValueError("Choose requested expressions with --only NAME[,NAME], without --pick.")
+        definitions = [item for item in definitions if item["name"] in names]
     picks = {}
     if args.pick:
         for value in args.pick.split(","):
@@ -294,6 +299,8 @@ def import_results(args, report):
         if name in picks and (result_file.is_symlink() or not result_file.is_file()):
             raise ValueError(f"{name}: selected candidate does not exist or is a symlink.")
         if not result_file.is_file():
+            if args.only is not None:
+                raise ValueError(f"{name}: selected result does not exist.")
             report["variants"][name] = {"status": "missing"}
             continue
         item = requests["variants"][name]
@@ -404,9 +411,9 @@ def import_results(args, report):
     # Validate every supplied variant before replacing any previously imported art.
     if not args.read_only:
         selection_file = args.output_dir / 'selections.json'
-        if picks and selection_file.is_symlink():
+        if selection_file.is_symlink():
             raise ValueError('Candidate selection history must not be a symlink.')
-        selections = json.loads(selection_file.read_text()) if picks and selection_file.is_file() else {}
+        selections = json.loads(selection_file.read_text()) if selection_file.is_file() else {}
         if not isinstance(selections, dict):
             raise ValueError('Candidate selection history must be an object.')
         for name in picks:
@@ -427,6 +434,10 @@ def import_results(args, report):
                 selection = report['variants'][name]['candidate']
                 selection['artworkSha256'] = file_hash(args.output_dir / f'{name}.png')
                 selections[name] = selection
+        else:
+            for name in outputs:
+                selections.pop(name, None)
+        if picks or selection_file.is_file():
             selection_file.write_text(json.dumps(selections, indent=2) + '\n')
     if args.preview_dir is not None:
         # Refuse output aliases before any diagnostic image is written.
@@ -466,6 +477,7 @@ def main():
     parser.add_argument("--max-alignment-scale", type=float, default=0.03)
     parser.add_argument("--read-only", action="store_true")
     parser.add_argument("--pick")
+    parser.add_argument("--only")
     parser.add_argument("--protected-check", choices=("strict", "seam"))
     parser.add_argument("--preview-dir", type=Path)
     parser.add_argument("--psd-occlusion-stdin", action="store_true")
