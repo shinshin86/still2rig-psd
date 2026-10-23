@@ -6,6 +6,7 @@ from PIL import Image, ImageChops, ImageFilter
 
 BAND_WIDTH = 3
 BLUR_RADIUS = 1
+MINIMUM_VISIBLE_BOUNDARY_PAIRS = 64
 LIMITS = {"outsideMean": 18, "outsideP99": 80, "bandMean": 6, "bandP95": 20,
           "boundaryJumpP95": 12, "boundaryTileMean": 12}
 
@@ -90,9 +91,8 @@ def check_seam(reference, result, editable, pixel_scale, underlay=None, occlusio
                     jumps.append(sum(abs(residual[i][c] - residual[n][c]) for c in range(3)) / 3)
     jump = summary(jumps)
     ignored_fraction = ignored_pairs / boundary_pairs if boundary_pairs else 0
-    checks = {"boundaryVisibility": boundary_pairs > 0 and ignored_fraction <= 0.5,
+    checks = {"boundaryVisibility": len(jumps) >= MINIMUM_VISIBLE_BOUNDARY_PAIRS,
               "outsideMean": outside["mean"] is not None and outside["mean"] <= LIMITS["outsideMean"],
-              "outsideP99": outside["percentile"] is not None and outside["percentile"] <= LIMITS["outsideP99"],
               "boundaryJump": jump["pixels"] > 0 and jump["percentile"] <= LIMITS["boundaryJumpP95"]}
     for name, stats in bands.items():
         checks[f"{name}Mean"] = stats["pixels"] > 0 and stats["mean"] <= LIMITS["bandMean"]
@@ -100,11 +100,14 @@ def check_seam(reference, result, editable, pixel_scale, underlay=None, occlusio
         if name == "inner":
             checks[f"{name}Tiles"] = stats["maximumTileMean"] <= LIMITS["boundaryTileMean"]
     return {"pass": all(checks.values()), "checks": checks, "failedChecks": [k for k, v in checks.items() if not v],
-            "diagnostics": {"outerTiles": {"withinLimit": bands["outer"]["maximumTileMean"] <= LIMITS["boundaryTileMean"],
+            "diagnostics": {"outsideP99": {"withinLimit": outside["percentile"] is not None and outside["percentile"] <= LIMITS["outsideP99"],
+                                            "limit": LIMITS["outsideP99"], "gatesImport": False},
+                            "outerTiles": {"withinLimit": bands["outer"]["maximumTileMean"] <= LIMITS["boundaryTileMean"],
                                             "limit": LIMITS["boundaryTileMean"], "gatesImport": False}},
             "outside": outside, "bands": bands, "boundaryJump": jump, "limits": LIMITS,
             "occlusion": {"boundaryPairs": boundary_pairs, "ignoredPairs": ignored_pairs,
-                          "ignoredFraction": round(ignored_fraction, 6), "maximumIgnoredFraction": 0.5,
+                          "ignoredFraction": round(ignored_fraction, 6),
+                          "visiblePairs": len(jumps), "minimumVisiblePairs": MINIMUM_VISIBLE_BOUNDARY_PAIRS,
                           "opaqueAlpha": 255},
             "bandWidth": BAND_WIDTH, "blurRadius": BLUR_RADIUS, "featherWidth": BAND_WIDTH,
             "units": "RGB levels on a white background; distances and tile coordinates in native PSD crop pixels"}

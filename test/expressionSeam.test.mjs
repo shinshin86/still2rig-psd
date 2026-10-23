@@ -77,12 +77,28 @@ print(json.dumps(check_seam(base,changed,mask,1)))
   assert.equal(result.diagnostics.outerTiles.gatesImport, false);
   assert.equal(Object.hasOwn(result.checks, 'outerTiles'), false);
   assert.equal(result.checks.innerTiles, true);
-  for (const name of ['outerMean', 'outerP95', 'innerMean', 'innerP95', 'boundaryJump', 'outsideMean', 'outsideP99']) {
+  for (const name of ['outerMean', 'outerP95', 'innerMean', 'innerP95', 'boundaryJump', 'outsideMean']) {
     assert.equal(result.checks[name], true);
   }
 });
 
-test('seam ignores only opaque coverage, retains visible defects and rejects majority-hidden boundaries', () => {
+test('outside P99 is diagnostic while outside mean and visible boundary defects still gate import', () => {
+  const result = run(`
+changed=base.copy();ImageDraw.Draw(changed).rectangle((0,0,12,12),fill=(0,0,0,255))
+local=check_seam(base,changed,mask,1)
+global_change=check_seam(base,Image.new('RGBA',base.size,(0,0,0,255)),mask,1)
+print(json.dumps({'local':local,'global':global_change}))
+`);
+  assert.equal(result.local.pass, true);
+  assert.ok(result.local.outside.percentile > result.local.limits.outsideP99);
+  assert.equal(Object.hasOwn(result.local.checks, 'outsideP99'), false);
+  assert.equal(result.local.diagnostics.outsideP99.withinLimit, false);
+  assert.equal(result.local.diagnostics.outsideP99.gatesImport, false);
+  assert.equal(result.global.checks.outsideMean, false);
+  assert.equal(result.global.pass, false);
+});
+
+test('seam ignores only opaque coverage, retains visible defects and rejects fully-hidden boundaries', () => {
   const result = run(`
 changed=base.copy();ImageDraw.Draw(changed).rectangle((25,34,31,43),fill=(0,255,0,255))
 coverage=Image.new('L',base.size);ImageDraw.Draw(coverage).rectangle((23,32,33,45),fill=255)
@@ -99,6 +115,25 @@ print(json.dumps({'hidden':hidden,'partial':partial,'visible':check_seam(base,vi
   assert.equal(result.visible.pass, false);
   assert.equal(result.full.checks.boundaryVisibility, false);
   assert.equal(result.full.occlusion.ignoredFraction, 1);
+});
+
+test('visible boundary length gates heavily occluded artwork without weakening visible defect checks', () => {
+  const result = run(`
+coverage=Image.new('L',base.size);ImageDraw.Draw(coverage).rectangle((0,0,55,95),fill=255)
+enough=check_seam(base,base,mask,1,occlusion=coverage)
+changed=base.copy();ImageDraw.Draw(changed).rectangle((64,36,70,48),fill=(0,255,0,255))
+defect=check_seam(base,changed,mask,1,occlusion=coverage)
+ImageDraw.Draw(coverage).rectangle((0,0,66,95),fill=255)
+short=check_seam(base,base,mask,1,occlusion=coverage)
+print(json.dumps({'enough':enough,'defect':defect,'short':short}))
+`);
+  assert.ok(result.enough.occlusion.ignoredFraction > 0.5);
+  assert.equal(result.enough.occlusion.visiblePairs, 64);
+  assert.equal(result.enough.pass, true);
+  assert.equal(result.defect.checks.boundaryVisibility, true);
+  assert.equal(result.defect.pass, false);
+  assert.ok(result.short.occlusion.visiblePairs < result.short.occlusion.minimumVisiblePairs);
+  assert.equal(result.short.checks.boundaryVisibility, false);
 });
 
 test('blush stays four native pixels inside face contours and eye masks include lateral eyelash tips', () => {

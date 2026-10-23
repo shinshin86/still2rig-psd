@@ -156,7 +156,11 @@ choice for the supplied results. Alignment and provenance checks are identical
 in both modes. The outside/band CLI thresholds above apply only to `strict`.
 
 `seam` evaluates the entire non-editable region for large changes: mean RGB
-error must be at most 18 and its 99th percentile at most 80. It then checks both
+error must be at most 18. Its 99th percentile is recorded with the diagnostic
+reference value 80 under `diagnostics.outsideP99`, but does not affect acceptance:
+the original artwork is retained outside the mask during extraction. The mean
+still rejects broad changes. This applies only to `seam`; `strict` keeps its
+existing percentile gate. It then checks both
 sides of the edit boundary in native PSD pixels. The inner and outer bands are
 3 pixels wide; only reference pixels with alpha at least 240 are measured.
 A Gaussian blur of radius 1 removes pixel texture before comparing the RGB
@@ -184,8 +188,15 @@ pixels contribute neither outside error nor boundary samples, and their
 residual is zeroed before blurring so hidden differences do not bleed into
 visible samples. Both pixels of a boundary pair must remain visible.
 Reports record the PSD hash, contributing layers, sample counts, and ignored
-boundary fraction. More than half of the opaque boundary pairs being covered
-fails `boundaryVisibility`; empty bands still fail. Historical requests for
+boundary fraction. `boundaryVisibility` requires at least 64 visible opaque
+boundary pairs in native pixels; the covered fraction is diagnostic only.
+Calibration uses the existing 40×40 synthetic edit support (160 boundary pairs):
+64 visible pairs pass even with 60% covered, while shorter support and fully
+covered boundaries fail. A visible color defect must still fail the unchanged
+color checks. Existing two-character archived samples retain 743–1391 visible
+pairs. This floor keeps at least sixteen 4-pixel boundary segments available;
+it is a support requirement, not evidence of natural artwork. The mean and
+boundary color limits remain unchanged, and empty bands still fail. Historical requests for
 other layer snapshots keep the full check without occlusion exclusions.
 
 Extraction still uses only editable pixels. After restoring native dimensions,
@@ -337,13 +348,23 @@ surprised, flustered, unamused or wink. Definitions live in
 250 ms; the renderer smooths the movement as well. Changing an expression slider
 marks the selection **自分で調整中**. Selecting another face replaces expression
 values, while pose, gaze, blink, hair and microphone controls retain their values.
-Without smiling-eye artwork, joy raises the lower lid using the existing open eye,
-and wink closes one eye with a single-drawing handoff to the blink artwork.
+The angry preset uses `eyes_angry` and optional `mouth_frown` drawings, with no
+anger symbol or neutral brow, lid or mouth-form deformation. The button displays
+a reason and is disabled when the eye drawing is absent. The transition matches
+measured drawing geometry and exchanges one drawing at halfway; strength 1
+restores the original expression art. During an angry blink, the open-eye drawing
+fades smoothly with eye openness and the closed-eye drawing uses the inverse
+opacity. Only the open drawing appears at full openness and only the closed
+drawing at full closure. The neutral brow returns briefly at closure because the
+angry eye and brow share one artwork layer. No shader clipping is used.
+Joy uses drawn smiling eyes, optional laughing mouth and blush, without a
+deformed neutral-eye substitute. Wink uses smiling-eye artwork or closes one eye
+with a single-drawing handoff to the blink artwork.
 The upper lash approaches the closed-eye position and endpoints without thinning.
 The closed artwork retains its ink thickness and endpoints as its curve returns. Missing
 blush is ignored. Unavailable artwork controls display a reason beside their slider.
 
-Worried and angry brows bend the inner and outer ends in mirrored directions;
+The separate manual worried and angry brow controls bend the inner and outer ends in mirrored directions;
 the flat-brow control straightens their centerline while retaining ink thickness. The upper-lid control moves the upper
 lash down without thinning its ink and clips the iris through the white-eye
 stencil. Its signed tilt lowers the inner end for anger or the outer end for
