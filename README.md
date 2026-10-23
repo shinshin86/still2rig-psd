@@ -143,11 +143,16 @@ sorting on phones is not supported.
 
 ### 5. Prepare closed-eye and open-mouth artwork
 
-For a generated PSD, **閉じた目と開いた口の絵を作ってもらう** in the preview copies
-a request for the agent you choose. The panel opens automatically when the PSD
-still lacks checked expression art. With **Codex**, the panel shows that face
+For a generated PSD, **表情の絵を作ってもらう** in the preview groups requests by
+expression button and shows which drawings are already present. Both the panel
+and its expression list start collapsed, with a count of expressions missing art.
+Complete expressions are checked and disabled, and excluded from requests. Partial
+expressions remain selectable, with an option to redraw their existing parts too.
+With **Codex**, the panel shows that face
 crops will be sent to Codex image generation, and copying the request records
-that agreement; Codex then generates, imports, and checks the art. With
+that agreement. Generate three candidates per drawing, compare them with the original,
+and stop for the user's selection before importing. Complete and approve one expression
+before moving to the next. With
 **Claude Code**, which cannot generate images, the request prepares the files,
 tells you what to hand to an image generator and where to save the results,
 and resumes after you report they are saved. PSDs opened from your computer do
@@ -156,12 +161,21 @@ not have the conversion data this needs, so the panel only explains that.
 You can also run the commands directly:
 
 ```bash
-npm run still2rig-psd -- expression-requests demo
-# After approval, generate each variant using its input.png, mask.png and prompt.txt.
-# Save results in .still2rig-psd/jobs/demo/expression-requests/results/.
-npm run still2rig-psd -- import-expressions demo
+npm run still2rig-psd -- expression-requests demo --only eyes_sad
+# After consent, use input.png, mask.png and prompt.txt to generate three candidates.
+# Save results/candidates/eyes_sad-1.png, eyes_sad-2.png and eyes_sad-3.png.
+npm run still2rig-psd -- expression-candidates demo --only eyes_sad
+# Show the comparison and stop. If the user chooses candidate 3:
+npm run still2rig-psd -- import-expressions demo --pick eyes_sad=3
 npm run still2rig-psd -- repair demo --expressions .still2rig-psd/jobs/demo/generated-expressions
 ```
+
+Candidate review does not change the source PSD, manifest, or imported artwork.
+Its sheets show masked face replacements, eye/mouth close-ups, original front hair
+and accessories, and each candidate's import checks. Passing checks is not visual
+approval. `--preview-dir` selects a review directory under `.still2rig-psd/` outside
+the source data; `--request-dir` selects archived requests. The original single-image
+flow still works: save `results/eyes_sad.png` and import without `--pick`.
 
 Requests use a face crop of the current PSD layers, including the latest repair,
 with front hair and head accessories hidden. Import removes pixels matching the

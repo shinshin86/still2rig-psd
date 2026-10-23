@@ -114,20 +114,54 @@ as approval for Codex imagegen only, not for other services. Otherwise, explain
 which face crops and service will be used, then ask and wait. Preparing local
 request files alone does not require this consent.
 
-If image generation is available (for example, Codex imagegen), inspect each
-input and mask, then generate each variant using its `input.png`, `mask.png` and
-the exact instructions in `prompt.txt`. Save the returned PNGs as
-`expression-requests/results/eye_close.png` and `mouth_open.png`. If the agent
-cannot generate images (for example, Claude Code), stop at this stage and tell
-the user which three files for each variant to hand to a generator, where to
-save the results, and how to resume. Do not substitute derived preview art.
+Work on one expression end to end before starting another. Inspect the input,
+mask and prompt, including the editable area beneath the original front hair.
+Generate **three candidates per drawing** using those exact files and save them
+under `expression-requests/results/candidates/NAME-1.png`, `NAME-2.png` and
+`NAME-3.png`. Keep the requested dimensions and transparency. Do not change the
+input, mask or underlay. No generation is authorized merely by preparing files.
 
-After results are available:
+If the agent cannot generate images (for example, Claude Code), stop and give
+the user the exact input/mask paths, prompt contents and three output filenames.
+Wait for the user to save the generated candidates. Do not substitute derived art.
+
+Review candidates without importing:
 
 ```bash
-npm run still2rig-psd -- import-expressions <job>
+npm run still2rig-psd -- expression-candidates <job> --only eyes_sad
+```
+
+The command uses the same import checks in read-only mode and produces a comparison
+of the original and masked candidates, eye/mouth close-ups, and pass/fail results.
+Original front hair and accessories are overlaid. It does not modify the source
+PSD, job.json, requests or imported art. Review images stay outside the source job
+under `.still2rig-psd/`; `--preview-dir DIR` chooses that destination and
+`--request-dir DIR` selects archived requests. Stale provenance remains a failed
+check; never rewrite hashes or relax gates to approve an archived candidate.
+
+**Show the comparison images and stop for the user's choice.** Passing import
+checks does not select a candidate or establish visual quality. Accept direction
+changes here. Never import, repair, or generate the next expression before this
+selection. Aim for 20 minutes per expression; report and stop if this is exceeded,
+or if the same problem fails twice.
+
+Only after the user chooses the numbers, import the chosen candidates and repair:
+
+```bash
+# Example only: use the numbers actually selected by the user.
+npm run still2rig-psd -- import-expressions <job> --pick eyes_sad=3,mouth_frown=1
 npm run still2rig-psd -- repair <job> --expressions .still2rig-psd/jobs/<job>/generated-expressions
 ```
+
+All selected candidates must pass before artwork is replaced. The chosen raw
+candidate becomes `results/NAME.png`; its number and hashes are recorded in the
+import report, `generated-expressions/selections.json`, and repair provenance.
+The older single-image flow still works: save `results/NAME.png` and run
+`import-expressions <job>` without `--pick`.
+
+Open the repaired PSD in the preview and check the expression button, a final
+close-up, both transition directions, and blinking. Show that evidence and stop
+for approval before continuing to the next expression.
 
 Repair automatically inherits the preceding layer overrides and expression
 source, including preview status, and reports them in `inheritedOptions`. Verify
@@ -160,7 +194,7 @@ Expression definitions select `protectedCheck`: `eye_close` and `mouth_open`
 use `strict`, while `eye_smile` and `blush` use `seam`. Use
 `import-expressions JOB [DIR] --protected-check strict|seam` for a temporary
 override. Alignment and provenance remain mandatory. In `seam`, whole-outside
-mean/p99 limits are 18/80. Both 3-native-pixel boundary bands use radius-1 blurred
+mean has limit 18; p99 with reference limit 80 is diagnostic only. Both 3-native-pixel boundary bands use radius-1 blurred
 RGB residuals against the original outside and the PSD underlay inside (source
 eye/mouth removal is intentional), with mean/p95 limits 6/20. Inner 4x4 tile means have limit 12; outer tile
 means and worst locations are diagnostic only because extraction keeps original
@@ -173,8 +207,8 @@ from seam metrics. Coverage uses finalized PSD order, offsets, layer opacity 1,
 and alpha exactly 255; absent expressions use layer-map insertion order. Hidden,
 translucent, masked, clipped, non-normal and animated expression layers do not
 establish coverage. Covered residuals are zeroed before blurring. Reports include
-the PSD hash, contributors and ignored boundary-pair fraction; more than half
-covered or empty sample support fails. Historical layer snapshots retain the
+the PSD hash, contributors and ignored boundary-pair fraction; fewer than 64
+visible boundary pairs fails (coverage fraction is diagnostic). Historical layer snapshots retain the
 full check without borrowing the current PSD coverage.
 
 Smiling-eye requests preserve the source white/lash alpha union, including faint

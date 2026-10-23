@@ -129,13 +129,17 @@ PSDを開く前の画面では、「画像から新しくPSDを作る」からCo
 かかる場合は、プレビュー上に処理中の内容を表示します。細かい並べ替えはPCのマウスで
 右端の点々をドラッグして行えます。スマートフォンのタッチ操作には対応していません。
 
-### 5. 閉じた目と開いた口の絵を用意する
+### 5. 表情の絵を用意する
 
-生成済みPSDを選ぶと、「閉じた目と開いた口の絵を作ってもらう」から、選んだ
-エージェント向けの依頼文をコピーできます。表情の絵がまだないPSDでは、この
-パネルが最初から開きます。**Codex**を選ぶと、顔の画像がCodexの画像生成に
+生成済みPSDを選ぶと、「表情の絵を作ってもらう」から、まばたきと口パク、笑顔、
+照れ、怒り、悲しみ、驚き、焦り、ジト目を選んで依頼文をコピーできます。
+一覧と依頼パネルは最初は閉じています。一覧の見出しに、足りない絵がある表情の数を
+表示します。絵がそろった表情はチェック済み・操作不可で表示し、依頼には含めません。
+一部の絵だけがある表情は選べます。その表情の既存の絵も描き直すかを指定できます。
+**Codex**を選ぶと、顔の画像がCodexの画像生成に
 送られることが表示され、依頼文のコピーをもって送信に同意したことが依頼文に
-書き込まれます。Codexは絵の生成、取り込み、確認まで行います。**Claude Code**は
+書き込まれます。各絵の候補を3つずつ作り、元の顔と並べた比較画像を見て、使う
+候補を選びます。選ぶまでは取り込みません。1つの表情を確認・承認してから次へ進みます。**Claude Code**は
 画像を生成できないため、依頼用ファイルを用意し、画像生成に渡すものと結果の
 保存先を案内して止まります。保存したことを伝えると続きを進めます。手元から
 開いたPSDには必要な変換時のデータがないため、パネルではその旨だけを表示します。
@@ -143,12 +147,20 @@ PSDを開く前の画面では、「画像から新しくPSDを作る」からCo
 直接操作する場合は、次の順で実行します。
 
 ```bash
-npm run still2rig-psd -- expression-requests demo
-# 送信を承認したあと、各表情の input.png、mask.png、prompt.txt で画像を生成します。
-# 結果は .still2rig-psd/jobs/demo/expression-requests/results/ に保存します。
-npm run still2rig-psd -- import-expressions demo
+npm run still2rig-psd -- expression-requests demo --only eyes_sad
+# 送信を承認したあと、input.png、mask.png、prompt.txt で候補を3つ生成します。
+# results/candidates/eyes_sad-1.png、eyes_sad-2.png、eyes_sad-3.png に保存します。
+npm run still2rig-psd -- expression-candidates demo --only eyes_sad
+# 比較画像を見せて止まり、ユーザーが候補3を選んだ場合:
+npm run still2rig-psd -- import-expressions demo --pick eyes_sad=3
 npm run still2rig-psd -- repair demo --expressions .still2rig-psd/jobs/demo/generated-expressions
 ```
+
+比較では元のPSD・設定・取り込み済みの絵を変更せず、前髪・髪飾りを重ねた顔と
+目元・口元の拡大、候補ごとの検査結果を表示します。検査合格は絵の品質の承認では
+ありません。`--preview-dir`で比較画像の保存先、`--request-dir`で保存済みの依頼を
+指定できます。保存先は`.still2rig-psd/`内で、元のデータと別の場所にしてください。
+従来どおり`results/eyes_sad.png`に1枚を保存し、`--pick`なしで取り込む方法も使えます。
 
 依頼用の画像は、最新の修復を含むPSDレイヤーから、前髪・頭の装飾を隠して顔を
 切り抜きます。取り込みでは、顔の下地と同じ画素を除き、新しい表情の描画だけを
