@@ -19,6 +19,8 @@ export interface PsdMotionParameters {
   armY: number;
   armPos: number;
   eyeSmile: number;
+  eyeAngry: number;
+  mouthFrown: number;
   eyeSmileL: number;
   eyeSmileR: number;
   browWorry: number;
@@ -107,6 +109,8 @@ export const PSD_MOTION_PARAMETER_DEFINITIONS: readonly PsdMotionParameterDefini
       max: 1,
       step: 0.01,
     },
+    { key: 'eyeAngry', label: '怒った目元', group: 'eyes', min: 0, max: 1, step: 0.01 },
+    { key: 'mouthFrown', label: '口角を下げた閉じ口', group: 'mouth', min: 0, max: 1, step: 0.01 },
     { key: 'eyeSmile', label: '笑い目', group: 'eyes', min: 0, max: 1, step: 0.01 },
     { key: 'eyeSmileL', label: '左目の笑い目', group: 'eyes', min: 0, max: 1, step: 0.01 },
     { key: 'eyeSmileR', label: '右目の笑い目', group: 'eyes', min: 0, max: 1, step: 0.01 },
@@ -363,6 +367,8 @@ export const DEFAULT_PSD_MOTION_PARAMETERS: Readonly<PsdMotionParameters> = {
   armY: 0,
   armPos: 0,
   eyeSmile: 0,
+  eyeAngry: 0,
+  mouthFrown: 0,
   eyeSmileL: 0,
   eyeSmileR: 0,
   browWorry: 0,

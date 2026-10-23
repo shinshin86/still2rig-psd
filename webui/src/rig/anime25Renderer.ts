@@ -1,6 +1,8 @@
 import { createMouthController, mouthContour, mouthRestWeight, type MouthContour, type MouthFrame, type MouthSelection } from './mouthExpression.mjs';
 import { expressionParameterNames } from '../../../src/expressionPresets.mjs';
-import { composeTrackedExpression, morphClosedWink, shapeBrow, shapeUpperLid, shapeWink, smileForSide } from './expressionParts.mjs';
+import { drawnEyeFeatures, morphDrawnEye, drawnBlinkOpacity, type DrawnEyeFeatures } from './drawnEye.mjs';
+import { createEyeDrawingSlot, eyeDrawingAlpha, eyeSlotParameters, type EyeDrawing, type EyeDrawingFrame, type EyeDrawingSnapshot } from './eyeDrawing.mjs';
+import { composeTrackedExpression, morphClosedWink, shapeBrow, shapeUpperLid, shapeWink, smileForSide, upperLidShape } from './expressionParts.mjs';
 /*!
  * Based on Anime2.5DRig (https://github.com/852wa/Anime2.5DRig)
  * by 852wa (hakoniwa), MIT License.
@@ -41,6 +43,7 @@ interface EyeAnchor {
   browCurve?: { x: number; y: number }[];
   browBounds?: { x0: number; x1: number; y0: number; y1: number } | null;
   smileInkBounds?: { x0: number; x1: number; y0: number; y1: number };
+  creaseCurve?: { x: number; y: number }[];
   upperLid?: { x: number; y: number }[];
   smileLid?: { x: number; y: number }[];
 }
@@ -92,6 +95,8 @@ interface RenderLayer extends Anime25RigLayer {
   vboPos: WebGLBuffer;
   vboUV: WebGLBuffer;
   vboInk: WebGLBuffer;
+  vboShade: WebGLBuffer;
+  lidShade: Float32Array;
   inkVisibility: Float32Array;
   ibo: WebGLBuffer;
   sw?: Float32Array;
@@ -106,6 +111,8 @@ interface MotionParams extends PsdMotionParameters {
 }
 
 interface AnimationState {
+  eyeSlots?: Record<'L'|'R', EyeDrawingSnapshot>;
+  eyeDrawings?: Record<'L' | 'R', EyeDrawing>;
   mouthSelection?: MouthSelection;
   current: MotionParams; blinkT: number; nextBlink: number; nextRandom: number;
   randomTarget: { ax: number; ay: number; az: number; bd: number; ex: number; ey: number };
@@ -114,6 +121,8 @@ interface AnimationState {
 }
 
 export interface Anime25RigAvatar {
+  setEyeExpressionTarget: (values: Partial<PsdMotionParameters> | null) => void;
+  getDrawingState: () => { eyes: Record<'L'|'R', EyeDrawingFrame & { drawing: EyeDrawing; open: number }>; layers: { name: string; side: string; drawing: string; alpha: number }[] };
   setVoiceMouth: (value: number | null) => void;
   getMouthState: () => MouthFrame & { visibleDrawings: number };
   setTrackingInput: (input: Partial<TrackingInput> | null, weight: number) => void;
@@ -168,12 +177,12 @@ const HAIR_WIND_SCALE = 3.0;
 const HAIR_PHYSICS_SCALE = 1.8;
 
 const VERTEX_SHADER =
-  'attribute vec2 aPos; attribute vec2 aUV; attribute float aInk; varying float vInk; uniform vec2 uRes; uniform vec2 uViewOffset; uniform float uViewScale; varying vec2 vUV;' +
-  'void main(){ vUV=aUV; vInk=aInk; vec2 p=(aPos-uRes*0.5)*uViewScale+uRes*0.5+uViewOffset; vec2 c=p/uRes*2.0-1.0; gl_Position=vec4(c.x,-c.y,0.0,1.0); }';
+  'attribute vec2 aPos; attribute vec2 aUV; attribute float aInk; attribute float aShade; varying float vShade; varying float vInk; uniform vec2 uRes; uniform vec2 uViewOffset; uniform float uViewScale; varying vec2 vUV;' +
+  'void main(){ vUV=aUV; vInk=aInk; vShade=aShade; vec2 p=(aPos-uRes*0.5)*uViewScale+uRes*0.5+uViewOffset; vec2 c=p/uRes*2.0-1.0; gl_Position=vec4(c.x,-c.y,0.0,1.0); }';
 
 const FRAGMENT_SHADER =
-  'precision mediump float; varying vec2 vUV; varying float vInk; uniform sampler2D uTex; uniform float uCut; uniform float uAlpha; uniform vec4 uMouthShade; uniform vec2 uResolveTexel;' +
-  'void main(){ vec4 c=texture2D(uTex,vUV); if(uResolveTexel.x>0.0){c=vec4(0.0);for(int y=-1;y<=1;y++){for(int x=-1;x<=1;x++){c+=texture2D(uTex,vUV+vec2(float(x),float(y))*uResolveTexel);}}c/=9.0;} if(c.a<uCut) discard; float cavity=smoothstep(0.35,0.7,c.r/max(c.a,0.001)); float pale=smoothstep(0.68,0.75,min(c.r,min(c.g,c.b))/max(c.a,0.001)); c.rgb=mix(c.rgb,uMouthShade.rgb*(1.0-0.18*cavity)*c.a,uMouthShade.a*(1.0-pale)); gl_FragColor=c*(uAlpha*vInk); }';
+  'precision mediump float; varying vec2 vUV; varying float vInk; varying float vShade; uniform sampler2D uTex; uniform float uCut; uniform float uAlpha; uniform vec4 uMouthShade; uniform vec2 uResolveTexel; uniform sampler2D uEyeMask; uniform float uUseEyeMask; uniform vec2 uEyeMaskTexel; uniform vec2 uMaskResolution; uniform vec4 uLashTrim;' +
+  'void main(){ vec4 c=texture2D(uTex,vUV); if(uResolveTexel.x>0.0){c=vec4(0.0);for(int y=-1;y<=1;y++){for(int x=-1;x<=1;x++){c+=texture2D(uTex,vUV+vec2(float(x),float(y))*uResolveTexel);}}c/=9.0;} if(c.a*uAlpha*vInk<uCut) discard; float cavity=smoothstep(0.35,0.7,c.r/max(c.a,0.001)); float pale=smoothstep(0.68,0.75,min(c.r,min(c.g,c.b))/max(c.a,0.001)); c.rgb=mix(c.rgb,uMouthShade.rgb*(1.0-0.18*cavity)*c.a,uMouthShade.a*(1.0-pale)); if(uUseEyeMask>0.5){float coverage=0.0;for(int my=-1;my<=1;my++){for(int mx=-1;mx<=1;mx++){coverage+=texture2D(uEyeMask,gl_FragCoord.xy/uMaskResolution+vec2(float(mx),float(my))*uEyeMaskTexel).a;}}c*=coverage/9.0;} if(uLashTrim.x>0.0){float outer=(vUV.x-uLashTrim.y)/uLashTrim.z*uLashTrim.w;c*=1.0-smoothstep(0.45,0.75,outer)*uLashTrim.x*(1.0-smoothstep(0.0,1.0,vShade));}else{c.rgb*=1.0-vShade;} gl_FragColor=c*(uAlpha*vInk); }';
 
 function clamp(value: number, min: number, max: number): number {
   return value < min ? min : value > max ? max : value;
@@ -317,6 +326,25 @@ function fadeAlpha(
   hasEyeClose: Record<'L' | 'R', boolean>,
   hasEyeSmile: Record<'L' | 'R', boolean>,
   mouthDrawing: string,
+  hasEyeAngry: Record<'L' | 'R', boolean>,
+  eyeDrawings: Record<'L' | 'R', EyeDrawing>,
+  eyeFrames: Record<'L'|'R', EyeDrawingFrame>,
+): number {
+  if (layer.side === 'L' || layer.side === 'R') {
+    const drawing = eyeDrawings[layer.side];
+    const sideParams = eyeSlotParameters(params, layer.side, drawing, eyeFrames[layer.side]);
+    const alpha = eyeDrawingAlpha(layer.fade, layer.bn, drawing,
+      drawnBlinkOpacity(layer.side === 'L' ? params.eyeOpenL : params.eyeOpenR),
+      baseFadeAlpha(layer, sideParams, hasEyeClose, hasEyeSmile, mouthDrawing, hasEyeAngry));
+    return alpha;
+  }
+  return baseFadeAlpha(layer, params, hasEyeClose, hasEyeSmile, mouthDrawing, hasEyeAngry);
+}
+
+function baseFadeAlpha(
+  layer: RenderLayer, params: MotionParams,
+  hasEyeClose: Record<'L' | 'R', boolean>, hasEyeSmile: Record<'L' | 'R', boolean>,
+  mouthDrawing: string, hasEyeAngry: Record<'L' | 'R', boolean>,
 ): number {
   const requestedWink = layer.side === 'L' ? params.eyeWinkL : params.eyeWinkR;
     const hasSmile = Boolean(layer.side && hasEyeSmile[layer.side as 'L'|'R']);
@@ -330,6 +358,10 @@ function fadeAlpha(
   if (layer.fade === 'tears' || layer.fade === 'sweat' || layer.fade === 'angerMark') return params[layer.fade];
   if (layer.fade === 'eyeOpen') {
     const value = expression.eyeOpen;
+    if(layer.bn==='eyewhite' && layer.side && !hasEyeSmile[layer.side as 'L'|'R'] && params.eyeNarrow>0) {
+      const aperture=value*(1-params.eyeNarrow*.8);
+      return originalAlpha*smooth((aperture-.16)/.12)*smooth((value-(.1+params.eyeEase*.45))/.15);
+    }
     if (wink > 0 && !expression.smileProgress && layer.side && hasEyeClose[layer.side as 'L'|'R']) return value <= 0.1 ? 0 : 1;
     if (expression.smileProgress > 0 && layer.bn === 'eyelash') return originalAlpha;
     if (
@@ -364,7 +396,7 @@ function createRenderLayer(
   layer.bn = baseRigName(layer.name);
 
   const cell = (layer.phys ? 30 : 42) * Math.max(0.6, canvasWidth / 768);
-  const eyeGrid = layer.fade === 'eyeOpen' || layer.fade === 'eyeClose' || layer.fade === 'eyeSmile' || layer.bn === 'eyebrow' || layer.fade === 'tears' ? 24 :
+  const eyeGrid = layer.fade === 'eyeOpen' || layer.fade === 'eyeClose' || layer.fade === 'eyeSmile' || layer.bn === 'eyebrow' || layer.fade === 'tears' ? 40 :
     layer.bn.startsWith('mouth_') ? 40 : 2;
   const nx = Math.max(eyeGrid, Math.round(layer.w / cell));
   const ny = Math.max(eyeGrid, Math.round(layer.h / cell));
@@ -409,6 +441,7 @@ function createRenderLayer(
   layer.base = base;
   layer.cur = new Float32Array(base);
   layer.inkVisibility = new Float32Array(vertexCount).fill(1);
+  layer.lidShade = new Float32Array(vertexCount);
   layer.uv = uv;
   layer.indices = typedIndices;
   layer.nIdx = indices.length;
@@ -481,6 +514,7 @@ function createRenderLayer(
   layer.vboPos = createBuffer(gl);
   layer.vboUV = createBuffer(gl);
   layer.vboInk = createBuffer(gl);
+  layer.vboShade = createBuffer(gl);
   layer.ibo = createBuffer(gl);
 
   gl.bindBuffer(gl.ARRAY_BUFFER, layer.vboUV);
@@ -522,6 +556,7 @@ export function createAnime25RigAvatar(
   const locPos = getAttribLocation(gl, program, 'aPos');
   const locUV = getAttribLocation(gl, program, 'aUV');
   const locInk = getAttribLocation(gl, program, 'aInk');
+  const locShade = getAttribLocation(gl, program, 'aShade');
   const locRes = getUniformLocation(gl, program, 'uRes');
   const locViewOffset = getUniformLocation(gl, program, 'uViewOffset');
   const locViewScale = getUniformLocation(gl, program, 'uViewScale');
@@ -529,10 +564,16 @@ export function createAnime25RigAvatar(
   const locAlpha = getUniformLocation(gl, program, 'uAlpha');
   const locMouthShade = getUniformLocation(gl, program, 'uMouthShade');
   const locResolveTexel = getUniformLocation(gl, program, 'uResolveTexel');
+  const locUseEyeMask=getUniformLocation(gl,program,'uUseEyeMask');
+  const locLashTrim=getUniformLocation(gl,program,'uLashTrim');
+  const locEyeMaskTexel=getUniformLocation(gl,program,'uEyeMaskTexel');
+  gl.uniform1i(getUniformLocation(gl,program,'uEyeMask'),1);
+  gl.uniform2f(getUniformLocation(gl,program,'uMaskResolution'),rig.canvas.w,rig.canvas.h);
 
   gl.enableVertexAttribArray(locPos);
   gl.enableVertexAttribArray(locUV);
   gl.enableVertexAttribArray(locInk);
+  gl.enableVertexAttribArray(locShade);
   gl.enable(gl.BLEND);
   gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
   gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
@@ -589,6 +630,18 @@ export function createAnime25RigAvatar(
       new Float32Array([0,1,1,1,0,0,0,0,1,1,1,0]),new Float32Array(6).fill(1)];
     mouthQuad.forEach((buffer,i)=>{gl.bindBuffer(gl.ARRAY_BUFFER,buffer);gl.bufferData(gl.ARRAY_BUFFER,values[i],gl.STATIC_DRAW);});
   }
+  const eyeMaskScale=Math.max(1,sampleScale);
+  const eyeMaskTexture=gl.createTexture(),eyeMaskFramebuffer=gl.createFramebuffer();
+  if(!eyeMaskTexture||!eyeMaskFramebuffer)throw new Error('目を表示する準備ができませんでした。');
+  gl.activeTexture(gl.TEXTURE1);gl.bindTexture(gl.TEXTURE_2D,eyeMaskTexture);
+  gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,canvasWidth*eyeMaskScale,canvasHeight*eyeMaskScale,0,gl.RGBA,gl.UNSIGNED_BYTE,null);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
+  gl.bindFramebuffer(gl.FRAMEBUFFER,eyeMaskFramebuffer);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,eyeMaskTexture,0);
+  if(gl.checkFramebufferStatus(gl.FRAMEBUFFER)!==gl.FRAMEBUFFER_COMPLETE)throw new Error('目の表示を準備できませんでした。ページを開き直してください。');
+  gl.bindFramebuffer(gl.FRAMEBUFFER,null);gl.activeTexture(gl.TEXTURE0);
+  gl.uniform2f(locEyeMaskTexel,1/(canvasWidth*3),1/(canvasHeight*3));
   const hasEyeSmile = {
     L: layers.some(layer => layer.bn === 'eye_smile' && layer.side === 'L'),
     R: layers.some(layer => layer.bn === 'eye_smile' && layer.side === 'R'),
@@ -597,6 +650,15 @@ export function createAnime25RigAvatar(
     L: layers.some((layer) => layer.bn === 'eye_close' && layer.side === 'L'),
     R: layers.some((layer) => layer.bn === 'eye_close' && layer.side === 'R'),
   };
+  const angryFeatures: Partial<Record<'L'|'R', DrawnEyeFeatures>> = {};
+  for (const layer of layers) if(layer.bn === 'eyes_angry' && (layer.side==='L'||layer.side==='R')) {
+    const anchor=layer.side==='L'?anchors.eyeL:anchors.eyeR;
+    if(anchor) angryFeatures[layer.side]=drawnEyeFeatures(layer,anchor);
+  }
+  const hasEyeAngry = { L: !!angryFeatures.L, R: !!angryFeatures.R };
+  const eyeSlots = { L: createEyeDrawingSlot(), R: createEyeDrawingSlot() };
+  const eyeDrawings: Record<'L'|'R', EyeDrawing> = { L: 'neutral', R: 'neutral' };
+  const eyeFrames = {L:eyeSlots.L.getFrame(),R:eyeSlots.R.getFrame()};
 
   canvas.width = canvasWidth;
   canvas.height = canvasHeight;
@@ -623,6 +685,7 @@ export function createAnime25RigAvatar(
   const dragInertia = { x: 0, y: 0, vx: 0, vy: 0, targetX: 0, targetY: 0, active: false };
   let averageFps = 0;
   let focusedLayer: string | null = null;
+  let drawingLayers: { name: string; side: string; drawing: string; alpha: number }[] = [];
   let fpsFrames = 0;
   let fpsStart = last;
   const randomTarget = { ax: 0, ay: 0, az: 0, bd: 0, ex: 0, ey: 0 };
@@ -682,6 +745,7 @@ export function createAnime25RigAvatar(
   }
 
   function deform(layer: RenderLayer, params: MotionParams) {
+    if (layer.side === 'L' || layer.side === 'R') params = eyeSlotParameters(params, layer.side, eyeDrawings[layer.side], eyeFrames[layer.side]);
     const base = layer.base;
     const output = layer.cur;
     const isHead = layer.group === 'head';
@@ -703,6 +767,8 @@ export function createAnime25RigAvatar(
     const expression = resolveEyeExpression(Math.min(layer.side === 'L' ? params.eyeOpenL : params.eyeOpenR, 1 - wink),
       Math.max(smileForSide(params, layer.side), hasSmile ? requestedWink : 0), hasSmile);
     const eyeOpen = expression.eyeOpen;
+    const angry = layer.side && hasEyeAngry[layer.side as 'L'|'R'] ? params.eyeAngry : 0;
+    const drawnFeatures = layer.side ? angryFeatures[layer.side as 'L'|'R'] : undefined;
     const lowerProgress = Math.max(expression.smileProgress, params.eyeNarrow * 0.8 * (1 - Math.min(1, wink / 0.9)));
     const winkClosure = wink > 0 ? Math.max(Math.min(1, wink / 0.9), 1 - (layer.side === 'L' ? params.eyeOpenL : params.eyeOpenR)) : 0;
     const lidParameters = { upperLid: params.upperLid, eyeWide: params.eyeWide,
@@ -718,6 +784,17 @@ export function createAnime25RigAvatar(
       let y = base[index + 1];
       const vertex = index >> 1;
       layer.inkVisibility[vertex] = 1;
+      layer.lidShade[vertex] = 0;
+      if(eyeAnchor && angry>0 && drawnFeatures && (layer.fade==='eyeAngry'||layer.fade==='eyeOpen'||layer.bn==='eyebrow')) {
+        const drawing=layer.fade==='eyeAngry';
+        const brow=layer.bn==='eyebrow'||(drawing&&y<drawnFeatures.browCut);
+        const amount=!drawing&&brow&&angry>=.5?0:angry;
+        const point=morphDrawnEye(x,y,eyeAnchor,drawnFeatures,amount,drawing,brow);
+        x=point.x;y=point.y;
+        if(drawing&&!brow) {
+          y=eyeAnchor.closeY+(y-eyeAnchor.closeY)*eyeOpen;
+        }
+      }
       if (layer.fade === 'tears') {
         const edge = layer.y + params.tears * layer.h;
         layer.inkVisibility[vertex] = smooth((edge-y)/Math.max(1,layer.h*.08));
@@ -771,21 +848,31 @@ export function createAnime25RigAvatar(
       }
 
       if (layer.fade === 'eyeOpen' && eyeAnchor) {
+        const fallbackNarrow=!hasSmile && lowerProgress>0 && winkClosure===0;
         const shaped = shapeUpperLid(x, y, eyeAnchor, lidParameters,
           layer.bn === 'eyelash', layer.bn === 'irides', lowerProgress);
         x = shaped.x; y = shaped.y;
+        if(layer.bn==='eyelash' && params.lidTilt>0.0001 && params.upperLid>0.0001) {
+          const lid=upperLidShape(x,eyeAnchor,lidParameters,lowerProgress);
+          layer.lidShade[vertex]=(y-lid.target-lid.height*.035)/Math.max(1,lid.height*.02);
+        }
 
         if (layer.bn === 'irides') {
           x = eyeAnchor.icx + (x - eyeAnchor.icx) * params.irisScale;
           y = eyeAnchor.icy + (y - eyeAnchor.icy) * params.irisScale;
           x += params.eyeX * 11 * faceScale;
           y += params.eyeY * 6 * faceScale;
-          if (winkClosure > 0) {
+          if(fallbackNarrow) {
+            y=shapeWink(x,y,eyeAnchor,1-eyeOpen,false,true).y;
+          } else if (winkClosure > 0) {
             const shaped = shapeWink(x, y, eyeAnchor, winkClosure, false, true); y = shaped.y;
           } else {
             const tuck = smooth((0.32 - eyeOpen) / 0.32);
             y = eyeAnchor.closeY + (y - eyeAnchor.closeY) * (1 - 0.8 * tuck);
           }
+        } else if(fallbackNarrow) {
+          y=raiseLowerLid(y,x,eyeAnchor,lowerProgress,layer.bn==='eyelash');
+          const shaped=shapeWink(x,y,eyeAnchor,1-eyeOpen,layer.bn==='eyelash');x=shaped.x;y=shaped.y;
         } else if (winkClosure > 0) {
           const shaped = shapeWink(x, y, eyeAnchor, winkClosure, layer.bn === 'eyelash'); x = shaped.x; y = shaped.y;
         } else {
@@ -793,7 +880,7 @@ export function createAnime25RigAvatar(
             eyeAnchor.closeY +
             (y - eyeAnchor.closeY) * (1 - 0.85 * (1 - eyeOpen));
         }
-        if (lowerProgress > 0) {
+        if (lowerProgress > 0 && !fallbackNarrow) {
           if (layer.bn === 'irides') {
             // The rising white-of-eye stencil hides the lower iris first.
             const tuck = smooth((lowerProgress - 0.5) / 0.5);
@@ -803,6 +890,13 @@ export function createAnime25RigAvatar(
             y = raiseLowerLid(y, x, eyeAnchor, lowerProgress, layer.bn === 'eyelash');
           }
         }
+      }
+
+      if (layer.fade === 'eyeOpen' && eyeAnchor && (layer.bn==='eyewhite'||layer.bn==='irides')) {
+        const lid=upperLidShape(x,eyeAnchor,lidParameters,lowerProgress);
+        const edge=lid.target+lid.height*.07;
+        const depth=Math.max(0,y-edge);
+        layer.lidShade[vertex]=lid.lower*.18*Math.exp(-depth/Math.max(1,lid.height*.09))*eyeOpen;
       }
 
       if (layer.fade === 'eyeSmile' && eyeAnchor) {
@@ -1081,13 +1175,14 @@ export function createAnime25RigAvatar(
     for (const key of Object.keys(current) as (keyof MotionParams)[]) {
       const tracked = (trackingInput?.[key as keyof TrackingInput] !== undefined && trackingWeight > 0) ||
         (key === 'mouthOpen' && voiceMouth !== null);
-      const alpha = tracked
+      const immediateBlink = (key === 'eyeOpenL' || key === 'eyeOpenR') && blinkT >= 0;
+      const alpha = immediateBlink ? 1 : tracked
         ? (key === 'eyeOpenL' || key === 'eyeOpenR' ? 1 : 1 - Math.exp(-dt / 0.025))
         : Math.min(1, dt * 14);
       current[key] += (target[key] - current[key]) * alpha;
       // A discrete expression handoff must reach an exact slider threshold,
       // rather than approach it forever from one side through smoothing.
-      if ((key.startsWith('eyeSmile') || key.startsWith('eyeWink') || key === 'mouthLaugh' || key === 'mouthRound') && Math.abs(target[key] - current[key]) < 0.001) current[key] = target[key];
+      if ((key.startsWith('eyeOpen') || key.startsWith('eyeSmile') || key.startsWith('eyeWink') || key === 'eyeAngry' || key === 'mouthFrown' || key === 'mouthLaugh' || key === 'mouthRound') && Math.abs(target[key] - current[key]) < 0.001) current[key] = target[key];
     }
 
     const dragStiffness = dragInertia.active ? 90 : 34;
@@ -1100,6 +1195,13 @@ export function createAnime25RigAvatar(
     dragInertia.y += dragInertia.vy * dt;
 
     const params = { ...current };
+    for (const side of ['L', 'R'] as const) {
+      const smile = hasEyeSmile[side] ? Math.max(smileForSide(params, side), side === 'L' ? params.eyeWinkL : params.eyeWinkR) : 0;
+      eyeDrawings[side] = eyeSlots[side].resolve(smile, hasEyeAngry[side] ? params.eyeAngry : 0,
+        side === 'L' ? params.eyeOpenL : params.eyeOpenR, dt,
+        hasEyeSmile[side] ? 0 : side === 'L' ? params.eyeWinkL : params.eyeWinkR);
+      eyeFrames[side] = eyeSlots[side].getFrame();
+    }
     mouthFrame = mouthController.resolve(params,mouthRestWeight(trackingInput?.mouthOpen,trackingWeight));
     params.mouthOpen = mouthFrame.openness;
     const dragPhysics = clamp(
@@ -1170,11 +1272,17 @@ export function createAnime25RigAvatar(
     gl.clearColor(0, 0, 0, 0);
     gl.clearStencil(0);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.STENCIL_BUFFER_BIT);
+    gl.bindFramebuffer(gl.FRAMEBUFFER,eyeMaskFramebuffer);gl.clear(gl.COLOR_BUFFER_BIT);gl.bindFramebuffer(gl.FRAMEBUFFER,null);
     gl.uniform2f(locRes, canvasWidth, canvasHeight);
     gl.uniform2f(locViewOffset, viewOffsetX, viewOffsetY);
     gl.uniform1f(locViewScale, viewScale);
+    drawingLayers = [];
     for (const layer of layers) {
-      const alpha = fadeAlpha(layer, params, hasEyeClose, hasEyeSmile, mouthFrame.drawing);
+      const alpha = fadeAlpha(layer, params, hasEyeClose, hasEyeSmile, mouthFrame.drawing, hasEyeAngry, eyeDrawings, eyeFrames);
+      const drawing = layer.fade === 'eyeOpen' ? 'neutral' : layer.fade === 'eyeClose' ? 'closed'
+        : layer.fade === 'eyeSmile' ? 'smile' : layer.fade === 'eyeAngry' ? 'angry'
+        : layer.bn.startsWith('mouth_') ? layer.bn : layer.bn === 'eyebrow' ? 'brow' : '';
+      if (drawing) drawingLayers.push({ name: layer.name, side: layer.side ?? '', drawing, alpha });
       if (
         alpha < 0.004 &&
         !(layer.fade === 'eyeOpen' && layer.name.startsWith('eyewhite'))
@@ -1191,8 +1299,13 @@ export function createAnime25RigAvatar(
       const focusAlpha =
         focusedLayer && layer.bn !== focusedLayer ? 0.2 : 1;
       gl.uniform1f(locAlpha, alpha * focusAlpha);
-      const mouthShade=layer.bn.startsWith('mouth_')&&layer.bn!=='mouth_close' ? 1-smooth((mouthFrame.progress-.05)/.28) : 0;
+      const mouthShade=layer.bn.startsWith('mouth_')&&layer.bn!=='mouth_close'&&layer.bn!=='mouth_frown' ? 1-smooth((mouthFrame.progress-.05)/.28) : 0;
       gl.uniform4f(locMouthShade,mouthInk[0],mouthInk[1],mouthInk[2],mouthShade);
+      const lashEye=layer.side==='L'?anchors.eyeL:layer.side==='R'?anchors.eyeR:null;
+      if(layer.bn==='eyelash' && lashEye && params.lidTilt>0.0001 && params.upperLid>0.0001) {
+        gl.uniform4f(locLashTrim,smooth(params.upperLid/.7)*params.lidTilt,
+          ((lashEye.x0+lashEye.x1)/2-layer.x)/layer.w,(lashEye.x1-lashEye.x0)/2/layer.w,layer.side==='L'?-1:1);
+      } else gl.uniform4f(locLashTrim,0,0,1,1);
       gl.bindBuffer(gl.ARRAY_BUFFER, layer.vboPos);
       gl.bufferData(gl.ARRAY_BUFFER, layer.cur, gl.DYNAMIC_DRAW);
       gl.vertexAttribPointer(locPos, 2, gl.FLOAT, false, 0, 0);
@@ -1201,26 +1314,26 @@ export function createAnime25RigAvatar(
       gl.bindBuffer(gl.ARRAY_BUFFER, layer.vboInk);
       gl.bufferData(gl.ARRAY_BUFFER, layer.inkVisibility, gl.DYNAMIC_DRAW);
       gl.vertexAttribPointer(locInk, 1, gl.FLOAT, false, 0, 0);
+      gl.bindBuffer(gl.ARRAY_BUFFER,layer.vboShade);
+      gl.bufferData(gl.ARRAY_BUFFER,layer.lidShade,gl.DYNAMIC_DRAW);
+      gl.vertexAttribPointer(locShade,1,gl.FLOAT,false,0,0);
       gl.bindTexture(gl.TEXTURE_2D, layer.tex);
       gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, layer.ibo);
 
-      if (layer.name.startsWith('eyewhite')) {
-        gl.enable(gl.STENCIL_TEST);
-        gl.stencilFunc(gl.ALWAYS, 1, 0xff);
-        gl.stencilOp(gl.KEEP, gl.KEEP, gl.REPLACE);
-        gl.uniform1f(locCut, 0.25);
-        gl.drawElements(gl.TRIANGLES, layer.nIdx, gl.UNSIGNED_SHORT, 0);
-        gl.disable(gl.STENCIL_TEST);
-        gl.uniform1f(locCut, 0);
-      } else if (layer.name.startsWith('irides')) {
-        gl.enable(gl.STENCIL_TEST);
-        gl.stencilFunc(gl.EQUAL, 1, 0xff);
-        gl.stencilOp(gl.KEEP, gl.KEEP, gl.KEEP);
-        gl.drawElements(gl.TRIANGLES, layer.nIdx, gl.UNSIGNED_SHORT, 0);
-        gl.disable(gl.STENCIL_TEST);
-      } else {
-        gl.drawElements(gl.TRIANGLES, layer.nIdx, gl.UNSIGNED_SHORT, 0);
+      // Use fractional coverage of the deformed whites instead of a binary stencil.
+      // The iris keeps its own shape and follows the same view and eye movement.
+      gl.uniform1f(locUseEyeMask,layer.bn==='irides'?1:0);
+      if(layer.bn==='eyewhite') {
+        gl.activeTexture(gl.TEXTURE1);gl.bindTexture(gl.TEXTURE_2D,layer.tex);gl.activeTexture(gl.TEXTURE0);
+        gl.bindFramebuffer(gl.FRAMEBUFFER,eyeMaskFramebuffer);
+        gl.viewport(0,0,canvasWidth*eyeMaskScale,canvasHeight*eyeMaskScale);
+        gl.uniform1f(locAlpha,alpha);
+        gl.drawElements(gl.TRIANGLES,layer.nIdx,gl.UNSIGNED_SHORT,0);
+        gl.bindFramebuffer(gl.FRAMEBUFFER,null);gl.viewport(0,0,canvasWidth,canvasHeight);
+        gl.uniform1f(locAlpha,alpha*focusAlpha);
+        gl.activeTexture(gl.TEXTURE1);gl.bindTexture(gl.TEXTURE_2D,eyeMaskTexture);gl.activeTexture(gl.TEXTURE0);
       }
+      gl.drawElements(gl.TRIANGLES,layer.nIdx,gl.UNSIGNED_SHORT,0);
       if(sampledMouth) {
         gl.bindFramebuffer(gl.FRAMEBUFFER,null);
         gl.viewport(0,0,canvasWidth,canvasHeight);
@@ -1229,7 +1342,9 @@ export function createAnime25RigAvatar(
         gl.uniform2f(locViewOffset,0,0);gl.uniform1f(locViewScale,1);
         gl.uniform1f(locAlpha,1);gl.uniform1f(locCut,0);gl.uniform4f(locMouthShade,0,0,0,0);
         gl.uniform2f(locResolveTexel,1/(3*canvasWidth),1/(3*canvasHeight));
+        gl.disableVertexAttribArray(locShade);gl.vertexAttrib1f(locShade,0);
         gl.drawArrays(gl.TRIANGLES,0,6);
+        gl.enableVertexAttribArray(locShade);
         gl.uniform2f(locResolveTexel,0,0);
         gl.uniform2f(locViewOffset,viewOffsetX,viewOffsetY);gl.uniform1f(locViewScale,viewScale);
       }
@@ -1338,6 +1453,15 @@ export function createAnime25RigAvatar(
     getEyeOpen() {
       return { left: current.eyeOpenL, right: current.eyeOpenR };
     },
+    setEyeExpressionTarget(values) {
+      for(const side of ['L','R'] as const) {
+        if(!values){eyeSlots[side].clearTarget();continue;}
+        const wink=(side==='L'?values.eyeWinkL:values.eyeWinkR)??0;
+        const smile=hasEyeSmile[side]?Math.max(values.eyeSmile??0,(side==='L'?values.eyeSmileL:values.eyeSmileR)??0,wink):0;
+        eyeSlots[side].request(smile,hasEyeAngry[side]?values.eyeAngry??0:0,hasEyeSmile[side]?0:wink);
+      }
+    },
+    getDrawingState() { return { eyes: {L:{...eyeFrames.L,drawing:eyeDrawings.L,open:current.eyeOpenL},R:{...eyeFrames.R,drawing:eyeDrawings.R,open:current.eyeOpenR}}, layers: drawingLayers.map(layer => ({ ...layer })) }; },
     getAverageFps() {
       return averageFps;
     },
@@ -1355,19 +1479,22 @@ export function createAnime25RigAvatar(
       const matches: string[] = [];
       for (let index = layers.length - 1; index >= 0; index -= 1) {
         const layer = layers[index]!;
-        if (fadeAlpha(layer, current, hasEyeClose, hasEyeSmile, mouthFrame.drawing) < 0.08) continue;
+        if (fadeAlpha(layer, current, hasEyeClose, hasEyeSmile, mouthFrame.drawing, hasEyeAngry, eyeDrawings, eyeFrames) < 0.08) continue;
         if (!layerContainsPoint(layer, modelX, modelY)) continue;
         if (!matches.includes(layer.bn)) matches.push(layer.bn);
       }
       return matches;
     },
     getAnimationState() {
-      return { current: { ...current }, blinkT, nextBlink, nextRandom, mouthSelection:mouthController.getState(),
+      return { current: { ...current }, blinkT, nextBlink, nextRandom, mouthSelection:mouthController.getState(), eyeDrawings: { ...eyeDrawings },
+        eyeSlots:{L:eyeSlots.L.getSnapshot(),R:eyeSlots.R.getSnapshot()},
         randomTarget: { ...randomTarget }, bounce: { ...bounce },
         springs: new Map(layers.map(layer => [layer.name, structuredClone(layer.spr ?? [])])) };
     },
     setAnimationState(state) {
       if(state.mouthSelection)mouthController.setState(state.mouthSelection);
+      if(state.eyeSlots)for(const side of ['L','R'] as const)eyeSlots[side].restore(state.eyeSlots[side]);
+      else if(state.eyeDrawings)for(const side of ['L','R'] as const)eyeSlots[side].setState(state.eyeDrawings[side]);
       Object.assign(current, state.current); Object.assign(randomTarget, state.randomTarget); Object.assign(bounce, state.bounce);
       blinkT = state.blinkT; nextBlink = state.nextBlink; nextRandom = state.nextRandom;
       for (const layer of layers) {
@@ -1380,11 +1507,13 @@ export function createAnime25RigAvatar(
     dispose() {
       disposed = true;
       cancelAnimationFrame(animationFrame);
+      gl.deleteTexture(eyeMaskTexture);gl.deleteFramebuffer(eyeMaskFramebuffer);
       for (const layer of layers) {
         gl.deleteTexture(layer.tex);
         gl.deleteBuffer(layer.vboPos);
         gl.deleteBuffer(layer.vboUV);
         gl.deleteBuffer(layer.vboInk);
+        gl.deleteBuffer(layer.vboShade);
         gl.deleteBuffer(layer.ibo);
       }
       gl.deleteProgram(program);

@@ -1,5 +1,6 @@
 interface Anchor {
   x0: number; x1: number; y0: number; y1: number; icx: number; icy: number;
+  creaseCurve?: { x: number; y: number }[];
   upperLid?: { x: number; y: number }[];
   browCurve?: { x: number; y: number }[];
   browBounds?: { x0: number; x1: number; y0: number; y1: number } | null;
@@ -14,3 +15,5 @@ export function morphClosedWink(x: number, y: number, anchor: Anchor & {
   closeY: number; closedBounds?: { x0: number; x1: number; y0: number; y1: number } | null;
   closedCurve?: { x: number; y: number }[] | null;
 }, restore: number): { x: number; y: number };
+
+export function upperLidShape(x: number, anchor: Anchor, params: { upperLid?: number; eyeWide?: number; lidTilt?: number; faceCenterX: number }, smileProgress?: number): {top:number;target:number;bottom:number;lower:number;wide:number;flatten:number;height:number};

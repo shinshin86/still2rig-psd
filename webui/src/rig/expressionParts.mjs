@@ -5,29 +5,54 @@ export function smileForSide(params, side) {
   return Math.max(params.eyeSmile || 0, (side === 'L' ? params.eyeSmileL : params.eyeSmileR) || 0);
 }
 
-/** Move the top boundary while preserving lash thickness and the lower lid. */
-export function shapeUpperLid(x, y, anchor, params, lash = false, iris = false, smileProgress = 0) {
+/** Share a straightening lid contour between the lash, whites and its shadow. */
+export function upperLidShape(x, anchor, params, smileProgress = 0) {
   const remaining = 1 - smileProgress;
   const lower = clamp(params.upperLid || 0) * remaining;
   const wide = clamp(params.eyeWide || 0) * remaining;
-  if (!lower && !wide) return { x, y };
   const height = anchor.y1 - anchor.y0;
-  if (iris) {
-    const scale = 1 - wide * 0.18;
-    return { x: anchor.icx + (x - anchor.icx) * scale, y: anchor.icy + (y - anchor.icy) * scale };
-  }
   const top = upperLidY(anchor.upperLid, x, anchor.y0);
-  const side = anchor.icx < params.faceCenterX ? 1 : -1;
-  const inward = clamp((x - anchor.icx) / Math.max(1, (anchor.x1 - anchor.x0) / 2), -1, 1) * side;
-  const flat = anchor.y0 + height * 0.45;
-  const tilt = (params.lidTilt || 0) * inward * height * 0.3;
-  const target = top + lower * (flat + tilt - top) - wide * height * 0.1;
-  const bottom = anchor.y1 + wide * height * 0.06;
-  const relative = y - top;
-  const band = lash ? height * 0.12 : 0;
-  const shaped = relative <= band && lash ? target + relative
-    : target + band + (relative - band) * (bottom - target - band) / Math.max(1, anchor.y1 - top - band);
-  return { x, y: shaped };
+  const center = (anchor.x0 + anchor.x1) / 2;
+  const side = center < params.faceCenterX ? 1 : -1;
+  const inward = clamp((x-center) / Math.max(1,(anchor.x1-anchor.x0)/2),-1,1)*side;
+  const flatten = 1-(1-lower)**2;
+  const tilt = (params.lidTilt || 0)*inward*height*.24;
+  const target = top+flatten*(anchor.y0+height*.45+tilt-top)-wide*height*.1;
+  const bottom = anchor.y1+wide*height*.06-lower*height*(.035+.07*Math.max(0,params.lidTilt||0));
+  return {top,target,bottom,lower,wide,flatten,height};
+}
+
+/** Flatten the upper ink and move the crease independently without thinning it. */
+export function shapeUpperLid(x, y, anchor, params, lash = false, iris = false, smileProgress = 0) {
+  const g=upperLidShape(x,anchor,params,smileProgress);
+  if (!g.lower && !g.wide) return {x,y};
+  if (iris) {
+    const scale=1-g.wide*.18;
+    return {x:anchor.icx+(x-anchor.icx)*scale,y:anchor.icy+(y-anchor.icy)*scale};
+  }
+  let relative=y-g.top;
+  const band=lash?g.height*.12:0;
+  const creaseCurve=anchor.creaseCurve;
+  const onCrease=creaseCurve?.length && x>=creaseCurve[0].x && x<=creaseCurve.at(-1).x;
+  if(lash && onCrease && relative<0) {
+    const crease=upperLidY(creaseCurve,x,g.top-g.height*.12);
+    const center=(anchor.x0+anchor.x1)/2;
+    const centerGap=upperLidY(anchor.upperLid,center,anchor.y0)-upperLidY(creaseCurve,center,anchor.y0-g.height*.12);
+    const gap=g.top-crease;
+    const flatGap=Math.max(g.height*.055,gap+(centerGap-gap)*g.flatten)*(1+.12*g.lower);
+    const creaseTarget=g.target-flatGap;
+    const inkBand=g.height*.035;
+    const blend=clamp((y-crease-inkBand)/Math.max(1,gap-inkBand));
+    const creaseY=y+(creaseTarget-crease)*(1-blend)+(g.target-g.top)*blend;
+    const feather=g.height*.2;
+    const fade=v=>{const t=clamp(v);return t*t*(3-2*t);};
+    const support=fade((x-creaseCurve[0].x)/feather)*fade((creaseCurve.at(-1).x-x)/feather);
+    const normalY=g.target+relative;
+    return {x,y:normalY+(creaseY-normalY)*support};
+  }
+  const shaped=relative<=band&&lash?g.target+relative
+    :g.target+band+(relative-band)*(g.bottom-g.target-band)/Math.max(1,anchor.y1-g.top-band);
+  return {x,y:shaped};
 }
 
 /** Mirror the inner brow displacement and bend along its length. */

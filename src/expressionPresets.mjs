@@ -5,6 +5,15 @@ export const expressionPresets = Object.freeze(config.presets.map(item => Object
   ...item, values: Object.freeze({ ...item.values }),
 })));
 
+export function expressionPresetAvailability(id, parts = []) {
+  const available = new Set(parts);
+  const required = { angry: ['eyes_angry'], sad: ['eyes_sad'], shy: ['eyes_shy'],
+    surprised: ['eyes_surprised'], flustered: ['eyes_flustered'], unamused: ['eyes_half'], joy: ['eye_smile'] };
+  const missing = id === 'wink' ? !available.has('eye_smile') && !available.has('eye_close')
+    : (required[id] ?? []).some(part => !available.has(part));
+  return { available: !missing, reason: missing ? 'この表情の絵がありません' : '' };
+}
+
 /** Replace only expression controls; pose, blink and speech stay independent. */
 export function expressionPresetValues(id, parts = []) {
   const preset = expressionPresets.find(item => item.id === id);
@@ -13,13 +22,12 @@ export function expressionPresetValues(id, parts = []) {
   Object.assign(values, preset.values);
   const available = new Set(parts);
   if (!available.has('eye_smile')) {
-    values.eyeNarrow = values.eyeSmile * 0.9;
-    values.eyeWinkL = values.eyeSmileL;
-    values.eyeWinkR = values.eyeSmileR;
+    values.eyeWinkL = available.has('eye_close') ? values.eyeSmileL : 0;
+    values.eyeWinkR = available.has('eye_close') ? values.eyeSmileR : 0;
     values.eyeSmile = values.eyeSmileL = values.eyeSmileR = 0;
   }
   if (!available.has('mouth_round')) values.expressionMouthOpen = (values.mouthRound || 0) * 0.75;
-  for (const [key, part] of [['blush','blush'],['tears','tears'],['sweat','sweat'],['angerMark','anger_mark'],['mouthLaugh','mouth_laugh'],['mouthRound','mouth_round']]) {
+  for (const [key, part] of [['eyeAngry','eyes_angry'],['mouthFrown','mouth_frown'],['blush','blush'],['tears','tears'],['sweat','sweat'],['angerMark','anger_mark'],['mouthLaugh','mouth_laugh'],['mouthRound','mouth_round']]) {
     if (!available.has(part)) values[key] = 0;
   }
   return values;

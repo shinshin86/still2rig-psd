@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { expressionParameterNames, expressionPresets, expressionPresetValues } from '../src/expressionPresets.mjs';
+import { expressionParameterNames, expressionPresets, expressionPresetValues, expressionPresetAvailability } from '../src/expressionPresets.mjs';
 import { composeTrackedExpression, morphClosedWink, shapeBrow, shapeUpperLid, shapeWink, smileForSide } from '../webui/src/rig/expressionParts.mjs';
 import { parseLiveState } from '../webui/src/live/protocol.mjs';
+import { morphDrawnEye, drawnBlinkOpacity } from '../webui/src/rig/drawnEye.mjs';
 
 const anchor = { x0: 20, x1: 80, y0: 30, y1: 70, icx: 50, icy: 50,
   upperLid: [{x:20,y:35},{x:50,y:30},{x:80,y:35}], browBounds:{x0:20,x1:80,y0:10,y1:20} };
@@ -19,17 +20,45 @@ test('all nine expressions replace only expression controls and skip absent artw
   assert.ok(Object.values(expressionPresetValues('neutral')).every(v=>v===0));
   assert.equal(expressionPresetValues('wink',['eye_smile']).eyeSmileL, 1);
   assert.equal(expressionPresetValues('wink',['eye_close']).eyeWinkL, 1);
-  assert.equal(expressionPresetValues('joy',[]).eyeNarrow, 0.9);
+  assert.equal(expressionPresetValues('joy',[]).eyeNarrow, 0);
   assert.throws(()=>expressionPresetValues('missing'));
 });
 
-test('upper lid clips from above, keeps the lower boundary and lash thickness, while widening shrinks the iris', () => {
+test('anger uses only its artwork, without symbols or deformed neutral features', () => {
+  const values=expressionPresetValues('angry',['eyes_angry','mouth_frown','anger_mark']);
+  assert.equal(values.eyeAngry,1); assert.equal(values.mouthFrown,1);
+  for(const key of ['browAngry','upperLid','lidTilt','mouthForm','angerMark'])assert.equal(values[key],0);
+  assert.equal(expressionPresetValues('angry',['eyes_angry']).mouthFrown,0);
+  assert.deepEqual(expressionPresetAvailability('angry',[]),{available:false,reason:'この表情の絵がありません'});
+  assert.equal(expressionPresetAvailability('angry',['eyes_angry']).available,true);
+});
+
+test('drawn eyes share halfway bounds and return to unchanged artwork at the endpoints', () => {
+  const features={eye:{x0:22,x1:78,y0:38,y1:68},brow:null,browCurve:[],browCut:30};
+  assert.deepEqual(morphDrawnEye(20,30,anchor,features,0,false),{x:20,y:30});
+  assert.deepEqual(morphDrawnEye(22,38,anchor,features,1,true),{x:22,y:38});
+  assert.deepEqual(morphDrawnEye(20,30,anchor,features,.5,false),morphDrawnEye(22,38,anchor,features,.5,true));
+  assert.deepEqual(morphDrawnEye(80,70,anchor,features,.5,false),morphDrawnEye(78,68,anchor,features,.5,true));
+});
+
+test('the drawn anger blink fades only between single-drawing endpoints', () => {
+  assert.deepEqual(drawnBlinkOpacity(1),{open:1,closed:0});
+  assert.deepEqual(drawnBlinkOpacity(0),{open:0,closed:1});
+  assert.deepEqual(drawnBlinkOpacity(.5),{open:.5,closed:.5});
+  for(const value of [-1,.1,.25,.75,.9,2]) {
+    const frame=drawnBlinkOpacity(value);
+    assert.equal(frame.open+frame.closed,1);
+    assert.ok(frame.open>=0&&frame.open<=1);
+  }
+});
+
+test('upper lid narrows from above, slightly raises the lower boundary and preserves lash thickness', () => {
   for (const strength of [0,.25,.5,.75,1]) {
     const p={upperLid:strength,faceCenterX:100};
     const top=shapeUpperLid(50,30,anchor,p,true), band=shapeUpperLid(50,34,anchor,p,true);
     assert.equal(band.y-top.y,4);
-    assert.equal(shapeUpperLid(50,70,anchor,p).y,70);
-    assert.equal(top.y,30+18*strength);
+    assert.ok(shapeUpperLid(50,70,anchor,p).y<=70 && shapeUpperLid(50,70,anchor,p).y>=68);
+    assert.ok(top.y>=30 && top.y<=48);
     assert.deepEqual(shapeUpperLid(50,30,anchor,p,true,false,1),{x:50,y:30});
   }
   const wide=shapeUpperLid(60,60,anchor,{eyeWide:1,faceCenterX:100},false,true);
@@ -105,5 +134,23 @@ test('blink artwork preserves ink thickness and endpoints throughout the handoff
   for (const restore of [0,.25,.5,.75,1]) {
     assert.equal(morphClosedWink(25,65,a,restore).x,25);
     assert.equal(morphClosedWink(50,70,a,restore).y-morphClosedWink(50,60,a,restore).y,10);
+  }
+});
+
+
+test('lowered lids flatten the crease, preserve both ink bands and tighten the lower boundary',()=>{
+  const a={...anchor,creaseCurve:[{x:20,y:25},{x:50,y:20},{x:80,y:25}]};
+  const p={upperLid:1,faceCenterX:100};
+  const center=shapeUpperLid(50,20,a,p,true),edge=shapeUpperLid(40,20+5/3,a,p,true);
+  assert.ok(Math.abs(center.y-edge.y)<.001);
+  assert.equal(shapeUpperLid(50,21,a,p,true).y-center.y,1);
+  const lash=shapeUpperLid(50,30,a,p,true);
+  assert.ok(center.y>20 && center.y<lash.y-2);
+  assert.ok(center.y-20<lash.y-30);
+  const angry={...p,lidTilt:1};
+  assert.ok(shapeUpperLid(50,70,a,angry).y<shapeUpperLid(50,70,a,p).y);
+  for(let i=0;i<=20;i++) {
+    const values={...angry,upperLid:i/20};
+    assert.ok(shapeUpperLid(50,34,a,values,true).y-shapeUpperLid(50,30,a,values,true).y>=3.99);
   }
 });

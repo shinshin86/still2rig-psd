@@ -64,12 +64,20 @@ export function createMouthController(contours) {
       const progress=(weights.base*opening+(laugh+round)*Math.sqrt(opening))*shapeGate;
       if(shapeGate<.01)seamClosed=true;
       else if(shapeGate>.08)seamClosed=false;
-      const drawing=(isClosed||seamClosed)&&contours.mouth_close?'mouth_close':(contours[drawings[shape]]?drawings[shape]:'mouth_close');
-      return {drawing,openness,progress:isClosed?0:progress,weights,opening,shapeGate};
+      const frown=contours.mouth_frown?clamp(params.mouthFrown??0):0;
+      const rest=frown>=.5?'mouth_frown':'mouth_close';
+      const drawing=(isClosed||seamClosed)&&contours.mouth_close?rest:(contours[drawings[shape]]?drawings[shape]:rest);
+      return {drawing,openness,progress:isClosed?0:progress,weights,opening,shapeGate,frown};
     },
     warp(x,y,name,frame) {
       const source=contours[name];
       if(!source || !closed || !base)return {x,y,visibility:1};
+      if((name==='mouth_close'||name==='mouth_frown') && frame.frown>0 && contours.mouth_frown) {
+        const frown=contours.mouth_frown,u=(x-source.left)/Math.max(1,source.right-source.left),t=frame.frown;
+        const sourceCenter=(sample(source.top,u)+sample(source.bottom,u))/2;
+        const targetCenter=mix((sample(closed.top,u)+sample(closed.bottom,u))/2,(sample(frown.top,u)+sample(frown.bottom,u))/2,t);
+        return {x:mix(mix(closed.left,frown.left,t),mix(closed.right,frown.right,t),u),y:y+targetCenter-sourceCenter,visibility:1};
+      }
       if(name==='mouth_close') {
         const u=(x-closed.left)/(closed.right-closed.left),edge=sample(closed.bottom,u);
         const tuck=smooth((frame.openness-.025)/.06);

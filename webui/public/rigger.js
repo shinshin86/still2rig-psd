@@ -36,6 +36,8 @@
     'anger_mark':  { depth: 1.30, group: 'head', fade: 'angerMark' },
     'facedetail':  { depth: 1.02, group: 'head' },
     'headwear':    { depth: 1.20, group: 'head' },
+    'mouth_frown': { depth: 1.08, group: 'head', fade: 'mouthFrown' },
+    'eyes_angry': { depth: 1.12, group: 'head', split: true, fade: 'eyeAngry' },
     'mouth_close': { depth: 1.08, group: 'head', fade: 'mouthClose' },
     'mouth_laugh': { depth: 1.08, group: 'head', fade: 'mouthLaugh' },
     'mouth_round': { depth: 1.08, group: 'head', fade: 'mouthRound' },
@@ -420,6 +422,10 @@
       }
       if (slot.split) {
         var masks = splitSides(e.alpha, W, H, FACE.cx);
+        if(bn==='eyes_angry') {
+          masks={l:new Uint8Array(W*H),r:new Uint8Array(W*H)};
+          for(var p=0;p<W*H;p++) if(e.alpha[p]) masks[p%W<FACE.cx?'l':'r'][p]=1;
+        }
         var got = false;
         ['l', 'r'].forEach(function (s) {
           if (!masks[s]) return;
@@ -547,6 +553,35 @@
       return curve.length ? curve : null;
     }
 
+    function upperCreaseCurve(entry, alpha, eye) {
+      if (!entry || !alpha) return null;
+      var data=entry.layer.imageData.data, width=entry.layer.imageData.width;
+      var left=entry.layer.left|0, top=entry.layer.top|0, curve=[];
+      var height=eye.y1-eye.y0;
+      for(var bin=0;bin<17;bin++) {
+        var x0=Math.floor(eye.x0+(eye.x1-eye.x0)*bin/17);
+        var x1=Math.ceil(eye.x0+(eye.x1-eye.x0)*(bin+1)/17);
+        var sum=0,total=0;
+        for(var x=x0;x<x1;x++) {
+          var dark=null;
+          for(var y=Math.max(top,Math.floor(eye.y0-height*.5));y<eye.y0+height*.45;y++) {
+            var ix=x-left,iy=y-top,i=(iy*width+ix)*4;
+            if(ix<0||ix>=width||iy<0||i>=data.length||alpha[y*W+x]<64)continue;
+            if(alpha[y*W+x]>=235 && data[i]*.3+data[i+1]*.6+data[i+2]*.1<115){dark=y;break;}
+          }
+          if(dark===null)continue;
+          for(var y=Math.max(top,Math.floor(dark-height*.3));y<dark-2;y++) {
+            var ix=x-left,iy=y-top,i=(iy*width+ix)*4,a=alpha[y*W+x];
+            if(ix<0||ix>=width||iy<0||i>=data.length||a<32)continue;
+            var light=data[i]*.3+data[i+1]*.6+data[i+2]*.1;
+            if(light<220){sum+=(y+.5)*a;total+=a;}
+          }
+        }
+        if(total)curve.push({x:(x0+x1)/2,y:sum/total});
+      }
+      return curve.length>=3?curve:null;
+    }
+
     function browCenterCurve(alpha) {
       var box = alpha ? bboxOf(alpha, W, H, 8) : null;
       if (!box) return null;
@@ -582,6 +617,7 @@
         a.browBounds = sided['eyebrow|' + s] ? bboxOf(sided['eyebrow|' + s], W, H, 8) : null;
         a.browCurve = browCenterCurve(sided['eyebrow|' + s]);
         a.upperLid = upperLidCurve(byName['eyelash'] || byName['eyewhite'], sided['eyelash|' + s] || ew, a);
+        a.creaseCurve = upperCreaseCurve(byName['eyelash'], sided['eyelash|' + s], a);
         var smileY = smileHeight(byName['eye_smile'], ink, a);
         if (smileY !== null) {
           a.smileY = smileY;

@@ -5,7 +5,7 @@ export const trackingRanges = Object.fromEntries([
   ...['eyeOpenL', 'eyeOpenR', 'mouthOpen'].map(key => [key, unit]),
 ]);
 const parameterRanges = {
-  ...trackingRanges, eyeSmile: unit, eyeSmileL: unit, eyeSmileR: unit, browWorry: unit, browAngry: unit, browFlat: unit, upperLid: unit, lidTilt: signed, eyeWide: unit, eyeNarrow: unit, eyeWinkL: unit, eyeWinkR: unit, blush: unit, tears: unit, sweat: unit, angerMark: unit, armY: signed, armPos: signed, irisScale: [0.5, 1.3], eyeEase: unit,
+  ...trackingRanges, eyeAngry: unit, mouthFrown: unit, eyeSmile: unit, eyeSmileL: unit, eyeSmileR: unit, browWorry: unit, browAngry: unit, browFlat: unit, upperLid: unit, lidTilt: signed, eyeWide: unit, eyeNarrow: unit, eyeWinkL: unit, eyeWinkR: unit, blush: unit, tears: unit, sweat: unit, angerMark: unit, armY: signed, armPos: signed, irisScale: [0.5, 1.3], eyeEase: unit,
   eyeCY: signed, eyeCAng: signed, eyeScaleL: [0.5, 1.5], eyeScaleR: [0.5, 1.5],
   browAngL: signed, browAngR: signed, browAngSym: signed,
   expressionMouthOpen: unit, mouthLaugh: unit, mouthRound: unit, mouthCY: signed, mouthEase: unit, mouthCAng: signed, mouthScale: [0.5, 1.5],

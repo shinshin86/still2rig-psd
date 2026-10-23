@@ -21,7 +21,9 @@
     "angerMark",
     "mouthLaugh",
     "mouthRound",
-    "expressionMouthOpen"
+    "expressionMouthOpen",
+    "eyeAngry",
+    "mouthFrown"
   ],
   "presets": [
     {
@@ -34,8 +36,6 @@
       "label": "笑顔",
       "values": {
         "eyeSmile": 1,
-        "mouthForm": 0.65,
-        "brow": 0.18,
         "blush": 0.25,
         "mouthLaugh": 1
       }
@@ -54,11 +54,8 @@
       "id": "angry",
       "label": "怒り",
       "values": {
-        "browAngry": 1,
-        "upperLid": 0.7,
-        "lidTilt": 1,
-        "mouthForm": -0.9,
-        "angerMark": 1
+        "eyeAngry": 1,
+        "mouthFrown": 1
       }
     },
     {
@@ -103,8 +100,7 @@
       "id": "wink",
       "label": "ウィンク",
       "values": {
-        "eyeSmileL": 1,
-        "mouthForm": 0.5
+        "eyeSmileL": 1
       }
     }
   ]
