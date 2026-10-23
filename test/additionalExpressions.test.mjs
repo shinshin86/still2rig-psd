@@ -40,6 +40,29 @@ function edit(f, mode) { python('test/edit_expression_fixture.py', f.requests, f
 function nativeAlpha(file) { return Array.from(readPngRgba(file).data).filter((_, i) => i % 4 === 3); }
 afterEach(() => { while (roots.length) fs.rmSync(roots.pop(), { recursive: true, force: true }); });
 
+test('candidate comparison is read-only and only a valid selected candidate is imported with provenance',()=>{
+  const f=fixture();ok('expression-requests',f.id,'--only','eye_smile');edit(f,'additional');
+  const candidates=path.join(f.results,'candidates');fs.mkdirSync(candidates,{recursive:true});
+  fs.copyFileSync(path.join(f.results,'eye_smile.png'),path.join(candidates,'eye_smile-1.png'));
+  python('-c','from PIL import Image; import sys; Image.open(sys.argv[1]).resize((10,100)).save(sys.argv[2])',path.join(candidates,'eye_smile-1.png'),path.join(candidates,'eye_smile-3.png'));
+  const protectedFiles=['job.json',`output/${f.id}.psd`,'expression-requests/requests.json','expression-requests/results/eye_smile.png'].map(file=>path.join(f.jobRoot,file));
+  const hashes=protectedFiles.map(sha256File);
+  const report=ok('expression-candidates',f.id,'--only','eye_smile','--preview-dir',path.join(f.root,'comparison'));
+  assert.deepEqual(report.candidates.map(item=>[item.number,item.report.ok]),[[1,true],[3,false]]);
+  assert.ok(fs.existsSync(path.join(PROJECT_ROOT,report.comparisons.eye_smile)));
+  assert.deepEqual(protectedFiles.map(sha256File),hashes);
+  assert.ok(!fs.existsSync(path.join(f.jobRoot,'generated-expressions')));
+  assert.notEqual(run('import-expressions',f.id,'--pick','eye_smile=3').status,0);
+  assert.deepEqual(protectedFiles.map(sha256File),hashes);
+  const imported=ok('import-expressions',f.id,'--pick','eye_smile=1');
+  assert.equal(imported.variants.eye_smile.candidate.number,1);
+  assert.equal(imported.variants.eye_smile.candidate.sha256,sha256File(path.join(candidates,'eye_smile-1.png')));
+  assert.equal(sha256File(path.join(f.results,'eye_smile.png')),sha256File(path.join(candidates,'eye_smile-1.png')));
+  const repair=ok('repair',f.id,'--expressions',imported.outputDir,'--preview-placeholders');
+  assert.equal(repair.expressionProvenance.eye_smile.candidate.number,1);
+  assert.notEqual(run('import-expressions',f.id,'--pick','../eye_smile=1').status,0);
+});
+
 test('requests preserve the default pair and select additional expressions with their own masks', () => {
   const f = fixture();
   ok('expression-requests', f.id);

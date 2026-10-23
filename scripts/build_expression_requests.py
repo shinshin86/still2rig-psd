@@ -131,7 +131,7 @@ def build_requests(job_id: str, layer_dir: Path, layer_map: Path, output_dir: Pa
     }
     (output_dir / "requests.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     request_title = " and ".join(item["requestLabel"] for item in requested)
-    result_paths = " and ".join(f"results/{item['name']}.png" for item in requested)
+    result_paths = " and ".join(f"results/candidates/{item['name']}-1.png, {item['name']}-2.png, {item['name']}-3.png" for item in requested)
     (output_dir / "README.md").write_text(
         f"# Generate {request_title}\n\n"
         "Ask the image owner for permission before sending these images to an image generation service. "
@@ -146,7 +146,10 @@ def build_requests(job_id: str, layer_dir: Path, layer_map: Path, output_dir: Pa
         f"Save the returned PNGs as {result_paths} in this directory. "
         "Keep the input size and position. Do not overwrite input.png, mask.png or underlay.png. "
         "If you rerun requests, use new results made from the new inputs.\n\n"
-        f"Run `npm run still2rig-psd -- import-expressions {job_id}` to validate and restore full-canvas layers. "
+        f"Run `npm run still2rig-psd -- expression-candidates {job_id}` to compare candidates read-only. "
+        "Show the comparison images and stop for the user's choice. Work on one expression at a time. "
+        f"After selection, run `npm run still2rig-psd -- import-expressions {job_id} --pick NAME=NUMBER` with the chosen names and numbers. "
+        "Direct single results in results/NAME.png still work without --pick. "
         "Then use the reported repair command. Import is not a quality approval: the existing expression QA "
         "and visual review are still required.\n", encoding="utf-8")
     return report

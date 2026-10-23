@@ -7,6 +7,8 @@ import argparse
 import base64
 import json
 import math
+import re
+import shutil
 import sys
 from pathlib import Path
 
@@ -274,13 +276,23 @@ def import_results(args, report):
     if not isinstance(requests.get("variants"), dict) or not requests["variants"] or any(name not in available for name in requests["variants"]):
         raise ValueError("Unknown expression requests. Rerun expression-requests.")
     definitions = [item for name, item in available.items() if name in requests["variants"]]
+    picks = {}
+    if args.pick:
+        for value in args.pick.split(","):
+            match = re.fullmatch(r"([a-z][a-z0-9_]*)=([1-9][0-9]*)", value)
+            if not match or match[1] not in requests["variants"] or match[1] in picks:
+                raise ValueError("Choose requested candidates with --pick NAME=NUMBER[,NAME=NUMBER].")
+            picks[match[1]] = int(match[2])
+        definitions = [item for item in definitions if item["name"] in picks]
     soft_maximum = json.loads((CONFIG_ROOT / "default.json").read_text(encoding="utf-8"))["quality"]["softExpressionMaximumAlpha"]
     outputs = {}
     previews = {}
     extractors = {"diff": extract_artwork, "soft": lambda *values: extract_soft_artwork(*values, maximum_alpha=soft_maximum)}
     for definition in definitions:
         name = definition["name"]
-        result_file = args.result_dir / f"{name}.png"
+        result_file = args.result_dir / (f"candidates/{name}-{picks[name]}.png" if name in picks else f"{name}.png")
+        if name in picks and (result_file.is_symlink() or not result_file.is_file()):
+            raise ValueError(f"{name}: selected candidate does not exist or is a symlink.")
         if not result_file.is_file():
             report["variants"][name] = {"status": "missing"}
             continue
@@ -298,6 +310,8 @@ def import_results(args, report):
         result = Image.open(result_file).convert("RGBA")
         details = {"status": "checking", "resultSize": list(result.size), "inputSize": list(reference.size)}
         report["variants"][name] = details
+        if name in picks:
+            details["candidate"] = {"number": picks[name], "file": result_file.name, "sha256": file_hash(result_file)}
         aspect_error = abs((result.width / result.height) / (reference.width / reference.height) - 1)
         details["aspectRatioError"] = round(aspect_error, 6)
         if aspect_error > 0.01:
@@ -389,6 +403,15 @@ def import_results(args, report):
         raise ValueError("No results found. Save " + " or ".join(f"{item['name']}.png" for item in definitions) + " in the results directory.")
     # Validate every supplied variant before replacing any previously imported art.
     if not args.read_only:
+        selection_file = args.output_dir / 'selections.json'
+        if picks and selection_file.is_symlink():
+            raise ValueError('Candidate selection history must not be a symlink.')
+        selections = json.loads(selection_file.read_text()) if picks and selection_file.is_file() else {}
+        if not isinstance(selections, dict):
+            raise ValueError('Candidate selection history must be an object.')
+        for name in picks:
+            if (args.result_dir / f"{name}.png").is_symlink():
+                raise ValueError("Selected result destinations must not be symlinks.")
         args.output_dir.mkdir(parents=True, exist_ok=True)
         for definition in definitions:
             name = definition["name"]
@@ -397,6 +420,14 @@ def import_results(args, report):
                 outputs[name].save(destination)
             elif destination.exists():
                 destination.unlink()
+        for name, number in picks.items():
+            shutil.copyfile(args.result_dir / "candidates" / f"{name}-{number}.png", args.result_dir / f"{name}.png")
+        if picks:
+            for name in picks:
+                selection = report['variants'][name]['candidate']
+                selection['artworkSha256'] = file_hash(args.output_dir / f'{name}.png')
+                selections[name] = selection
+            selection_file.write_text(json.dumps(selections, indent=2) + '\n')
     if args.preview_dir is not None:
         # Refuse output aliases before any diagnostic image is written.
         if any((args.preview_dir / f"{name}-{label}.png").is_symlink()
@@ -434,6 +465,7 @@ def main():
     parser.add_argument("--max-alignment-shift", type=float, default=12)
     parser.add_argument("--max-alignment-scale", type=float, default=0.03)
     parser.add_argument("--read-only", action="store_true")
+    parser.add_argument("--pick")
     parser.add_argument("--protected-check", choices=("strict", "seam"))
     parser.add_argument("--preview-dir", type=Path)
     parser.add_argument("--psd-occlusion-stdin", action="store_true")

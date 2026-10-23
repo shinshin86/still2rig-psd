@@ -56,7 +56,7 @@ test('requests use the current neutral PSD canvas, face crops, alpha masks and r
   assert.equal(resized.status, 0);
   const result = ok('expression-requests', f.id);
   assert.deepEqual(result.canvas, [96, 96]);
-  assert.match(result.next, /import-expressions/);
+  assert.match(result.next, /expression-candidates/);
   const requests = JSON.parse(fs.readFileSync(path.join(f.requestDir, 'requests.json')));
   assert.equal(requests.schemaVersion, 2);
   assert.equal(requests.jobId, f.id);

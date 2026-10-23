@@ -34,7 +34,9 @@ Usage:
   still2rig-psd repair JOB [--expressions DIR | --preview-expressions DIR | --no-expressions] [--layer-overrides DIR | --no-layer-overrides] [--preview-placeholders]
   still2rig-psd derive-expressions JOB
   still2rig-psd expression-requests JOB [--only eye_smile,blush | all]
+  still2rig-psd expression-candidates JOB [--only eyes_sad] [--request-dir DIR] [--preview-dir DIR]
   still2rig-psd import-expressions JOB [DIR] [--max-outside-mean 6] [--max-outside-p99 20]
+    [--pick eyes_sad=3,mouth_frown=1]
     [--max-band-local-mean 24] [--max-band-flat-mean 12]
     [--protected-band 8] [--alignment-radius 24] [--max-alignment-shift 12] [--max-alignment-scale 0.03]
     [--artwork-threshold 8] [--minimum-component-pixels 4]
@@ -319,7 +321,10 @@ function mergeExpressionInputs(root, manifest, repairRoot, options, inheritedArt
   if (!retained.length && !optional) return null;
   const provenance = {};
   let imported = [];
-  try { const accepted = JSON.parse(fs.readFileSync(path.join(incoming, 'report.json'), 'utf8')).accepted; imported = Array.isArray(accepted) ? accepted : []; } catch { /* Supplied PNGs need no import report. */ }
+  let importedVariants = {};
+  let selectedCandidates = {};
+  try { const report = JSON.parse(fs.readFileSync(path.join(incoming, 'report.json'), 'utf8')); imported = Array.isArray(report.accepted) ? report.accepted : []; importedVariants = report.variants || {}; } catch { /* Supplied PNGs need no import report. */ }
+  try { selectedCandidates=JSON.parse(fs.readFileSync(path.join(incoming,'selections.json'),'utf8')); } catch { /* Direct artwork has no candidate history. */ }
   const preview = new Set();
   for (const item of retained) {
     const old = latest?.expressionProvenance?.[item.name];
@@ -330,6 +335,8 @@ function mergeExpressionInputs(root, manifest, repairRoot, options, inheritedArt
   for (const item of supplied) {
     const derived = Boolean(options['preview-expressions']);
     provenance[item.name] = { kind: derived ? 'derived-preview' : 'supplied-artwork', importedResult: imported.includes(item.name), inheritedFromRepair: null };
+    const candidate = importedVariants[item.name]?.candidate ?? selectedCandidates[item.name];
+    if(candidate?.artworkSha256===sha256File(path.join(incoming,`${item.name}.png`)))provenance[item.name].candidate=candidate;
     if (derived) preview.add(item.name);
   }
   if (retained.length) {
@@ -475,7 +482,7 @@ function expressionRequests(jobId, options) {
     canvas: requests.canvas,
     layerDir: requests.layerDir,
     layerSha256: requests.layerSha256,
-    next: `still2rig-psd import-expressions ${jobId}`,
+    next: `still2rig-psd expression-candidates ${jobId}`,
     note: 'Local requests only. Ask the image owner before sending these crops to an image generation service.',
   };
 }
@@ -498,6 +505,7 @@ function importExpressions(jobId, directory, options) {
     '--output-dir', outputDir, '--report', reportFile,
   ];
   if (options['read-only']) args.push('--read-only');
+  if (options.pick !== undefined) args.push('--pick', options.pick);
   if (options['protected-check'] !== undefined) {
     if (!['strict', 'seam'].includes(options['protected-check'])) throw new Error('--protected-check must be strict or seam.');
     args.push('--protected-check', options['protected-check']);
@@ -528,7 +536,7 @@ function importExpressions(jobId, directory, options) {
     const result = spawnSync('python3', [path.join(PROJECT_ROOT, 'scripts', 'import_expression_results.py'), ...args], { cwd: PROJECT_ROOT, encoding: 'utf8', maxBuffer: 20 * 1024 * 1024, input: visibility });
     report = JSON.parse(result.stdout || '{}');
     if (!report.schemaVersion) throw new Error((result.stderr || 'Expression evaluation failed.').trim());
-    if (!report.ok) process.exitCode = 1;
+    if (!report.ok && !options.candidateReview) process.exitCode = 1;
     return report;
   }
   report = JSON.parse(runPython('import_expression_results.py', args, visibility));
@@ -538,6 +546,39 @@ function importExpressions(jobId, directory, options) {
     report: relativeProjectPath(reportFile),
     next: `still2rig-psd repair ${jobId} --expressions ${relativeProjectPath(outputDir)}`,
   };
+}
+
+function expressionCandidates(jobId, options) {
+  const { root } = loadJob(jobId);
+  const requestDir = options['request-dir'] ? path.resolve(options['request-dir']) : path.join(root, 'expression-requests');
+  const requests = JSON.parse(fs.readFileSync(path.join(requestDir, 'requests.json'), 'utf8'));
+  const names = options.only ? options.only.split(',') : Object.keys(requests.variants);
+  if (!names.length || new Set(names).size !== names.length || names.some(name => !requests.variants[name] || !expressions.some(item=>item.name===name&&item.prompt))) throw new Error('--only must name expressions in the prepared requests.');
+  const candidateDir = path.join(requestDir, 'results', 'candidates');
+  if(!fs.existsSync(candidateDir))throw new Error('Save candidates as expression-requests/results/candidates/NAME-1.png, NAME-2.png, NAME-3.png first.');
+  const files = fs.readdirSync(candidateDir);
+  const selected = names.flatMap(name => files.flatMap(file => {
+    const match = file.match(new RegExp(`^${name}-([1-9][0-9]*)\\.png$`));
+    return match ? [{name,number:Number(match[1])}] : [];
+  })).sort((a,b)=>names.indexOf(a.name)-names.indexOf(b.name)||a.number-b.number);
+  if(!selected.length || (options.only && names.some(name=>!selected.some(item=>item.name===name))))throw new Error('No numbered candidates found for a requested expression.');
+  const output = options['preview-dir'] ? path.resolve(options['preview-dir']) : path.join(STATE_ROOT,'reviews',jobId,`candidates-${Date.now()}`);
+  if(!output.startsWith(`${STATE_ROOT}${path.sep}`)||output===root||output.startsWith(`${root}${path.sep}`)||output===requestDir||output.startsWith(`${requestDir}${path.sep}`))throw new Error('Candidate previews must stay under .still2rig-psd outside the source job and request directory.');
+  let ancestor=output;
+  while(!fs.existsSync(ancestor))ancestor=path.dirname(ancestor);
+  const resolved=path.resolve(fs.realpathSync(ancestor),path.relative(ancestor,output));
+  const sourceRoot=fs.realpathSync(root),sourceRequests=fs.realpathSync(requestDir);
+  if(!resolved.startsWith(`${fs.realpathSync(STATE_ROOT)}${path.sep}`)||[sourceRoot,sourceRequests].some(source=>resolved===source||resolved.startsWith(`${source}${path.sep}`)))throw new Error('Candidate previews must not alias source files.');
+  fs.mkdirSync(output,{recursive:true});
+  for(const name of ['report.json',...new Set(selected.map(item=>`${item.name}-comparison.png`))]) {
+    const destination=path.join(output,name);
+    if(fs.existsSync(destination)&&(fs.lstatSync(destination).isSymbolicLink()||fs.statSync(destination).nlink>1))throw new Error('Candidate review files must not alias source files.');
+  }
+  const candidates=selected.map(item=>({...item,report:importExpressions(jobId,undefined,{...options,'request-dir':requestDir,'read-only':true,'preview-dir':fs.mkdtempSync(path.join(output,`${item.name}-${item.number}-`)),pick:`${item.name}=${item.number}`,candidateReview:true})}));
+  const report={schemaVersion:1,jobId,readOnly:true,requestDir:relativeProjectPath(requestDir),layerDir:requests.layerDir,candidates};
+  const reportFile=path.join(output,'report.json');writeJson(reportFile,report);
+  const sheets=JSON.parse(runPython('build_expression_candidate_sheet.py',['--report',reportFile,'--output-dir',output]));
+  return {...report,report:relativeProjectPath(reportFile),comparisons:sheets, next:'Show the comparison images and wait for the user to choose. Do not import or repair yet.'};
 }
 
 function shiftedMouthFixture(psdFile, output) {
@@ -654,6 +695,8 @@ export async function main(argv = process.argv.slice(2)) {
     print(deriveExpressions(positional[0]), true);
   } else if (command === 'expression-requests') {
     print(expressionRequests(positional[0], options), true);
+  } else if (command === 'expression-candidates') {
+    print(expressionCandidates(positional[0], options), true);
   } else if (command === 'import-expressions') {
     print(importExpressions(positional[0], positional[1], options), true);
   } else if (command === 'status') {
