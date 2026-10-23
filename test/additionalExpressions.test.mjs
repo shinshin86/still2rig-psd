@@ -46,11 +46,17 @@ test('requests preserve the default pair and select additional expressions with 
   assert.deepEqual(Object.keys(JSON.parse(fs.readFileSync(path.join(f.requests, 'requests.json'))).variants), ['eye_close', 'mouth_open']);
   ok('expression-requests', f.id, '--only', 'all');
   const variants = JSON.parse(fs.readFileSync(path.join(f.requests, 'requests.json'))).variants;
-  assert.deepEqual(Object.keys(variants), ['eye_close', 'mouth_open', 'eye_smile', 'blush', 'tears', 'sweat', 'anger_mark', 'mouth_laugh', 'mouth_round']);
+  assert.deepEqual(Object.keys(variants), ['eye_close', 'mouth_open', 'eye_smile', 'blush', 'tears', 'sweat', 'anger_mark', 'mouth_laugh', 'mouth_round', 'mouth_frown',
+    'eyes_angry', 'eyes_sad', 'eyes_half', 'eyes_surprised', 'eyes_shy', 'eyes_flustered']);
   assert.deepEqual(variants.eye_smile.protectedFeatures, { layers: ['eyebrow', 'front hair'], paddingPx: 4 });
   assert.ok(variants.eye_smile.editableBox[1] < variants.eye_close.editableBox[1]);
   const mask = readPngRgba(path.join(f.requests, 'blush/mask.png'));
   assert.ok(Array.from(mask.data).some((value, i) => i % 4 === 3 && value > 0 && value < 255));
+  const eyeMask = readPngRgba(path.join(f.requests, 'eyes_angry/mask.png'));
+  const item = variants.eyes_angry;
+  const editable = (x, y) => eyeMask.data[((y - item.cropBox[1]) * item.scale * eyeMask.width + (x - item.cropBox[0]) * item.scale) * 4 + 3] === 0;
+  for (const point of [[37, 34], [48, 35], [59, 34]]) assert.equal(editable(...point), true);
+  for (const point of [[48, 52], [20, 35]]) assert.equal(editable(...point), false);
   assert.match(run('expression-requests', f.id, '--only', 'blush,unknown').stderr, /Choose known expressions/);
   assert.match(run('expression-requests', f.id, '--only', 'blush,blush').stderr, /Choose known expressions/);
   assert.match(run('expression-requests', f.id, '--only', 'mouth_close').stderr, /Choose known expressions/);

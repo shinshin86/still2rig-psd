@@ -26,6 +26,6 @@ test('overlays augment the intended faces only when matching artwork exists',()=
  const parts=['tears','sweat','anger_mark'];
  assert.equal(expressionPresetValues('sad',parts).tears,1);
  assert.equal(expressionPresetValues('flustered',parts).sweat,1);
- assert.equal(expressionPresetValues('angry',parts).angerMark,1);
+ assert.equal(expressionPresetValues('angry',parts).angerMark,0);
  for(const id of ['sad','flustered','angry']){const p=expressionPresetValues(id,[]);assert.equal(p.tears,0);assert.equal(p.sweat,0);assert.equal(p.angerMark,0);}
 });

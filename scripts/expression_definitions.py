@@ -55,7 +55,7 @@ def validate_expressions(config, layer_map):
                 fail()
         if item["mask"] is not None:
             mask = item["mask"]
-            if "region" in mask and mask["region"] not in ("cheeks", "tears", "temple", "forehead", "mouth"):
+            if "region" in mask and mask["region"] not in ("cheeks", "tears", "temple", "forehead", "mouth", "eyes"):
                 fail()
             if "upperExpansionRatio" in mask and (type(mask["upperExpansionRatio"]) not in (int, float)
                     or not math.isfinite(mask["upperExpansionRatio"]) or not 0 <= mask["upperExpansionRatio"] <= 1):

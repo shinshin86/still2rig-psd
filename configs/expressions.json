@@ -214,6 +214,178 @@
       "placeholderFrom": null,
       "checkFrontHair": true,
       "protectedCheck": "overlay"
+    },
+    {
+      "name": "mouth_frown",
+      "label": "口角を下げた閉じ口",
+      "requestLabel": "口角を下げた閉じ口",
+      "prompt": "Draw a small, almost flat closed mouth with the corners turned slightly down, a calm unhappy expression. Match the original mouth position, width, fine brown line and anime style. Output only the single closed lip line on a transparent background at the reference coordinates. Keep the rest of the canvas transparent. No face, skin, nose, hair, teeth, open mouth, text or background.",
+      "editableLayers": [
+        "mouth_close"
+      ],
+      "mask": {
+        "dilationRatio": 0.2,
+        "minimumDilation": 3,
+        "fillBounds": true,
+        "mouthLimits": true,
+        "region": "mouth"
+      },
+      "extraction": "overlay",
+      "registration": "mouth",
+      "split": false,
+      "placeholderFrom": null,
+      "checkFrontHair": true,
+      "protectedCheck": "overlay"
+    },
+    {
+      "name": "eyes_angry",
+      "label": "怒った目元",
+      "requestLabel": "怒った目元",
+      "prompt": "Quiet restrained anger: lower the brows only slightly and draw their inner ends a little closer, keeping a soft natural shape rather than a strong V. Lower the upper eyelids slightly for a calm, cool, displeased gaze. Keep both irises looking straight ahead at the viewer. Keep the expression subtle and composed, without an angry symbol, veins, tears or sweat. Draw both complete eyes including opaque whites, irises, pupils, highlights, fine lash lines and eyebrows. Match the reference anime style, line thickness, brown ink and iris colors. Preserve eye spacing and overall eye positions. Replace the original eye and brow artwork cleanly, preserving the natural skin behind slightly narrower eyes. Return the whole reference face with ONLY the eyes and brows edited. Keep the original closed mouth exactly unchanged; do not redraw it or change its corners. Preserve the face, hair, nose, cheek color, pose, canvas, skin gradients and all other pixels. Preserve existing transparency outside the head. Do not draw a transparent eye overlay.",
+      "editableLayers": [
+        "eyewhite",
+        "irides",
+        "eyelash",
+        "eyebrow"
+      ],
+      "mask": {
+        "dilationRatio": 0,
+        "minimumDilation": 0,
+        "fillBounds": false,
+        "mouthLimits": false,
+        "region": "eyes"
+      },
+      "extraction": "diff",
+      "registration": "eyes",
+      "split": true,
+      "placeholderFrom": null,
+      "checkFrontHair": true,
+      "protectedCheck": "seam"
+    },
+    {
+      "name": "eyes_sad",
+      "label": "悲しい目元",
+      "requestLabel": "悲しい目元",
+      "prompt": "Sad eyes: worried brows with raised inner ends, drooping outer corners, slightly heavy upper lids, watery irises. Draw both complete eyes including opaque whites, irises, pupils, highlights, fine lash lines and eyebrows. Match the reference anime style, line thickness, brown ink and iris colors. Preserve eye spacing and overall eye positions. Replace the original eyes and eyebrows completely with this new expression. Keep skin outside the changed eyes smooth and identical to the reference; erase the old eye artwork, preserving natural face skin behind the narrower eyes. Return the whole reference face with ONLY the eyes and brows edited. Do not draw a transparent overlay. Preserve the face, hair, mouth, nose, cheek color, pose, canvas and all other pixels.",
+      "editableLayers": [
+        "eyewhite",
+        "irides",
+        "eyelash",
+        "eyebrow"
+      ],
+      "mask": {
+        "dilationRatio": 0,
+        "minimumDilation": 0,
+        "fillBounds": false,
+        "mouthLimits": false,
+        "region": "eyes"
+      },
+      "extraction": "diff",
+      "registration": "eyes",
+      "split": true,
+      "placeholderFrom": null,
+      "checkFrontHair": true,
+      "protectedCheck": "seam"
+    },
+    {
+      "name": "eyes_half",
+      "label": "ジト目",
+      "requestLabel": "ジト目",
+      "prompt": "Unamused half-lidded eyes: flat upper eyelid lines cover the upper half of each iris; flat low eyebrows. Draw both complete eyes including opaque whites, irises, pupils, highlights, fine lash lines and eyebrows. Match the reference anime style, line thickness, brown ink and iris colors. Preserve eye spacing and overall eye positions. Replace the original eyes and eyebrows completely with this new expression. Keep skin outside the changed eyes smooth and identical to the reference; erase the old eye artwork, preserving natural face skin behind the narrower eyes. Return the whole reference face with ONLY the eyes and brows edited. Do not draw a transparent overlay. Preserve the face, hair, mouth, nose, cheek color, pose, canvas and all other pixels.",
+      "editableLayers": [
+        "eyewhite",
+        "irides",
+        "eyelash",
+        "eyebrow"
+      ],
+      "mask": {
+        "dilationRatio": 0,
+        "minimumDilation": 0,
+        "fillBounds": false,
+        "mouthLimits": false,
+        "region": "eyes"
+      },
+      "extraction": "diff",
+      "registration": "eyes",
+      "split": true,
+      "placeholderFrom": null,
+      "checkFrontHair": true,
+      "protectedCheck": "seam"
+    },
+    {
+      "name": "eyes_surprised",
+      "label": "驚いた目元",
+      "requestLabel": "驚いた目元",
+      "prompt": "Surprised eyes: wide open eyes, slightly smaller irises and raised eyebrows. Draw both complete eyes including opaque whites, irises, pupils, highlights, fine lash lines and eyebrows. Match the reference anime style, line thickness, brown ink and iris colors. Preserve eye spacing and overall eye positions. Replace the original eyes and eyebrows completely with this new expression. Keep skin outside the changed eyes smooth and identical to the reference; erase the old eye artwork, preserving natural face skin behind the narrower eyes. Return the whole reference face with ONLY the eyes and brows edited. Do not draw a transparent overlay. Preserve the face, hair, mouth, nose, cheek color, pose, canvas and all other pixels.",
+      "editableLayers": [
+        "eyewhite",
+        "irides",
+        "eyelash",
+        "eyebrow"
+      ],
+      "mask": {
+        "dilationRatio": 0,
+        "minimumDilation": 0,
+        "fillBounds": false,
+        "mouthLimits": false,
+        "region": "eyes"
+      },
+      "extraction": "diff",
+      "registration": "eyes",
+      "split": true,
+      "placeholderFrom": null,
+      "checkFrontHair": true,
+      "protectedCheck": "seam"
+    },
+    {
+      "name": "eyes_shy",
+      "label": "照れた目元",
+      "requestLabel": "照れた目元",
+      "prompt": "Shy eyes: slightly narrowed and downcast eyes with mildly worried brows. Draw both complete eyes including opaque whites, irises, pupils, highlights, fine lash lines and eyebrows. Match the reference anime style, line thickness, brown ink and iris colors. Preserve eye spacing and overall eye positions. Replace the original eyes and eyebrows completely with this new expression. Keep skin outside the changed eyes smooth and identical to the reference; erase the old eye artwork, preserving natural face skin behind the narrower eyes. Return the whole reference face with ONLY the eyes and brows edited. Do not draw a transparent overlay. Preserve the face, hair, mouth, nose, cheek color, pose, canvas and all other pixels.",
+      "editableLayers": [
+        "eyewhite",
+        "irides",
+        "eyelash",
+        "eyebrow"
+      ],
+      "mask": {
+        "dilationRatio": 0,
+        "minimumDilation": 0,
+        "fillBounds": false,
+        "mouthLimits": false,
+        "region": "eyes"
+      },
+      "extraction": "diff",
+      "registration": "eyes",
+      "split": true,
+      "placeholderFrom": null,
+      "checkFrontHair": true,
+      "protectedCheck": "seam"
+    },
+    {
+      "name": "eyes_flustered",
+      "label": "焦った目元",
+      "requestLabel": "焦った目元",
+      "prompt": "Flustered eyes: somewhat wide eyes with worried brows and slightly wandering gaze. Draw both complete eyes including opaque whites, irises, pupils, highlights, fine lash lines and eyebrows. Match the reference anime style, line thickness, brown ink and iris colors. Preserve eye spacing and overall eye positions. Replace the original eyes and eyebrows completely with this new expression. Keep skin outside the changed eyes smooth and identical to the reference; erase the old eye artwork, preserving natural face skin behind the narrower eyes. Return the whole reference face with ONLY the eyes and brows edited. Do not draw a transparent overlay. Preserve the face, hair, mouth, nose, cheek color, pose, canvas and all other pixels.",
+      "editableLayers": [
+        "eyewhite",
+        "irides",
+        "eyelash",
+        "eyebrow"
+      ],
+      "mask": {
+        "dilationRatio": 0,
+        "minimumDilation": 0,
+        "fillBounds": false,
+        "mouthLimits": false,
+        "region": "eyes"
+      },
+      "extraction": "diff",
+      "registration": "eyes",
+      "split": true,
+      "placeholderFrom": null,
+      "checkFrontHair": true,
+      "protectedCheck": "seam"
     }
   ]
 }

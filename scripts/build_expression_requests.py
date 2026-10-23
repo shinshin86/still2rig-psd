@@ -11,7 +11,7 @@ from pathlib import Path
 from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
 from expression_definitions import load_expressions
-from expression_masks import alpha_union, cheek_mask, overlay_mask, expand_up, exclude_eye_obstacles, expand_eye_sides
+from expression_masks import alpha_union, cheek_mask, overlay_mask, whole_eye_mask, expand_up, exclude_eye_obstacles, expand_eye_sides
 from expression_requests_common import composite_layers, file_hash, layer_hash, mouth_limits, neutral_layers
 
 
@@ -55,6 +55,8 @@ def build_requests(job_id: str, layer_dir: Path, layer_map: Path, output_dir: Pa
         variant_composite = composite_layers(variant_layers,definitions=definitions)
         region = mask_options.get("region")
         editable = overlay_mask(layers,composite.size,region) if definition["extraction"] == "overlay" and definition["registration"] == "face" else cheek_mask(layers, composite.size) if region == "cheeks" else alpha_union(layers, targets, composite.size)
+        if region == "eyes":
+            editable = whole_eye_mask(layers, composite.size)
         editable_box = editable.getbbox()
         if not editable_box:
             raise ValueError(f"Cannot prepare {name}: the relevant layers are empty.")

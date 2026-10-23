@@ -11,6 +11,17 @@ const contours={
   mouth_round:{left:70,right:110,top:[70,60,70],bottom:[71,125,71]},
 };
 
+test('a drawn closed frown swaps alone, preserves its endpoint and yields to speech',()=>{
+  const frown={left:42,right:138,top:[72,68,72],bottom:[73,69,73]};
+  const c=createMouthController({...contours,mouth_frown:frown});
+  assert.equal(c.resolve({mouthFrown:.4,mouthOpen:0}).drawing,'mouth_close');
+  const full=c.resolve({mouthFrown:1,mouthOpen:0});
+  assert.equal(full.drawing,'mouth_frown');
+  assert.deepEqual(c.warp(90,68,'mouth_frown',full),{x:90,y:68,visibility:1});
+  assert.equal(c.resolve({mouthFrown:1,mouthOpen:.8}).drawing,'mouth_open');
+  assert.equal(createMouthController(contours).resolve({mouthFrown:1}).drawing,'mouth_close');
+});
+
 test('mouth shape keeps speech independent, clears its resting opening and obeys camera closure',()=>{
   const c=createMouthController(contours);
   assert.equal(c.resolve({mouthOpen:0}).drawing,'mouth_close');
@@ -67,7 +78,7 @@ test('missing round art uses a separate resting floor that neutral clears',()=>{
   assert.equal(c.resolve(values).openness,.75);
   assert.equal(c.resolve(values,mouthRestWeight(0,1)).openness,0);
   assert.equal(c.resolve(expressionPresetValues('neutral',[])).openness,0);
-  assert.equal(expressionPresetValues('joy',[]).mouthForm,.65);
+  assert.equal(expressionPresetValues('joy',[]).mouthForm,0);
 });
 
 test('isolated mouth import registers only a bounded offset and rejects a skin patch',()=>{

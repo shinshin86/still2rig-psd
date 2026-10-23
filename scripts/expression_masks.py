@@ -22,6 +22,28 @@ def expand_up(mask, pixels):
     return mask
 
 
+def whole_eye_mask(layers, size):
+    """Surround replacement eyes and brows with a forehead/cheek skin margin."""
+    support = alpha_union(layers, ["eyewhite", "irides", "eyelash", "eyebrow"], size)
+    face = alpha_union(layers, ["face"], size)
+    box = face.getbbox()
+    if not box:
+        raise ValueError("A visible face is required for eye artwork.")
+    eye_box = support.getbbox()
+    if not eye_box:
+        raise ValueError("Visible eyes and brows are required for replacement artwork.")
+    mask = Image.new("L", size)
+    draw = ImageDraw.Draw(mask)
+    width, height = eye_box[2]-eye_box[0], eye_box[3]-eye_box[1]
+    # Include the bridge between the eyes and a skin margin around every ink
+    # stroke; otherwise the extraction boundary cuts through changed lashes.
+    draw.rectangle((eye_box[0]-width*.08, eye_box[1]-height*.35,
+                    eye_box[2]+width*.08, eye_box[3]+height*.4), fill=255)
+    # The complete drawing continues underneath front hair. The permanent
+    # hair layer stays above it in PSD order, preserving its visible contour.
+    return ImageChops.multiply(mask, face.filter(ImageFilter.MinFilter(9)))
+
+
 def cheek_mask(layers, size):
     face = alpha_union(layers, ["face"], size)
     eyes = alpha_union(layers, ["eyewhite", "irides", "eyelash"], size)
