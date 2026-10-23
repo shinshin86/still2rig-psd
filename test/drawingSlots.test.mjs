@@ -95,3 +95,22 @@ test('smile drawings use the same blink endpoints without a third eye drawing', 
     if(open===1)assert.equal(alpha('eyeClose'),0);
   }
 });
+
+test('sad artwork replaces other eyes and commits at closure without a neutral-face substitute',()=>{
+  const slot=createEyeDrawingSlot();slot.request(0,0,0,1);
+  assert.equal(slot.resolve(0,0,1,.25,0,1),'sad');
+  for(const open of [1,.5,0]){
+    const blink=drawnBlinkOpacity(open);
+    assert.equal(eyeDrawingAlpha('eyeSad','','sad',blink,1),blink.open);
+    assert.equal(eyeDrawingAlpha('eyeAngry','','sad',blink,1),0);
+    assert.equal(eyeDrawingAlpha('eyeSmile','','sad',blink,1),0);
+    assert.equal(eyeDrawingAlpha('eyeOpen','','sad',blink,1),0);
+  }
+  slot.resolve(0,0,.5,.033,0,1);slot.request(0,1);
+  assert.equal(slot.resolve(0,1,.25,.033),'sad');
+  assert.equal(slot.resolve(0,1,0,.033),'angry');
+  const preset=expressionPresetValues('sad',['eyes_sad','mouth_frown','tears']);
+  assert.equal(preset.eyeSad,1);assert.equal(preset.mouthFrown,1);assert.equal(preset.tears,1);
+  for(const key of ['browWorry','upperLid','lidTilt','mouthForm'])assert.equal(preset[key],0);
+  assert.equal(expressionPresetValues('sad',[]).eyeSad,0);
+});

@@ -23,7 +23,8 @@
     "mouthRound",
     "expressionMouthOpen",
     "eyeAngry",
-    "mouthFrown"
+    "mouthFrown",
+    "eyeSad"
   ],
   "presets": [
     {
@@ -62,10 +63,8 @@
       "id": "sad",
       "label": "悲しみ",
       "values": {
-        "browWorry": 1,
-        "upperLid": 0.55,
-        "lidTilt": -1,
-        "mouthForm": -0.8,
+        "eyeSad": 1,
+        "mouthFrown": 1,
         "tears": 1
       }
     },

@@ -361,6 +361,7 @@ const PARAMETER_LABELS: Partial<Record<PsdMotionParameterName, string>> = {
   eyeWide: '目を見開く',
   eyeNarrow: '下まぶたを上げる',
   eyeAngry: '怒った目元',
+  eyeSad: '悲しい目元',
   mouthFrown: '口角を下げた閉じ口',
   eyeWinkL: '左目を閉じる',
   eyeWinkR: '右目を閉じる',
@@ -1966,7 +1967,7 @@ function setCameraConflicts(active: boolean): void {
     'eyeX', 'eyeY', 'mouthOpen',
   ]);
   for (const [name, control] of advancedControls) {
-    const part = name === 'eyeAngry' ? 'eyes_angry' : name === 'mouthFrown' ? 'mouth_frown' : name.startsWith('eyeSmile') ? 'eye_smile' : name === 'blush' || name === 'tears' || name === 'sweat' ? name : name === 'angerMark' ? 'anger_mark' : name === 'mouthLaugh' ? 'mouth_laugh' : name === 'mouthRound' ? 'mouth_round' : null;
+    const part = name === 'eyeSad' ? 'eyes_sad' : name === 'eyeAngry' ? 'eyes_angry' : name === 'mouthFrown' ? 'mouth_frown' : name.startsWith('eyeSmile') ? 'eye_smile' : name === 'blush' || name === 'tears' || name === 'sweat' ? name : name === 'angerMark' ? 'anger_mark' : name === 'mouthLaugh' ? 'mouth_laugh' : name === 'mouthRound' ? 'mouth_round' : null;
     const missing = Boolean(part && !avatarParts.has(part));
     control.unavailable.hidden = !missing;
     control.unavailable.textContent = missing ? `このPSDには${PARAMETER_LABELS[name]}の絵がありません。` : '';
