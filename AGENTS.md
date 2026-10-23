@@ -56,6 +56,23 @@ Treat this folder as a future public repository.
   lid rises; they do not close from the top like a blink first.
 - A transition must not pass through an unrelated expression such as a closed
   blink, and switching between drawings must not be noticeable.
+- Build every expression's final shape from drawn expression artwork (supplied
+  or image-generated). Never fake an expression such as angry, sad or
+  half-closed eyes by bending the neutral eyes, brows or mouth; that lowers the
+  avatar's quality. Mesh deformation is only for the brief switch between
+  drawings. When a PSD lacks the artwork, disable that expression and say why.
+
+## Working pace
+
+- Show visual candidates to the user before spending time on automated gates.
+  If a gate rejects artwork that looks right, stop and ask instead of
+  redesigning the gate.
+- Finish one item end to end (for example one expression) and get it approved
+  before repeating the work for the rest.
+- If the same problem fails twice, stop and report the cause and options
+  instead of starting a third round of tuning.
+- Keep verification proportional: close-ups of the final result and a short
+  strip of intermediate states, with tests and `motion-qa` run once at the end.
 
 ## Local PSD preview
 
