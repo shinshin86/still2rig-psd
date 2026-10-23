@@ -180,6 +180,12 @@
       .request-steps { margin: 0; padding-left: 18px; color: #c4cde0; font-size: 11px; line-height: 1.55; }
       .request-steps li + li { margin-top: 4px; }
       #expression-request-body { display: grid; gap: 10px; }
+      .expression-request-choice { display:flex; gap:9px; align-items:flex-start; padding:8px; border-radius:6px; background:#202b40; cursor:pointer; }
+      .expression-request-choice input { margin-top:4px; }
+      .expression-request-choice span { display:grid; gap:3px; min-width:0; }
+      .expression-request-choice small { color:#bcc8de; line-height:1.5; }
+      .expression-group-status[data-complete="true"] { color:#9bdfb6; }
+      .expression-group-status { white-space:pre-line; }
       .request-recipient { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
       .request-disclosure { margin: 0; padding: 8px 10px; color: #ffe1a6; background: rgb(255 210 124 / 10%); border: 1px solid rgb(255 210 124 / 35%); border-radius: 8px; font-size: 11px; line-height: 1.5; }
       .advanced-panel { border: 1px solid #495570; border-radius: 11px; background: rgb(25 31 45 / 72%); }
@@ -362,13 +368,16 @@
             <div class="advanced-content">
               <p id="expression-request-summary" class="tuning-note"></p>
               <div id="expression-request-body">
+                <details id="expression-choices-control" class="advanced-panel">
+                  <summary id="expression-choices-summary">作ってもらう表情</summary>
+                  <div class="advanced-content">
                 <fieldset id="expression-choices" style="display:grid;gap:8px;margin:0;padding:10px;border:1px solid #495570;border-radius:8px">
                   <legend>作ってもらう表情</legend>
-                  <label class="camera-check"><input type="checkbox" data-expression-choice="eye_close,mouth_open" checked />閉じた目と開いた口</label>
-                  <label class="camera-check"><input type="checkbox" data-expression-choice="eye_smile" />笑い目</label>
-                  <label class="camera-check"><input type="checkbox" data-expression-choice="blush" />頬の赤らみ</label>
                 </fieldset>
-                <p class="tuning-note">追加した笑い目と頬の赤らみは、「細かい設定」のつまみで確認できます。</p>
+                <label class="camera-check"><input id="expression-redraw" type="checkbox" />一部入っている絵も描き直す</label>
+                <p class="tuning-note">笑顔の笑い目は、ウィンクにも使います。怒りマークは「細かい設定」で付けられます。</p>
+                  </div>
+                </details>
                 <div class="field-head"><span>依頼する相手</span></div>
                 <div class="request-recipient" role="group" aria-label="依頼する相手">
                   <button type="button" data-recipient="codex" aria-pressed="true">Codex</button>
@@ -376,15 +385,16 @@
                 </div>
                 <ol class="request-steps" data-recipient-steps="codex">
                   <li>下のボタンで依頼文をコピーします。</li>
-                  <li>このフォルダで開いたCodexに貼り付けて送ります。Codexが絵を描き、このPSDに組み込みます。</li>
-                  <li>完了の連絡が来たら、上の「一覧を更新」を押してPSDを開き直し、追加した絵と品質検査の結果を確認します。</li>
+                  <li>このフォルダで開いたCodexに貼り付けて送ります。1つの表情について、絵の候補を3つずつ用意します。</li>
+                  <li>比較画像を見て、使いたい候補の番号を伝えます。選ぶまではPSDに組み込みません。</li>
+                  <li>組み込み後は「一覧を更新」でPSDを開き直し、表情ボタンで絵と動きを確認します。承認したら次の表情へ進みます。</li>
                 </ol>
                 <ol class="request-steps" data-recipient-steps="claude" hidden>
                   <li>下のボタンで依頼文をコピーします。</li>
                   <li>このフォルダで開いたClaude Codeに貼り付けて送ります。Claude Codeは絵を描けないため、画像生成に渡すファイルと保存先を案内してくれます。</li>
-                  <li>案内に沿ってCodexなどの画像生成で絵を作り、指定された場所に保存します。</li>
-                  <li>保存したことをClaude Codeに伝えると、絵を取り込んでPSDを作り直します。</li>
-                  <li>終わったら、上の「一覧を更新」を押してPSDを開き直し、追加した絵と品質検査の結果を確認します。</li>
+                  <li>案内に沿って、承認した画像生成サービスで候補を3つずつ作り、指定された場所に保存します。</li>
+                  <li>保存したと伝え、比較画像から候補を選びます。選ぶまではPSDに組み込みません。</li>
+                  <li>組み込み後はPSDを開き直し、表情ボタンで確認します。承認したら次の表情へ進みます。</li>
                 </ol>
                 <p id="expression-request-disclosure" class="request-disclosure">顔の画像がCodexの画像生成に送られます。依頼文をコピーすると、送信に同意したものとして依頼文に書き込まれます。</p>
                 <button id="expression-request-copy" type="button">依頼文をコピー</button>
@@ -479,6 +489,7 @@
             <h3 id="expression-heading">表情</h3>
             <div id="expression-buttons" class="expression-buttons" role="group" aria-label="表情を選ぶ"></div>
             <p id="expression-status" class="tuning-note" role="status">いつもの顔</p>
+            <p id="expression-add-hint" class="tuning-note" hidden>足りない絵は、上の<a href="#expression-request-control">「表情の絵を作ってもらう」</a>から依頼できます。</p>
             <p class="tuning-note">この絵でできる動きに合わせて表情を変えます。選んだあと「細かい設定」で調整できます。</p>
           </section>
           <details id="advanced-parameters" class="advanced-panel">

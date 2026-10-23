@@ -1,5 +1,6 @@
 import { expressionPresets, expressionParameterNames, expressionPresetValues, expressionPresetAvailability } from '../../src/expressionPresets.mjs';
-import { requestedExpressions, generatableExpressions } from '../../src/expressions.mjs';
+import { expressionRequestGroups, expressionGroupState, selectedExpressionArtwork, expressionFlowRequest, expressionArtworkLabel } from '../../src/expressionFlow.mjs';
+import { requestedExpressions } from '../../src/expressions.mjs';
 import { installVoiceControls } from './voice/controls';
 import { createLivePublisher } from './live/publisher';
 import { installStreamControls } from './live/controls';
@@ -119,8 +120,22 @@ const expressionRequestSummary = requireElement<HTMLElement>('#expression-reques
 const expressionRequestBody = requireElement<HTMLElement>('#expression-request-body');
 const expressionRequestDisclosure = requireElement<HTMLElement>('#expression-request-disclosure');
 const expressionRecipientButtons = [...document.querySelectorAll<HTMLButtonElement>('[data-recipient]')];
+const expressionChoicesContainer = requireElement<HTMLElement>('#expression-choices');
+const expressionChoicesControl = requireElement<HTMLDetailsElement>('#expression-choices-control');
+const expressionChoicesSummary = requireElement<HTMLElement>('#expression-choices-summary');
+for (const group of expressionRequestGroups) {
+  const label=document.createElement('label');label.className='expression-request-choice';
+  const input=document.createElement('input');input.type='checkbox';input.dataset.expressionChoice=group.id;
+  const content=document.createElement('span'),title=document.createElement('strong'),description=document.createElement('small'),status=document.createElement('small');
+  title.textContent=group.label;description.textContent=group.parts.map(expressionArtworkLabel).join('・');
+  status.dataset.expressionGroupStatus=group.id;status.className='expression-group-status';
+  content.append(title,description,status);label.append(input,content);expressionChoicesContainer.append(label);
+}
 const expressionChoices = [...document.querySelectorAll<HTMLInputElement>('[data-expression-choice]')];
-const selectedExpressions = () => generatableExpressions.filter(item => expressionChoices.some(choice => choice.checked && choice.dataset.expressionChoice?.split(',').includes(item.name)));
+const expressionRedraw = requireElement<HTMLInputElement>('#expression-redraw');
+const selectedGroupIds = () => expressionChoices.filter(choice=>choice.checked && !choice.disabled).map(choice=>choice.dataset.expressionChoice!);
+const selectedExpressions = () => selectedExpressionArtwork(selectedGroupIds(),avatarParts,expressionRedraw.checked);
+let expressionChoicesSource = '';
 const expressionRecipientSteps = [...document.querySelectorAll<HTMLElement>('[data-recipient-steps]')];
 const startRequestCopy = requireElement<HTMLButtonElement>('#start-request-copy');
 const startRequestStatus = requireElement<HTMLElement>('#start-request-status');
@@ -1696,8 +1711,8 @@ async function loadGeneratedPsd(item: GeneratedPsd): Promise<void> {
   generatedPsdSelect.value = item.id;
   activeGeneratedPsdId = item.id;
   generatedPsdOpenFolder.disabled = false;
-  // Open the panel by default only when the PSD still lacks checked expression art.
-  expressionRequestControl.open = Boolean(item.jobId) && item.productionReady !== true;
+  expressionRequestControl.open = false;
+  expressionChoicesControl.open = false;
   syncExpressionRequestControl();
 }
 
@@ -1726,10 +1741,28 @@ function syncExpressionRequestControl(): void {
   const unavailable = !usable && (expressionRequestSource === 'local' || Boolean(item));
   expressionRequestControl.hidden = !usable && !unavailable;
   expressionRequestBody.hidden = !usable;
+  requireElement<HTMLElement>('#expression-add-hint').hidden = !usable || expressionRequestGroups.filter(group=>group.id!=='mark').every(group=>expressionGroupState(group,avatarParts).complete);
+  const choiceSource = `${activeGeneratedPsdId}:${[...avatarParts].sort().join(',')}`;
+  const changedSource = expressionChoicesSource !== choiceSource;
+  if(changedSource){expressionChoicesSource=choiceSource;expressionRedraw.checked=false;expressionChoicesControl.open=false;expressionRequestControl.open=false;}
+  let missingGroups=0;
+  for(const group of expressionRequestGroups) {
+    const state=expressionGroupState(group,avatarParts);
+    const choice=expressionChoices.find(input=>input.dataset.expressionChoice===group.id)!;
+    choice.disabled=state.complete;
+    if(state.complete)choice.checked=true;
+    else {
+      missingGroups+=1;
+      if(changedSource)choice.checked=group.id!=='mark';
+    }
+    const status=expressionChoicesContainer.querySelector<HTMLElement>(`[data-expression-group-status="${group.id}"]`)!;
+    const labels=(names:string[])=>names.map(expressionArtworkLabel).join('・');
+    status.textContent=state.complete?'入っています':state.present.length?`入っています：${labels(state.present)}\n足りない絵：${labels(state.missing)}`:'まだ入っていません';
+    status.dataset.complete=String(state.complete);
+  }
+  expressionChoicesSummary.textContent=`作ってもらう表情（足りない絵がある表情：${missingGroups}）`;
   if (usable) {
-    expressionRequestSummary.textContent = item?.productionReady === true
-      ? 'このPSDには閉じた目と開いた口の絵が入っています。描き直しや、表情の追加を依頼できます。'
-      : 'このPSDには閉じた目と開いた口の絵がまだないため、まばたきや口パクが不自然になります。画像生成でその絵を描き足し、このPSDに組み込めます。';
+    expressionRequestSummary.textContent = '足りない絵がある表情を選び、候補3つの比較画像から使う絵を選べます。絵がそろった表情はチェック済みで表示し、選べません。';
   } else if (unavailable) {
     expressionRequestSummary.textContent =
       'この機能は、このツールで変換したPSD（上の一覧から選ぶPSD）で使えます。手元から開いたPSDには、絵を組み込むための変換時のデータがありません。';
@@ -1742,7 +1775,7 @@ function syncExpressionRequestControl(): void {
   }
   expressionRequestCopy.disabled = selectedExpressions().length === 0;
   expressionRequestDisclosure.hidden = expressionRecipient !== 'codex';
-  expressionRequestStatus.textContent = selectedExpressions().length ? '' : '作ってもらう表情を1つ以上選んでください。';
+  expressionRequestStatus.textContent = missingGroups===0 ? '必要な絵はすべて入っています。追加の依頼はありません。' : selectedExpressions().length ? '' : '作ってもらう表情を1つ以上選んでください。';
   for (const button of startRecipientButtons) {
     button.setAttribute('aria-pressed', String(button.dataset.startRecipient === expressionRecipient));
   }
@@ -1788,45 +1821,8 @@ async function copyStartRequest(): Promise<void> {
 }
 
 function expressionRequestMessage(item: GeneratedPsd, id: string): string {
-  const root = `.still2rig-psd/jobs/${id}`;
-  const target = `対象: ${item.name}（変換の識別名: ${id}）。`;
-  const selected = selectedExpressions();
-  const labels = selected.map(item => item.label).join('・');
-  const selection = selected.map(item => item.name).join(',');
-  const prepare = `まず npm run still2rig-psd -- expression-requests ${id} --only ${selection} を実行してください。`;
-  const names = selected.map(item => item.name).join(' と ');
-  const results = `${root}/expression-requests/results/${selected.map(item => `${item.name}.png`).join(' と ')}`;
-  const finish = [
-    `npm run still2rig-psd -- import-expressions ${id} を実行し、取り込みが通ったら npm run still2rig-psd -- repair ${id} --expressions ${root}/generated-expressions を実行してください。`,
-    '前回の修復で使った差し替え画像は自動で引き継がれます。引き継いだ内容も実行結果で確認してください。',
-    `既存の品質検査の結果と、${labels}の絵を確認して報告してください。`,
-    '笑い目と頬の赤らみは、プレビューの「細かい設定」のつまみで確認できます。',
-  ];
-  const common = [
-    '仮の表情（derive-expressions）で置き換えないでください。',
-    '対象は保存済みPSDのレイヤーです。ブラウザ内の未保存の並べ替えは含めません。コミット・pushはしないでください。',
-  ];
-  if (expressionRecipient === 'codex') {
-    return [
-      `$still2rig-psd を使い、このPSDの${labels}の絵を作って組み込んでください。`,
-      `${target}リポジトリの AGENTS.md とスキルの「Image-generated expressions」の手順に従ってください。`,
-      prepare,
-      'ユーザーはこの画面で、顔の切り抜き画像を Codex の組み込みの画像生成（imagegen）に送ることに同意済みです。ほかの外部サービスは使わないでください。',
-      `${names} それぞれの input.png、mask.png、prompt.txt を使って画像を生成し、${results} に保存してください。`,
-      ...finish,
-      ...common,
-    ].join('\n');
-  }
-  return [
-    `リポジトリの AGENTS.md と .agents/skills/still2rig-psd/SKILL.md を読み、このPSDの${labels}の絵を用意する準備をしてください。`,
-    target,
-    prepare,
-    'Claude Code は画像を生成できません。画像の生成や外部サービスへの送信はしないでください。',
-    `${names} それぞれについて、画像生成に渡すファイル（input.png と mask.png の場所、prompt.txt の内容）と、結果を保存するファイル名（${results}）を具体的に案内して、そこで止まってください。`,
-    '私が結果を保存したと伝えたら、続きを進めてください。',
-    ...finish,
-    ...common,
-  ].join('\n');
+  return expressionFlowRequest({jobId:id,name:item.name,recipient:expressionRecipient,
+    groupIds:selectedGroupIds(),parts:avatarParts,redraw:expressionRedraw.checked});
 }
 
 async function copyExpressionRequest(): Promise<void> {
@@ -2114,6 +2110,8 @@ function installEventListeners(): void {
     void copyExpressionRequest();
   });
   for (const choice of expressionChoices) choice.addEventListener('change', syncExpressionRequestControl);
+  expressionRedraw.addEventListener('change',syncExpressionRequestControl);
+  document.querySelector<HTMLAnchorElement>('#expression-add-hint a')?.addEventListener('click',()=>{expressionRequestControl.open=true;});
   for (const button of expressionRecipientButtons) {
     button.addEventListener('click', () => {
       setExpressionRecipient(button.dataset.recipient === 'claude' ? 'claude' : 'codex');
