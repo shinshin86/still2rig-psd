@@ -38,6 +38,10 @@
     'headwear':    { depth: 1.20, group: 'head' },
     'mouth_frown': { depth: 1.08, group: 'head', fade: 'mouthFrown' },
     'eyes_angry': { depth: 1.12, group: 'head', split: true, fade: 'eyeAngry' },
+    'eyes_surprised': { depth: 1.12, group: 'head', split: true, fade: 'eyeSurprised' },
+    'eyes_shy': { depth: 1.12, group: 'head', split: true, fade: 'eyeShy' },
+    'eyes_flustered': { depth: 1.12, group: 'head', split: true, fade: 'eyeFlustered' },
+    'eyes_half': { depth: 1.12, group: 'head', split: true, fade: 'eyeHalf' },
     'eyes_sad': { depth: 1.12, group: 'head', split: true, fade: 'eyeSad' },
     'mouth_close': { depth: 1.08, group: 'head', fade: 'mouthClose' },
     'mouth_laugh': { depth: 1.08, group: 'head', fade: 'mouthLaugh' },
@@ -423,7 +427,7 @@
       }
       if (slot.split) {
         var masks = splitSides(e.alpha, W, H, FACE.cx);
-        if(bn==='eyes_angry'||bn==='eyes_sad') {
+        if(bn.startsWith('eyes_')) {
           masks={l:new Uint8Array(W*H),r:new Uint8Array(W*H)};
           for(var p=0;p<W*H;p++) if(e.alpha[p]) masks[p%W<FACE.cx?'l':'r'][p]=1;
         }

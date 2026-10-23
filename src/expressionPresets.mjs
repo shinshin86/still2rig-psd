@@ -27,7 +27,7 @@ export function expressionPresetValues(id, parts = []) {
     values.eyeSmile = values.eyeSmileL = values.eyeSmileR = 0;
   }
   if (!available.has('mouth_round')) values.expressionMouthOpen = (values.mouthRound || 0) * 0.75;
-  for (const [key, part] of [['eyeSad','eyes_sad'],['eyeAngry','eyes_angry'],['mouthFrown','mouth_frown'],['blush','blush'],['tears','tears'],['sweat','sweat'],['angerMark','anger_mark'],['mouthLaugh','mouth_laugh'],['mouthRound','mouth_round']]) {
+  for (const [key, part] of [['eyeSurprised','eyes_surprised'],['eyeShy','eyes_shy'],['eyeFlustered','eyes_flustered'],['eyeHalf','eyes_half'],['eyeSad','eyes_sad'],['eyeAngry','eyes_angry'],['mouthFrown','mouth_frown'],['blush','blush'],['tears','tears'],['sweat','sweat'],['angerMark','anger_mark'],['mouthLaugh','mouth_laugh'],['mouthRound','mouth_round']]) {
     if (!available.has(part)) values[key] = 0;
   }
   return values;

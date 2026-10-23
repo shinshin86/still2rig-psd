@@ -1,12 +1,16 @@
 const clamp = value => Math.max(0, Math.min(1, value ?? 0));
+export const drawnEyeDefinitions = ['angry','sad','surprised','shy','flustered','half'].map(drawing => ({drawing,part:`eyes_${drawing}`,parameter:`eye${drawing[0].toUpperCase()}${drawing.slice(1)}`}));
+const kinds = ['smile', ...drawnEyeDefinitions.map(def => def.drawing)];
+const shapeKeys = [...kinds, 'wink'];
+const normalize = values => Object.fromEntries(shapeKeys.map(key => [key, clamp(values?.[key])]));
 
 /** A side owns one drawing. Retarget from the displayed slot, never a queue. */
 export function createEyeDrawingSlot(initial = 'neutral') {
   let drawing = initial;
-  let shape = {smile: initial === 'smile' ? 1 : 0, angry: initial === 'angry' ? 1 : 0, sad: initial === 'sad' ? 1 : 0, wink: 0};
+  let shape = normalize({[initial]:1});
   let destination = null, transition = null, locked = false, closed = false, awaitClosure = false;
   const choose = () => {
-    const weights = {neutral:1-Math.max(shape.smile,shape.angry,shape.sad),smile:shape.smile,angry:shape.angry,sad:shape.sad};
+    const weights = {neutral:1-Math.max(...kinds.map(key=>shape[key])),...Object.fromEntries(kinds.map(key=>[key,shape[key]]))};
     const next=Object.keys(weights).reduce((best,key)=>weights[key]>weights[best]?key:best,drawing);
     if(weights[next]>weights[drawing]+.001)drawing=next;
   };
@@ -15,12 +19,16 @@ export function createEyeDrawingSlot(initial = 'neutral') {
     getState: () => drawing,
     getFrame: () => ({...shape,locked}),
     getSnapshot: () => ({drawing,shape:{...shape},destination:destination&&{...destination},transition:transition&&{from:{...transition.from},elapsed:transition.elapsed},locked,closed,awaitClosure}),
-    setState(value) { drawing = ['neutral', 'smile', 'angry', 'sad'].includes(value) ? value : 'neutral'; shape={smile:drawing==='smile'?1:0,angry:drawing==='angry'?1:0,sad:drawing==='sad'?1:0,wink:0}; },
-    restore(state) { drawing=state.drawing;shape={sad:0,...state.shape};destination=state.destination&&{sad:0,...state.destination};transition=state.transition&&{from:{sad:0,...state.transition.from},elapsed:state.transition.elapsed};locked=state.locked;closed=state.closed;awaitClosure=state.awaitClosure; },
-    request(smile,angry,wink=0,sad=0) { destination={smile:clamp(smile),angry:clamp(angry),sad:clamp(sad),wink:clamp(wink)};awaitClosure=locked;if(!locked)begin(); },
+    setState(value) { drawing = ['neutral',...kinds].includes(value) ? value : 'neutral'; shape=normalize({[drawing]:1}); },
+    restore(state) { drawing=state.drawing;shape=normalize(state.shape);destination=state.destination&&normalize(state.destination);transition=state.transition&&{from:normalize(state.transition.from),elapsed:state.transition.elapsed};locked=state.locked;closed=state.closed;awaitClosure=state.awaitClosure; },
+    request(smile,angry,wink=0,sad=0) { this.requestFrame({smile,angry,wink,sad}); },
+    requestFrame(values) { destination=normalize(values);awaitClosure=locked;if(!locked)begin(); },
     clearTarget() { destination=null;transition=null;awaitClosure=false; },
     resolve(smile, angry, open=1, dt=1/60, wink=0,sad=0) {
-      const incoming={smile:clamp(smile),angry:clamp(angry),sad:clamp(sad),wink:clamp(wink)};
+      return this.resolveFrame({smile,angry,wink,sad},open,dt);
+    },
+    resolveFrame(values,open=1,dt=1/60) {
+      const incoming=normalize(values);
       if(open<1) {
         if(!locked){locked=true;closed=false;awaitClosure=!!destination;transition=null;}
         if(open===0){shape={...(destination??incoming)};choose();closed=true;awaitClosure=false;}
@@ -30,7 +38,7 @@ export function createEyeDrawingSlot(initial = 'neutral') {
       if(destination) {
         if(transition) {
           transition.elapsed+=dt;const t=clamp(transition.elapsed/.25),ease=t*t*(3-2*t);
-          for(const key of ['smile','angry','sad','wink'])shape[key]=transition.from[key]+(destination[key]-transition.from[key])*ease;
+          for(const key of shapeKeys)shape[key]=transition.from[key]+(destination[key]-transition.from[key])*ease;
           if(t===1)transition=null;
         }
       } else shape=incoming;
@@ -42,24 +50,23 @@ export function createEyeDrawingSlot(initial = 'neutral') {
 
 /** All layers of a drawing share the slot; only blink closure may overlap it. */
 export function eyeDrawingAlpha(fade, baseName, drawing, blink, fallback) {
-  if (fade === 'eyeSad') return drawing === 'sad' ? blink.open : 0;
-  if (fade === 'eyeAngry') return drawing === 'angry' ? blink.open : 0;
+  const drawn = drawnEyeDefinitions.find(def=>def.parameter===fade);
+  if (drawn) return drawing === drawn.drawing ? blink.open : 0;
   if (fade === 'eyeSmile') return drawing === 'smile' ? blink.open : 0;
   if (fade === 'eyeOpen') return drawing === 'neutral' ? fallback * blink.open : 0;
   if (fade === 'eyeClose') return drawing === 'neutral' ? Math.max(fallback,blink.closed) : blink.closed;
-  if (baseName === 'eyebrow' && (drawing === 'angry' || drawing === 'sad')) return blink.closed;
+  if (baseName === 'eyebrow' && drawnEyeDefinitions.some(def=>def.drawing===drawing)) return blink.closed;
   return fallback;
 }
 
 /** Do not bend the visible drawing toward two interrupted expressions at once. */
 export function eyeSlotParameters(params, side, drawing, frame) {
   const smile = frame?.smile ?? Math.max(params.eyeSmile || 0, params[`eyeSmile${side}`] || 0);
-  const angry = frame?.angry ?? params.eyeAngry ?? 0;
-  const sad = frame?.sad ?? params.eyeSad ?? 0;
-  const useSad = drawing === 'sad' || (drawing === 'neutral' && sad > Math.max(smile,angry));
-  const useAngry = drawing === 'angry' || (drawing === 'neutral' && !useSad && angry > smile);
-  const drawn = useAngry || useSad;
-  return { ...params, eyeSad: useSad ? sad : 0, eyeAngry: useAngry ? angry : 0,
+  const strengths=drawnEyeDefinitions.map(def=>({...def,value:frame?.[def.drawing]??params[def.parameter]??0}));
+  const strongest=strengths.reduce((best,def)=>def.value>best.value?def:best,strengths[0]);
+  const active=strengths.find(def=>def.drawing===drawing)??(drawing==='neutral'&&strongest.value>smile?strongest:null);
+  const drawn=!!active;
+  return { ...params, ...Object.fromEntries(strengths.map(def=>[def.parameter,def===active?def.value:0])),
     eyeSmile: drawn ? 0 : smile, eyeSmileL: 0, eyeSmileR: 0,
     eyeWinkL: drawn ? 0 : side==='L' ? frame?.wink ?? params.eyeWinkL : 0,
     eyeWinkR: drawn ? 0 : side==='R' ? frame?.wink ?? params.eyeWinkR : 0 };

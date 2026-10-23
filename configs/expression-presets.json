@@ -24,7 +24,11 @@
     "expressionMouthOpen",
     "eyeAngry",
     "mouthFrown",
-    "eyeSad"
+    "eyeSad",
+    "eyeSurprised",
+    "eyeShy",
+    "eyeFlustered",
+    "eyeHalf"
   ],
   "presets": [
     {
@@ -45,10 +49,8 @@
       "id": "shy",
       "label": "照れ",
       "values": {
-        "blush": 1,
-        "upperLid": 0.25,
-        "browWorry": 0.35,
-        "mouthForm": 0.3
+        "eyeShy": 1,
+        "blush": 1
       }
     },
     {
@@ -72,8 +74,7 @@
       "id": "surprised",
       "label": "驚き",
       "values": {
-        "brow": 0.55,
-        "eyeWide": 1,
+        "eyeSurprised": 1,
         "mouthRound": 1
       }
     },
@@ -81,9 +82,7 @@
       "id": "flustered",
       "label": "焦り",
       "values": {
-        "browWorry": 1,
-        "eyeWide": 0.8,
-        "brow": 0.15,
+        "eyeFlustered": 1,
         "sweat": 1
       }
     },
@@ -91,8 +90,7 @@
       "id": "unamused",
       "label": "ジト目",
       "values": {
-        "upperLid": 1,
-        "browFlat": 1
+        "eyeHalf": 1
       }
     },
     {

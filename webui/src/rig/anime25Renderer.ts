@@ -1,7 +1,7 @@
 import { createMouthController, mouthContour, mouthRestWeight, type MouthContour, type MouthFrame, type MouthSelection } from './mouthExpression.mjs';
 import { expressionParameterNames } from '../../../src/expressionPresets.mjs';
 import { drawnEyeFeatures, morphDrawnEye, drawnBlinkOpacity, type DrawnEyeFeatures } from './drawnEye.mjs';
-import { createEyeDrawingSlot, eyeDrawingAlpha, eyeSlotParameters, type EyeDrawing, type EyeDrawingFrame, type EyeDrawingSnapshot } from './eyeDrawing.mjs';
+import { drawnEyeDefinitions, type DrawnEye, createEyeDrawingSlot, eyeDrawingAlpha, eyeSlotParameters, type EyeDrawing, type EyeDrawingFrame, type EyeDrawingSnapshot } from './eyeDrawing.mjs';
 import { composeTrackedExpression, morphClosedWink, shapeBrow, shapeUpperLid, shapeWink, smileForSide, upperLidShape } from './expressionParts.mjs';
 /*!
  * Based on Anime2.5DRig (https://github.com/852wa/Anime2.5DRig)
@@ -650,18 +650,13 @@ export function createAnime25RigAvatar(
     L: layers.some((layer) => layer.bn === 'eye_close' && layer.side === 'L'),
     R: layers.some((layer) => layer.bn === 'eye_close' && layer.side === 'R'),
   };
-  const angryFeatures: Partial<Record<'L'|'R', DrawnEyeFeatures>> = {};
-  for (const layer of layers) if(layer.bn === 'eyes_angry' && (layer.side==='L'||layer.side==='R')) {
+  const eyeFeatures = Object.fromEntries(drawnEyeDefinitions.map(def=>[def.drawing,{}])) as Record<DrawnEye,Partial<Record<'L'|'R',DrawnEyeFeatures>>>;
+  for (const def of drawnEyeDefinitions) for (const layer of layers) if(layer.bn===def.part && (layer.side==='L'||layer.side==='R')) {
     const anchor=layer.side==='L'?anchors.eyeL:anchors.eyeR;
-    if(anchor) angryFeatures[layer.side]=drawnEyeFeatures(layer,anchor);
+    if(anchor)eyeFeatures[def.drawing][layer.side]=drawnEyeFeatures(layer,anchor);
   }
-  const hasEyeAngry = { L: !!angryFeatures.L, R: !!angryFeatures.R };
-  const sadFeatures: Partial<Record<'L'|'R', DrawnEyeFeatures>> = {};
-  for(const layer of layers)if(layer.bn==='eyes_sad'&&(layer.side==='L'||layer.side==='R')) {
-    const anchor=layer.side==='L'?anchors.eyeL:anchors.eyeR;
-    if(anchor)sadFeatures[layer.side]=drawnEyeFeatures(layer,anchor);
-  }
-  const hasEyeSad={L:!!sadFeatures.L,R:!!sadFeatures.R};
+  const hasEyeAngry = {L:!!eyeFeatures.angry.L,R:!!eyeFeatures.angry.R};
+  const drawnShape = (params:Partial<MotionParams>,side:'L'|'R') => Object.fromEntries(drawnEyeDefinitions.map(def=>[def.drawing,eyeFeatures[def.drawing][side]?params[def.parameter]??0:0]));
   const eyeSlots = { L: createEyeDrawingSlot(), R: createEyeDrawingSlot() };
   const eyeDrawings: Record<'L'|'R', EyeDrawing> = { L: 'neutral', R: 'neutral' };
   const eyeFrames = {L:eyeSlots.L.getFrame(),R:eyeSlots.R.getFrame()};
@@ -773,9 +768,9 @@ export function createAnime25RigAvatar(
     const expression = resolveEyeExpression(Math.min(layer.side === 'L' ? params.eyeOpenL : params.eyeOpenR, 1 - wink),
       Math.max(smileForSide(params, layer.side), hasSmile ? requestedWink : 0), hasSmile);
     const eyeOpen = expression.eyeOpen;
-    const sad = layer.side && hasEyeSad[layer.side as 'L'|'R'] ? params.eyeSad : 0;
-    const angry = sad || (layer.side && hasEyeAngry[layer.side as 'L'|'R'] ? params.eyeAngry : 0);
-    const drawnFeatures = layer.side ? (sad?sadFeatures:angryFeatures)[layer.side as 'L'|'R'] : undefined;
+    const activeDrawing = drawnEyeDefinitions.find(def=>params[def.parameter]>0 && layer.side && eyeFeatures[def.drawing][layer.side as 'L'|'R']);
+    const drawnStrength = activeDrawing ? params[activeDrawing.parameter] : 0;
+    const drawnFeatures = activeDrawing && layer.side ? eyeFeatures[activeDrawing.drawing][layer.side as 'L'|'R'] : undefined;
     const lowerProgress = Math.max(expression.smileProgress, params.eyeNarrow * 0.8 * (1 - Math.min(1, wink / 0.9)));
     const winkClosure = wink > 0 ? Math.max(Math.min(1, wink / 0.9), 1 - (layer.side === 'L' ? params.eyeOpenL : params.eyeOpenR)) : 0;
     const lidParameters = { upperLid: params.upperLid, eyeWide: params.eyeWide,
@@ -792,10 +787,10 @@ export function createAnime25RigAvatar(
       const vertex = index >> 1;
       layer.inkVisibility[vertex] = 1;
       layer.lidShade[vertex] = 0;
-      if(eyeAnchor && angry>0 && drawnFeatures && (layer.fade==='eyeAngry'||layer.fade==='eyeSad'||layer.fade==='eyeOpen'||layer.bn==='eyebrow')) {
-        const drawing=layer.fade==='eyeAngry'||layer.fade==='eyeSad';
+      if(eyeAnchor && drawnStrength>0 && drawnFeatures && (layer.fade===activeDrawing?.parameter||layer.fade==='eyeOpen'||layer.bn==='eyebrow')) {
+        const drawing=layer.fade===activeDrawing?.parameter;
         const brow=layer.bn==='eyebrow'||(drawing&&y<drawnFeatures.browCut);
-        const amount=!drawing&&brow&&angry>=.5?0:angry;
+        const amount=!drawing&&brow&&drawnStrength>=.5?0:drawnStrength;
         const point=morphDrawnEye(x,y,eyeAnchor,drawnFeatures,amount,drawing,brow);
         x=point.x;y=point.y;
         if(drawing&&!brow) {
@@ -1189,7 +1184,7 @@ export function createAnime25RigAvatar(
       current[key] += (target[key] - current[key]) * alpha;
       // A discrete expression handoff must reach an exact slider threshold,
       // rather than approach it forever from one side through smoothing.
-      if ((key.startsWith('eyeOpen') || key.startsWith('eyeSmile') || key.startsWith('eyeWink') || key === 'eyeSad' || key === 'eyeAngry' || key === 'mouthFrown' || key === 'mouthLaugh' || key === 'mouthRound') && Math.abs(target[key] - current[key]) < 0.001) current[key] = target[key];
+      if ((key.startsWith('eyeOpen') || key.startsWith('eyeSmile') || key.startsWith('eyeWink') || drawnEyeDefinitions.some(def=>def.parameter===key) || key === 'mouthFrown' || key === 'mouthLaugh' || key === 'mouthRound') && Math.abs(target[key] - current[key]) < 0.001) current[key] = target[key];
     }
 
     const dragStiffness = dragInertia.active ? 90 : 34;
@@ -1204,9 +1199,9 @@ export function createAnime25RigAvatar(
     const params = { ...current };
     for (const side of ['L', 'R'] as const) {
       const smile = hasEyeSmile[side] ? Math.max(smileForSide(params, side), side === 'L' ? params.eyeWinkL : params.eyeWinkR) : 0;
-      eyeDrawings[side] = eyeSlots[side].resolve(smile, hasEyeAngry[side] ? params.eyeAngry : 0,
-        side === 'L' ? params.eyeOpenL : params.eyeOpenR, dt,
-        hasEyeSmile[side] ? 0 : side === 'L' ? params.eyeWinkL : params.eyeWinkR,hasEyeSad[side]?params.eyeSad:0);
+      eyeDrawings[side] = eyeSlots[side].resolveFrame({...drawnShape(params,side),smile,
+        wink:hasEyeSmile[side]?0:side==='L'?params.eyeWinkL:params.eyeWinkR},
+        side==='L'?params.eyeOpenL:params.eyeOpenR,dt);
       eyeFrames[side] = eyeSlots[side].getFrame();
     }
     mouthFrame = mouthController.resolve(params,mouthRestWeight(trackingInput?.mouthOpen,trackingWeight));
@@ -1287,8 +1282,8 @@ export function createAnime25RigAvatar(
     for (const layer of layers) {
       const alpha = fadeAlpha(layer, params, hasEyeClose, hasEyeSmile, mouthFrame.drawing, hasEyeAngry, eyeDrawings, eyeFrames);
       const drawing = layer.fade === 'eyeOpen' ? 'neutral' : layer.fade === 'eyeClose' ? 'closed'
-        : layer.fade === 'eyeSmile' ? 'smile' : layer.fade === 'eyeAngry' ? 'angry' : layer.fade === 'eyeSad' ? 'sad'
-        : layer.bn.startsWith('mouth_') ? layer.bn : layer.bn === 'eyebrow' ? 'brow' : '';
+        : layer.fade === 'eyeSmile' ? 'smile' : drawnEyeDefinitions.find(def=>def.parameter===layer.fade)?.drawing ??
+          (layer.bn.startsWith('mouth_') ? layer.bn : layer.bn === 'eyebrow' ? 'brow' : '');
       if (drawing) drawingLayers.push({ name: layer.name, side: layer.side ?? '', drawing, alpha });
       if (
         alpha < 0.004 &&
@@ -1465,7 +1460,7 @@ export function createAnime25RigAvatar(
         if(!values){eyeSlots[side].clearTarget();continue;}
         const wink=(side==='L'?values.eyeWinkL:values.eyeWinkR)??0;
         const smile=hasEyeSmile[side]?Math.max(values.eyeSmile??0,(side==='L'?values.eyeSmileL:values.eyeSmileR)??0,wink):0;
-        eyeSlots[side].request(smile,hasEyeAngry[side]?values.eyeAngry??0:0,hasEyeSmile[side]?0:wink,hasEyeSad[side]?values.eyeSad??0:0);
+        eyeSlots[side].requestFrame({...drawnShape(values,side),smile,wink:hasEyeSmile[side]?0:wink});
       }
     },
     getDrawingState() { return { eyes: {L:{...eyeFrames.L,drawing:eyeDrawings.L,open:current.eyeOpenL},R:{...eyeFrames.R,drawing:eyeDrawings.R,open:current.eyeOpenR}}, layers: drawingLayers.map(layer => ({ ...layer })) }; },

@@ -21,6 +21,10 @@ export interface PsdMotionParameters {
   eyeSmile: number;
   eyeAngry: number;
   eyeSad: number;
+  eyeSurprised: number;
+  eyeShy: number;
+  eyeFlustered: number;
+  eyeHalf: number;
   mouthFrown: number;
   eyeSmileL: number;
   eyeSmileR: number;
@@ -110,6 +114,10 @@ export const PSD_MOTION_PARAMETER_DEFINITIONS: readonly PsdMotionParameterDefini
       max: 1,
       step: 0.01,
     },
+    { key: 'eyeSurprised', label: '驚いた目元', group: 'eyes', min: 0, max: 1, step: 0.01 },
+    { key: 'eyeShy', label: '照れた目元', group: 'eyes', min: 0, max: 1, step: 0.01 },
+    { key: 'eyeFlustered', label: '焦った目元', group: 'eyes', min: 0, max: 1, step: 0.01 },
+    { key: 'eyeHalf', label: 'ジト目', group: 'eyes', min: 0, max: 1, step: 0.01 },
     { key: 'eyeSad', label: '悲しい目元', group: 'eyes', min: 0, max: 1, step: 0.01 },
     { key: 'eyeAngry', label: '怒った目元', group: 'eyes', min: 0, max: 1, step: 0.01 },
     { key: 'mouthFrown', label: '口角を下げた閉じ口', group: 'mouth', min: 0, max: 1, step: 0.01 },
@@ -371,6 +379,10 @@ export const DEFAULT_PSD_MOTION_PARAMETERS: Readonly<PsdMotionParameters> = {
   eyeSmile: 0,
   eyeAngry: 0,
   eyeSad: 0,
+  eyeSurprised: 0,
+  eyeShy: 0,
+  eyeFlustered: 0,
+  eyeHalf: 0,
   mouthFrown: 0,
   eyeSmileL: 0,
   eyeSmileR: 0,

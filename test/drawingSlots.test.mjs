@@ -114,3 +114,31 @@ test('sad artwork replaces other eyes and commits at closure without a neutral-f
   for(const key of ['browWorry','upperLid','lidTilt','mouthForm'])assert.equal(preset[key],0);
   assert.equal(expressionPresetValues('sad',[]).eyeSad,0);
 });
+
+test('every drawn expression remains exclusive through interrupted transitions and blinks',async()=>{
+  const {drawnEyeDefinitions}=await import('../webui/src/rig/eyeDrawing.mjs');
+  const parts=drawnEyeDefinitions.map(def=>def.part);
+  const slot=createEyeDrawingSlot();
+  for(const def of drawnEyeDefinitions){
+    slot.requestFrame({[def.drawing]:1});
+    for(let n=0;n<5;n++)slot.resolveFrame({},1,.02);
+    const before=slot.getFrame(),drawing=slot.getState();
+    slot.resolveFrame({},.7);slot.requestFrame({[def.drawing]:1});
+    slot.resolveFrame({},.3);
+    assert.equal(slot.getState(),drawing);
+    for(const key of Object.keys(before).filter(key=>key!=='locked'))assert.equal(slot.getFrame()[key],before[key]);
+    slot.resolveFrame({},0);assert.equal(slot.getState(),def.drawing);
+    for(const open of [0,.3,.7,1]){
+      slot.resolveFrame({},open);
+      const blink=drawnBlinkOpacity(open);
+      for(const other of drawnEyeDefinitions)assert.equal(eyeDrawingAlpha(other.parameter,'',slot.getState(),blink,1),other===def?blink.open:0);
+      assert.equal(eyeDrawingAlpha('eyeOpen','',slot.getState(),blink,1),0);
+      assert.equal(eyeDrawingAlpha(undefined,'eyebrow',slot.getState(),blink,1),blink.closed);
+    }
+  }
+  for(const [id,key] of [['shy','eyeShy'],['surprised','eyeSurprised'],['flustered','eyeFlustered'],['unamused','eyeHalf']]){
+    const values=expressionPresetValues(id,parts);
+    assert.equal(values[key],1);assert.equal(expressionPresetValues(id,[])[key],0);
+    for(const legacy of ['upperLid','browWorry','browFlat','brow','eyeWide','mouthForm'])assert.equal(values[legacy],0);
+  }
+});
