@@ -180,9 +180,10 @@
       .request-steps { margin: 0; padding-left: 18px; color: #c4cde0; font-size: 11px; line-height: 1.55; }
       .request-steps li + li { margin-top: 4px; }
       #expression-request-body { display: grid; gap: 10px; }
-      .expression-request-choice { display:flex; gap:9px; align-items:flex-start; padding:8px; border-radius:6px; background:#202b40; cursor:pointer; }
-      .expression-request-choice input { margin-top:4px; }
-      .expression-request-choice span { display:grid; gap:3px; min-width:0; }
+      .expression-request-choice { display:grid; gap:5px; min-width:0; padding:10px; border-radius:6px; background:#202b40; }
+      .expression-request-choice input[type="checkbox"] { margin-top:4px; }
+      .expression-redraw-note { display:grid; gap:5px; font-size:12px; color:#bcc8de; }
+      .expression-redraw-note input { box-sizing:border-box; width:100%; min-width:0; padding:8px; color:#edf3ff; background:#111b2b; border:1px solid #61708d; border-radius:5px; }
       .expression-request-choice small { color:#bcc8de; line-height:1.5; }
       .expression-group-status[data-complete="true"] { color:#9bdfb6; }
       .expression-group-status { white-space:pre-line; }
@@ -374,8 +375,7 @@
                 <fieldset id="expression-choices" style="display:grid;gap:8px;margin:0;padding:10px;border:1px solid #495570;border-radius:8px">
                   <legend>作ってもらう表情</legend>
                 </fieldset>
-                <label class="camera-check"><input id="expression-redraw" type="checkbox" />一部入っている絵も描き直す</label>
-                <p class="tuning-note">笑顔の笑い目は、ウィンクにも使います。怒りマークは「細かい設定」で付けられます。</p>
+                <p class="tuning-note">同じ絵を使う表情も一緒に変わります。たとえば笑い目は、笑顔とウィンクで共通です。怒りマークは「細かい設定」で付けられます。</p>
                   </div>
                 </details>
                 <div class="field-head"><span>依頼する相手</span></div>
@@ -385,16 +385,16 @@
                 </div>
                 <ol class="request-steps" data-recipient-steps="codex">
                   <li>下のボタンで依頼文をコピーします。</li>
-                  <li>このフォルダで開いたCodexに貼り付けて送ります。1つの表情について、絵の候補を3つずつ用意します。</li>
-                  <li>比較画像を見て、使いたい候補の番号を伝えます。選ぶまではPSDに組み込みません。</li>
-                  <li>組み込み後は「一覧を更新」でPSDを開き直し、表情ボタンで絵と動きを確認します。承認したら次の表情へ進みます。</li>
+                  <li>このフォルダで開いたCodexに貼り付けて送ります。選んだ表情の絵をまとめて作り、確認できた絵をPSDに組み込みます。</li>
+                  <li>終わったら完成した表情の一覧が届きます。「一覧を更新」でPSDを開き直し、表情ボタンで確認できます。</li>
+                  <li>気になる表情があれば「作り直す」を選び、希望を書いてもう一度依頼できます。</li>
                 </ol>
                 <ol class="request-steps" data-recipient-steps="claude" hidden>
                   <li>下のボタンで依頼文をコピーします。</li>
                   <li>このフォルダで開いたClaude Codeに貼り付けて送ります。Claude Codeは絵を描けないため、画像生成に渡すファイルと保存先を案内してくれます。</li>
-                  <li>案内に沿って、承認した画像生成サービスで候補を3つずつ作り、指定された場所に保存します。</li>
-                  <li>保存したと伝え、比較画像から候補を選びます。選ぶまではPSDに組み込みません。</li>
-                  <li>組み込み後はPSDを開き直し、表情ボタンで確認します。承認したら次の表情へ進みます。</li>
+                  <li>案内に沿って、利用する画像生成サービスを自分で選び、各絵を1枚ずつ作って指定された場所に保存します。</li>
+                  <li>保存したと伝えると、まとめて確認し、使える絵をPSDに組み込みます。作り直しが必要な絵は案内されます。</li>
+                  <li>終わったらPSDを開き直して確認します。気になる表情は「作り直す」からもう一度依頼できます。</li>
                 </ol>
                 <p id="expression-request-disclosure" class="request-disclosure">顔の画像がCodexの画像生成に送られます。依頼文をコピーすると、送信に同意したものとして依頼文に書き込まれます。</p>
                 <button id="expression-request-copy" type="button">依頼文をコピー</button>

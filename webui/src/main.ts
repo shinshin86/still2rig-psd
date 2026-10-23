@@ -124,17 +124,25 @@ const expressionChoicesContainer = requireElement<HTMLElement>('#expression-choi
 const expressionChoicesControl = requireElement<HTMLDetailsElement>('#expression-choices-control');
 const expressionChoicesSummary = requireElement<HTMLElement>('#expression-choices-summary');
 for (const group of expressionRequestGroups) {
-  const label=document.createElement('label');label.className='expression-request-choice';
-  const input=document.createElement('input');input.type='checkbox';input.dataset.expressionChoice=group.id;
-  const content=document.createElement('span'),title=document.createElement('strong'),description=document.createElement('small'),status=document.createElement('small');
+  const row=document.createElement('div');row.className='expression-request-choice';
+  const title=document.createElement('strong'),description=document.createElement('small'),status=document.createElement('small');
   title.textContent=group.label;description.textContent=group.parts.map(expressionArtworkLabel).join('・');
   status.dataset.expressionGroupStatus=group.id;status.className='expression-group-status';
-  content.append(title,description,status);label.append(input,content);expressionChoicesContainer.append(label);
+  const choiceLabel=document.createElement('label'),choice=document.createElement('input');choiceLabel.className='camera-check';
+  choice.type='checkbox';choice.dataset.expressionChoice=group.id;choiceLabel.append(choice,'足りない絵を作ってもらう');
+  const redrawLabel=document.createElement('label'),redraw=document.createElement('input');redrawLabel.className='camera-check';
+  redraw.type='checkbox';redraw.dataset.expressionRedraw=group.id;redrawLabel.append(redraw,'作り直す');
+  const noteLabel=document.createElement('label'),note=document.createElement('input');noteLabel.className='expression-redraw-note';
+  note.type='text';note.maxLength=300;note.dataset.expressionNote=group.id;note.placeholder='例：もう少し静かな怒りに';
+  noteLabel.append('作り直すときの希望（任意）',note);
+  row.append(title,description,status,choiceLabel,redrawLabel,noteLabel);expressionChoicesContainer.append(row);
 }
 const expressionChoices = [...document.querySelectorAll<HTMLInputElement>('[data-expression-choice]')];
-const expressionRedraw = requireElement<HTMLInputElement>('#expression-redraw');
+const expressionRedrawChoices = [...document.querySelectorAll<HTMLInputElement>('[data-expression-redraw]')];
+const expressionNotes = [...document.querySelectorAll<HTMLInputElement>('[data-expression-note]')];
 const selectedGroupIds = () => expressionChoices.filter(choice=>choice.checked && !choice.disabled).map(choice=>choice.dataset.expressionChoice!);
-const selectedExpressions = () => selectedExpressionArtwork(selectedGroupIds(),avatarParts,expressionRedraw.checked);
+const redrawGroupIds = () => expressionRedrawChoices.filter(choice=>choice.checked && !choice.disabled).map(choice=>choice.dataset.expressionRedraw!);
+const selectedExpressions = () => selectedExpressionArtwork(selectedGroupIds(),avatarParts,redrawGroupIds());
 let expressionChoicesSource = '';
 const expressionRecipientSteps = [...document.querySelectorAll<HTMLElement>('[data-recipient-steps]')];
 const startRequestCopy = requireElement<HTMLButtonElement>('#start-request-copy');
@@ -362,6 +370,10 @@ const PARAMETER_LABELS: Partial<Record<PsdMotionParameterName, string>> = {
   eyeNarrow: '下まぶたを上げる',
   eyeAngry: '怒った目元',
   eyeSad: '悲しい目元',
+  eyeSurprised: '驚いた目元',
+  eyeShy: '照れた目元',
+  eyeFlustered: '焦った目元',
+  eyeHalf: 'ジト目',
   mouthFrown: '口角を下げた閉じ口',
   eyeWinkL: '左目を閉じる',
   eyeWinkR: '右目を閉じる',
@@ -1745,17 +1757,22 @@ function syncExpressionRequestControl(): void {
   requireElement<HTMLElement>('#expression-add-hint').hidden = !usable || expressionRequestGroups.filter(group=>group.id!=='mark').every(group=>expressionGroupState(group,avatarParts).complete);
   const choiceSource = `${activeGeneratedPsdId}:${[...avatarParts].sort().join(',')}`;
   const changedSource = expressionChoicesSource !== choiceSource;
-  if(changedSource){expressionChoicesSource=choiceSource;expressionRedraw.checked=false;expressionChoicesControl.open=false;expressionRequestControl.open=false;}
+  if(changedSource){expressionChoicesSource=choiceSource;for(const input of expressionRedrawChoices)input.checked=false;for(const note of expressionNotes)note.value='';expressionChoicesControl.open=false;expressionRequestControl.open=false;}
   let missingGroups=0;
   for(const group of expressionRequestGroups) {
     const state=expressionGroupState(group,avatarParts);
     const choice=expressionChoices.find(input=>input.dataset.expressionChoice===group.id)!;
     choice.disabled=state.complete;
-    if(state.complete)choice.checked=true;
+    choice.parentElement!.hidden=state.complete;
+    if(state.complete)choice.checked=false;
     else {
       missingGroups+=1;
       if(changedSource)choice.checked=group.id!=='mark';
     }
+    const redraw=expressionRedrawChoices.find(input=>input.dataset.expressionRedraw===group.id)!;
+    redraw.disabled=!state.present.length;redraw.parentElement!.hidden=!state.present.length;
+    const note=expressionNotes.find(input=>input.dataset.expressionNote===group.id)!;
+    note.parentElement!.hidden=!redraw.checked;note.disabled=!redraw.checked;
     const status=expressionChoicesContainer.querySelector<HTMLElement>(`[data-expression-group-status="${group.id}"]`)!;
     const labels=(names:string[])=>names.map(expressionArtworkLabel).join('・');
     status.textContent=state.complete?'入っています':state.present.length?`入っています：${labels(state.present)}\n足りない絵：${labels(state.missing)}`:'まだ入っていません';
@@ -1763,7 +1780,7 @@ function syncExpressionRequestControl(): void {
   }
   expressionChoicesSummary.textContent=`作ってもらう表情（足りない絵がある表情：${missingGroups}）`;
   if (usable) {
-    expressionRequestSummary.textContent = '足りない絵がある表情を選び、候補3つの比較画像から使う絵を選べます。絵がそろった表情はチェック済みで表示し、選べません。';
+    expressionRequestSummary.textContent = '足りない絵をまとめて作ってもらえます。入っている絵を変えたいときは、表情ごとの「作り直す」を選んでください。';
   } else if (unavailable) {
     expressionRequestSummary.textContent =
       'この機能は、このツールで変換したPSD（上の一覧から選ぶPSD）で使えます。手元から開いたPSDには、絵を組み込むための変換時のデータがありません。';
@@ -1776,7 +1793,7 @@ function syncExpressionRequestControl(): void {
   }
   expressionRequestCopy.disabled = selectedExpressions().length === 0;
   expressionRequestDisclosure.hidden = expressionRecipient !== 'codex';
-  expressionRequestStatus.textContent = missingGroups===0 ? '必要な絵はすべて入っています。追加の依頼はありません。' : selectedExpressions().length ? '' : '作ってもらう表情を1つ以上選んでください。';
+  expressionRequestStatus.textContent = selectedExpressions().length ? '' : missingGroups===0 ? '必要な絵はすべて入っています。変更したい表情は「作り直す」を選べます。' : '作ってもらう表情を1つ以上選んでください。';
   for (const button of startRecipientButtons) {
     button.setAttribute('aria-pressed', String(button.dataset.startRecipient === expressionRecipient));
   }
@@ -1823,7 +1840,8 @@ async function copyStartRequest(): Promise<void> {
 
 function expressionRequestMessage(item: GeneratedPsd, id: string): string {
   return expressionFlowRequest({jobId:id,name:item.name,recipient:expressionRecipient,
-    groupIds:selectedGroupIds(),parts:avatarParts,redraw:expressionRedraw.checked});
+    groupIds:selectedGroupIds(),parts:avatarParts,redrawGroupIds:redrawGroupIds(),
+    notes:Object.fromEntries(expressionNotes.map(note=>[note.dataset.expressionNote!,note.value]))});
 }
 
 async function copyExpressionRequest(): Promise<void> {
@@ -1967,7 +1985,7 @@ function setCameraConflicts(active: boolean): void {
     'eyeX', 'eyeY', 'mouthOpen',
   ]);
   for (const [name, control] of advancedControls) {
-    const part = name === 'eyeSad' ? 'eyes_sad' : name === 'eyeAngry' ? 'eyes_angry' : name === 'mouthFrown' ? 'mouth_frown' : name.startsWith('eyeSmile') ? 'eye_smile' : name === 'blush' || name === 'tears' || name === 'sweat' ? name : name === 'angerMark' ? 'anger_mark' : name === 'mouthLaugh' ? 'mouth_laugh' : name === 'mouthRound' ? 'mouth_round' : null;
+    const part = name === 'eyeSurprised' ? 'eyes_surprised' : name === 'eyeShy' ? 'eyes_shy' : name === 'eyeFlustered' ? 'eyes_flustered' : name === 'eyeHalf' ? 'eyes_half' : name === 'eyeSad' ? 'eyes_sad' : name === 'eyeAngry' ? 'eyes_angry' : name === 'mouthFrown' ? 'mouth_frown' : name.startsWith('eyeSmile') ? 'eye_smile' : name === 'blush' || name === 'tears' || name === 'sweat' ? name : name === 'angerMark' ? 'anger_mark' : name === 'mouthLaugh' ? 'mouth_laugh' : name === 'mouthRound' ? 'mouth_round' : null;
     const missing = Boolean(part && !avatarParts.has(part));
     control.unavailable.hidden = !missing;
     control.unavailable.textContent = missing ? `このPSDには${PARAMETER_LABELS[name]}の絵がありません。` : '';
@@ -2111,7 +2129,7 @@ function installEventListeners(): void {
     void copyExpressionRequest();
   });
   for (const choice of expressionChoices) choice.addEventListener('change', syncExpressionRequestControl);
-  expressionRedraw.addEventListener('change',syncExpressionRequestControl);
+  for(const choice of expressionRedrawChoices)choice.addEventListener('change',syncExpressionRequestControl);
   document.querySelector<HTMLAnchorElement>('#expression-add-hint a')?.addEventListener('click',()=>{expressionRequestControl.open=true;});
   for (const button of expressionRecipientButtons) {
     button.addEventListener('click', () => {
