@@ -146,36 +146,49 @@ sorting on phones is not supported.
 For a generated PSD, **表情の絵を作ってもらう** in the preview groups requests by
 expression button and shows which drawings are already present. Both the panel
 and its expression list start collapsed, with a count of expressions missing art.
-Complete expressions are checked and disabled, and excluded from requests. Partial
-expressions remain selectable, with an option to redraw their existing parts too.
-With **Codex**, the panel shows that face
-crops will be sent to Codex image generation, and copying the request records
-that agreement. Generate three candidates per drawing, compare them with the original,
-and stop for the user's selection before importing. Complete and approve one expression
-before moving to the next. With
-**Claude Code**, which cannot generate images, the request prepares the files,
-tells you what to hand to an image generator and where to save the results,
-and resumes after you report they are saved. PSDs opened from your computer do
-not have the conversion data this needs, so the panel only explains that.
+Missing artwork is selected initially. Existing expressions offer **作り直す**
+with an optional note. Redrawing shared art also changes other expressions that
+use it; for example, smiling eyes are shared by joy and wink.
+With **Codex**, the panel explains that face crops are sent to Codex image
+generation, and copying the request records that agreement. One request covers
+all selected expressions: generate one image per drawing, accept the first that
+passes import checks and visual review, and retry a failed drawing at most twice.
+Skip any drawing that still fails, preserve its previous art, and continue with
+the others. Import accepted drawings together and finish with one overview,
+retry/skip reasons, and test results. No candidate selection is needed between
+expressions. With **Claude Code**, which cannot generate images, the request
+prepares all files and explains what to send to an approved image generator and
+where to save each result. After those images are available, it performs the same
+review and import flow. PSDs opened from your computer do not have the conversion
+data this needs, so the panel only explains that.
 
 You can also run the commands directly:
 
 ```bash
-npm run still2rig-psd -- expression-requests demo --only eyes_sad
-# After consent, use input.png, mask.png and prompt.txt to generate three candidates.
-# Save results/candidates/eyes_sad-1.png, eyes_sad-2.png and eyes_sad-3.png.
-npm run still2rig-psd -- expression-candidates demo --only eyes_sad
-# Show the comparison and stop. If the user chooses candidate 3:
-npm run still2rig-psd -- import-expressions demo --pick eyes_sad=3
+npm run still2rig-psd -- expression-requests demo --only eyes_sad,mouth_frown
+# After consent, generate one image using each input.png, mask.png and prompt.txt.
+# Save results/eyes_sad.png and results/mouth_frown.png.
+# Check each image without changing the PSD; inspect its exported preview too.
+npm run still2rig-psd -- import-expressions demo --only eyes_sad --read-only --preview-dir .still2rig-psd/review/demo/eyes_sad
+npm run still2rig-psd -- import-expressions demo --only mouth_frown --read-only --preview-dir .still2rig-psd/review/demo/mouth_frown
+# When both pass checks and visual review, import them together.
+npm run still2rig-psd -- import-expressions demo --only eyes_sad,mouth_frown
 npm run still2rig-psd -- repair demo --expressions .still2rig-psd/jobs/demo/generated-expressions
 ```
 
-Candidate review does not change the source PSD, manifest, or imported artwork.
-Its sheets show masked face replacements, eye/mouth close-ups, original front hair
-and accessories, and each candidate's import checks. Passing checks is not visual
-approval. `--preview-dir` selects a review directory under `.still2rig-psd/` outside
-the source data; `--request-dir` selects archived requests. The original single-image
-flow still works: save `results/eyes_sad.png` and import without `--pick`.
+Inspect whether each image reads as the intended expression, matches the original
+style, line weight and colors, avoids duplicate eyes/brows/mouths, and adds nothing
+outside the requested region. Keep requests and their recorded hashes unchanged
+until all images have been reviewed and imported. `--only` limits validation and
+replacement to the named drawings, preserving other imported art. If an image
+fails after two retries, omit it from the final import list; if none pass, skip
+repair and report the reasons. Never weaken checks to accept an image.
+
+`expression-candidates` and `import-expressions --pick` remain available for
+optional numbered comparisons and development. Read-only review does not change
+the source PSD, manifest, or imported artwork. `--preview-dir` selects a review
+directory under `.still2rig-psd/` outside the source data; `--request-dir` selects
+archived requests. Passing import checks alone does not establish visual quality.
 
 Requests use a face crop of the current PSD layers, including the latest repair,
 with front hair and head accessories hidden. Import removes pixels matching the

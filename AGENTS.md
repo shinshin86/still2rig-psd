@@ -64,11 +64,15 @@ Treat this folder as a future public repository.
 
 ## Working pace
 
-- Show visual candidates to the user before spending time on automated gates.
-  If a gate rejects artwork that looks right, stop and ask instead of
-  redesigning the gate.
-- Finish one item end to end (for example one expression) and get it approved
-  before repeating the work for the rest.
+- When a user asks for expression artwork, finish every requested expression in
+  one run without stopping for per-item approval. Generate one candidate per
+  drawing and accept it when the import checks pass and it visibly matches the
+  expression and the original style. Regenerate a failing drawing at most twice,
+  skip it with a reason if it still fails, and end with one overview of all
+  results. The user asks for redos afterwards.
+- When changing the tool itself, show visual candidates for a new art
+  direction before building on it. If a gate rejects artwork that looks right,
+  stop and ask instead of redesigning the gate.
 - If the same problem fails twice, stop and report the cause and options
   instead of starting a third round of tuning.
 - Keep verification proportional: close-ups of the final result and a short

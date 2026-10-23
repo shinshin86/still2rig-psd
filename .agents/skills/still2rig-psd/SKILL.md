@@ -114,54 +114,77 @@ as approval for Codex imagegen only, not for other services. Otherwise, explain
 which face crops and service will be used, then ask and wait. Preparing local
 request files alone does not require this consent.
 
-Work on one expression end to end before starting another. Inspect the input,
-mask and prompt, including the editable area beneath the original front hair.
-Generate **three candidates per drawing** using those exact files and save them
-under `expression-requests/results/candidates/NAME-1.png`, `NAME-2.png` and
-`NAME-3.png`. Keep the requested dimensions and transparency. Do not change the
-input, mask or underlay. No generation is authorized merely by preparing files.
+Prepare all requested drawings together before generating any image. Inspect
+each input, mask and prompt, including the editable area beneath the original
+front hair. Generate **one image per drawing** using those exact files and save
+it as `expression-requests/results/NAME.png`. Keep the requested dimensions and
+transparency. Do not change the input, mask, underlay or recorded hashes.
+Preparing files alone never authorizes generation.
 
-If the agent cannot generate images (for example, Claude Code), stop and give
-the user the exact input/mask paths, prompt contents and three output filenames.
-Wait for the user to save the generated candidates. Do not substitute derived art.
+Complete every requested expression in one run without asking the user to pick
+candidates or approve each expression. For a redraw, replace the selected
+expression's existing artwork, reflect any note only in its drawing direction,
+and preserve unrelated art. Shared drawings such as blush, smiling eyes and the
+frowning mouth affect every expression that uses them; the preview explains this.
 
-Review candidates without importing:
+If the agent cannot generate images (for example, Claude Code), give all exact
+input/mask paths, prompt contents and single-result filenames together. Do not
+send images to an unapproved service or substitute derived art. Wait only for
+those images to be supplied; after the user reports they are saved, continue
+through review, import and repair without intermediate candidate selection.
+
+For each generated image, run the import checks without changing the source:
 
 ```bash
-npm run still2rig-psd -- expression-candidates <job> --only eyes_sad
+npm run still2rig-psd -- import-expressions <job> --only eyes_sad --read-only --preview-dir .still2rig-psd/review/<job>/eyes_sad
 ```
 
-The command uses the same import checks in read-only mode and produces a comparison
-of the original and masked candidates, eye/mouth close-ups, and pass/fail results.
-Original front hair and accessories are overlaid. It does not modify the source
-PSD, job.json, requests or imported art. Review images stay outside the source job
-under `.still2rig-psd/`; `--preview-dir DIR` chooses that destination and
-`--request-dir DIR` selects archived requests. Stale provenance remains a failed
-check; never rewrite hashes or relax gates to approve an archived candidate.
+Inspect the exported artwork and composite. A passing check is necessary but
+does not establish visual quality. Accept the first image that passes both the
+checks and all of these visual criteria:
 
-**Show the comparison images and stop for the user's choice.** Passing import
-checks does not select a candidate or establish visual quality. Accept direction
-changes here. Never import, repair, or generate the next expression before this
-selection. Aim for 20 minutes per expression; report and stop if this is exceeded,
-or if the same problem fails twice.
+- It reads as the intended expression.
+- Its style, line weight and colors match the original.
+- It has no doubled eyes, brows or mouth.
+- It adds no artwork outside the requested region.
 
-Only after the user chooses the numbers, import the chosen candidates and repair:
+If it fails checks or visual review, regenerate that drawing at most twice using
+the same unchanged request. Stop generating it as soon as one image passes. If
+it still fails, skip that drawing, record the reason and continue with the other
+drawings. Preserve any previous art for a skipped drawing. Never weaken checks,
+rewrite provenance or edit the mask to make a failing image pass. Source-layer
+hash mismatches require fresh requests rather than an artwork retry.
+
+After all drawings have been reviewed, import only the accepted names together,
+then repair once. For example, if both of these images passed:
 
 ```bash
-# Example only: use the numbers actually selected by the user.
-npm run still2rig-psd -- import-expressions <job> --pick eyes_sad=3,mouth_frown=1
+npm run still2rig-psd -- import-expressions <job> --only eyes_sad,mouth_frown
 npm run still2rig-psd -- repair <job> --expressions .still2rig-psd/jobs/<job>/generated-expressions
 ```
 
-All selected candidates must pass before artwork is replaced. The chosen raw
-candidate becomes `results/NAME.png`; its number and hashes are recorded in the
-import report, `generated-expressions/selections.json`, and repair provenance.
-The older single-image flow still works: save `results/NAME.png` and run
-`import-expressions <job>` without `--pick`.
+`--only` evaluates and replaces just the named images; other imported art stays
+intact. Leave failed drawings out of this list even when their result files are
+present. If no drawing passes, do not repair; report the reasons. Keep the source
+layers unchanged until this combined import is complete, so all requests retain
+valid provenance. A successful direct import clears old numbered-candidate
+metadata for the images it replaces.
 
-Open the repaired PSD in the preview and check the expression button, a final
-close-up, both transition directions, and blinking. Show that evidence and stop
-for approval before continuing to the next expression.
+Open the repaired PSD in the preview. Check all expression buttons, final
+close-ups, both transition directions in 0.05 strength steps and blinking.
+Retain one overview of all completed expressions. At the end, report that image,
+a short table of retry counts and skipped drawings with reasons, tests/build
+results and remaining visual differences. Run the applicable tests, build and
+motion QA once at the end; rerun only after a meaningful change or failure.
+Aim for about 30 minutes for the whole request. Do not stop for per-item approval;
+the user can request a specific redo afterwards.
+
+`expression-candidates` and `import-expressions --pick` remain available for
+optional comparisons and development, not the standard workflow. Numbered raw
+candidates live in `results/candidates/NAME-N.png`. Read-only comparison does not
+change the PSD, job state, requests or imported art, and preserves the same import
+checks. Review output must stay under `.still2rig-psd/` outside the source job.
+Archived requests keep their recorded hashes and layer snapshots.
 
 Repair automatically inherits the preceding layer overrides and expression
 source, including preview status, and reports them in `inheritedOptions`. Verify
@@ -281,15 +304,14 @@ blush follows the head with opacity only. Selecting either part in
 `configs/expression-presets.json` defines the nine faces in the **表情** buttons.
 Selection updates only expression sliders over 250 ms; manual changes show
 **自分で調整中**. Pose, gaze, normal blinking and voice input stay independent.
-Without smile artwork, joy raises the lower lid of the existing eye and wink
-closes one eye, handing off to closed-eye art without overlapping drawings.
-Missing blush is ignored. Brow deformation preserves ink thickness while
-changing its centerline. New controls bend worried/angry/flat brows,
-lower and tilt the upper lid, widen eyes and adjust smiling eyes per side.
-Mouth form affects both closed and open artwork. Camera mouth form and brow
-height add to expression values (clamped to -1..1); other tracking values keep
-their existing weighted blend. Upper-lid and widening deformations precede blink
-closure and diminish into a smile, so normal blinks still close fully.
+An expression that lacks its required artwork is disabled with a reason. Final
+eye and mouth shapes use the supplied or generated drawings; neutral-feature
+deformation is limited to the brief handoff between drawings. Each side shows
+one eye drawing, with only blink closure allowed to overlap. Whole-eye drawings
+for anger, sadness, surprise, shyness, fluster and half-closed eyes share the same
+retargetable slot and blink-safe transition. Missing optional blush is ignored.
+Camera mouth form and brow height add to expression values (clamped to -1..1);
+other tracking values keep their existing weighted blend.
 All values reach the stream in validated live settings; old profiles use zero
 for new controls. Motion QA captures parts, preset blink states and representative
 transitions. It checks coverage and wink-side isolation, not visual naturalness.
