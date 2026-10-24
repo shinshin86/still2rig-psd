@@ -136,7 +136,11 @@ Prepare all requested drawings together before generating any image. Inspect
 each input, mask and prompt, including the editable area beneath the original
 front hair. Generate **one image per drawing** using those exact files and save
 it as `expression-requests/results/NAME.png`. Keep the requested dimensions and
-transparency. Do not change the input, mask, underlay or recorded hashes.
+transparency: ask the generator for a transparent background (for Codex image
+generation, `transparent_background=true`). A result that fills the transparent
+corners of `input.png` with an opaque color fails the outside check even when
+the drawing is correct. Do not change the input, mask, underlay or recorded
+hashes.
 Preparing files alone never authorizes generation.
 
 Complete every requested expression in one run without asking the user to pick

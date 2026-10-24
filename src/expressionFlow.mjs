@@ -44,6 +44,7 @@ export function expressionFlowRequest({jobId,name,recipient,groupIds,parts,redra
     `閉じた口を組み込んだら、もう一度 npm run still2rig-psd -- expression-requests ${jobId} --only ${selection} を実行し、新しい依頼用画像で残りを続けてください。この2段階も1回の依頼の中で行い、途中の確認は求めないでください。`,
     recipient==='codex'?'ユーザーはこの画面で、顔の切り抜き画像をCodexの組み込みの画像生成（imagegen）に送ることに同意済みです。ほかの外部サービスは使わないでください。':'Claude Codeは画像を生成できません。画像生成や外部サービスへの送信はせず、全ての絵についてinput.png・mask.pngの場所、prompt.txtの内容、下記の保存先をまとめて案内してください。画像を用意する必要がある場合だけ待ち、保存の連絡後は下記の判定・取り込み・修復をまとめて進めてください。',
     ...selected.map(item=>`${item.name}: 同名フォルダのinput.png・mask.png・prompt.txtを使って1枚生成し、${root}/expression-requests/results/${item.name}.png に保存してください。`),
+    'input.pngの透明な部分は透明のまま返すよう、背景を透明にして生成してください（Codexの画像生成では transparent_background=true）。透明な部分が色で塗られると、絵が正しくても取り込み判定に落ちます。',
     '各絵を1枚ずつ生成し、取り込み判定と目視を通った最初の1枚を採用してください。途中で候補を選ばせたり、表情ごとに承認を求めたりせず、全て進めてください。',
     '目視基準: その表情に見える／元の絵柄・線の太さ・色に合う／目・眉・口が二重になっていない／指定範囲の外に描き足していない。',
     `各絵は npm run still2rig-psd -- import-expressions ${jobId} --only 絵の名前 --read-only --preview-dir .still2rig-psd/review/${jobId}/絵の名前 で判定し、画像も確認してください。`,
