@@ -4,12 +4,20 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import math
+import re
+import shutil
+import sys
 from pathlib import Path
 
 from PIL import Image, ImageChops, ImageFilter
 
+from expression_definitions import load_expressions, CONFIG_ROOT
+from overlay_expression import validate_overlay_artwork
+from soft_expression import extract_soft_artwork
+from expression_seam import check_seam, feather_artwork
 from expression_requests_common import file_hash, layer_hash
 
 
@@ -252,6 +260,7 @@ def extract_artwork(result, underlay, editable, noise_threshold, minimum_compone
 
 
 def import_results(args, report):
+    occlusion = json.load(sys.stdin) if args.psd_occlusion_stdin else None
     request_file = args.request_dir / "requests.json"
     if not request_file.is_file():
         raise ValueError("Run expression-requests before importing expressions.")
@@ -261,12 +270,37 @@ def import_results(args, report):
     current_hash = layer_hash(args.layer_dir, args.layer_map)
     if (requests["layerSha256"] != current_hash
             or requests["layerDir"] != args.layer_dir.relative_to(Path.cwd()).as_posix()):
-        raise ValueError("Current layers changed. Rerun expression-requests and generate new results.")
+        raise ValueError("Current layers changed. Rerun expression-requests and generate new results. 依頼ファイルを作り直してください（expression-requests）。")
     report["layerSha256"] = current_hash
+    available = {item["name"]: item for item in load_expressions(json.loads(args.layer_map.read_text(encoding="utf-8"))) if item["prompt"] is not None}
+    if not isinstance(requests.get("variants"), dict) or not requests["variants"] or any(name not in available for name in requests["variants"]):
+        raise ValueError("Unknown expression requests. Rerun expression-requests.")
+    definitions = [item for name, item in available.items() if name in requests["variants"]]
+    if args.only is not None:
+        names = args.only.split(",")
+        if args.pick is not None or not names or len(names) != len(set(names)) or any(name not in requests["variants"] for name in names):
+            raise ValueError("Choose requested expressions with --only NAME[,NAME], without --pick.")
+        definitions = [item for item in definitions if item["name"] in names]
+    picks = {}
+    if args.pick:
+        for value in args.pick.split(","):
+            match = re.fullmatch(r"([a-z][a-z0-9_]*)=([1-9][0-9]*)", value)
+            if not match or match[1] not in requests["variants"] or match[1] in picks:
+                raise ValueError("Choose requested candidates with --pick NAME=NUMBER[,NAME=NUMBER].")
+            picks[match[1]] = int(match[2])
+        definitions = [item for item in definitions if item["name"] in picks]
+    soft_maximum = json.loads((CONFIG_ROOT / "default.json").read_text(encoding="utf-8"))["quality"]["softExpressionMaximumAlpha"]
     outputs = {}
-    for name in ("eye_close", "mouth_open"):
-        result_file = args.result_dir / f"{name}.png"
+    previews = {}
+    extractors = {"diff": extract_artwork, "soft": lambda *values: extract_soft_artwork(*values, maximum_alpha=soft_maximum)}
+    for definition in definitions:
+        name = definition["name"]
+        result_file = args.result_dir / (f"candidates/{name}-{picks[name]}.png" if name in picks else f"{name}.png")
+        if name in picks and (result_file.is_symlink() or not result_file.is_file()):
+            raise ValueError(f"{name}: selected candidate does not exist or is a symlink.")
         if not result_file.is_file():
+            if args.only is not None:
+                raise ValueError(f"{name}: selected result does not exist.")
             report["variants"][name] = {"status": "missing"}
             continue
         item = requests["variants"][name]
@@ -283,6 +317,8 @@ def import_results(args, report):
         result = Image.open(result_file).convert("RGBA")
         details = {"status": "checking", "resultSize": list(result.size), "inputSize": list(reference.size)}
         report["variants"][name] = details
+        if name in picks:
+            details["candidate"] = {"number": picks[name], "file": result_file.name, "sha256": file_hash(result_file)}
         aspect_error = abs((result.width / result.height) / (reference.width / reference.height) - 1)
         details["aspectRatioError"] = round(aspect_error, 6)
         if aspect_error > 0.01:
@@ -295,46 +331,138 @@ def import_results(args, report):
                 or list(reference.size) != item["size"]
                 or reference.size != (crop_size[0] * pixel_scale, crop_size[1] * pixel_scale)):
             raise ValueError(f"{name}: invalid crop or scale metadata. Rerun expression-requests.")
-        band = protected_band(reference, editable, args.protected_band * pixel_scale)
-        details["alignment"] = alignment_check(reference, result, band, args.alignment_radius, pixel_scale,
-                                               args.max_alignment_shift, args.max_alignment_scale)
-        result = compensate_result(reference, result, details["alignment"], pixel_scale)
-        details.update(protected_diff(reference, result, band))
-        support = protected_band(reference, editable, (args.protected_band + 2) * pixel_scale)
-        face_core = Image.open(args.layer_dir / "face.png").convert("RGBA").getchannel("A").crop(item["cropBox"])
-        face_core = face_core.point(lambda value: 255 if value >= 240 else 0).filter(ImageFilter.MinFilter(5))
-        details.update(local_band_diff(reference, result, band, pixel_scale, support, face_core))
-        if not details["alignment"]["pass"]:
-            alignment = details["alignment"]
-            raise ValueError(f"{name}: global image misalignment: shift=({alignment['dx']}, {alignment['dy']}), scale={alignment['scale']}.")
-        if details["meanMatchedDiff"] > args.max_outside_mean or details["p99MatchedDiff"] > args.max_outside_p99:
-            raise ValueError(f"{name}: pixels outside the mask changed: mean={details['meanMatchedDiff']}, "
-                             f"p99={details['p99MatchedDiff']} (limits {args.max_outside_mean}, {args.max_outside_p99}).")
-        if details["maxLocalMeanDiff"] > args.max_band_local_mean or details["maxFlatMeanDiff"] > args.max_band_flat_mean:
-            raise ValueError(f"{name}: local pixels outside the mask changed: local={details['maxLocalMeanDiff']}, "
-                             f"flat={details['maxFlatMeanDiff']} (limits {args.max_band_local_mean}, {args.max_band_flat_mean}).")
-        result, extraction = extract_artwork(result, underlay, editable, args.artwork_threshold, args.minimum_component_pixels * pixel_scale * pixel_scale)
-        details.update(extraction)
+        if definition["extraction"] == "overlay":
+            if item.get("outputMode") != "transparent-overlay":
+                raise ValueError(f"{name}: regenerate transparent overlay requests.")
+            if args.protected_check is not None:
+                raise ValueError("Transparent overlays use alpha/placement checks, not a background seam override.")
+            source = Image.open(result_file)
+            if "A" not in source.getbands() and "transparency" not in source.info:
+                raise ValueError(f"{name}: a PNG with genuine alpha transparency is required.")
+            if definition["registration"] == "mouth":
+                from overlay_expression import register_mouth_overlay
+                from render_expression_states import selected_layers
+                # A fresh job stores the closed mouth as mouth.png; the layer map names it mouth_close.
+                layer_files = dict(selected_layers(args.layer_dir, json.loads(args.layer_map.read_text(encoding="utf-8"))))
+                mouth = Image.open(layer_files[definition["editableLayers"][0]]).convert("RGBA")
+                result, details["mouthRegistration"] = register_mouth_overlay(result,mouth,box,reference.size,args.max_alignment_shift)
+            else:
+                result = result.resize(reference.size,Image.Resampling.LANCZOS)
+            details["protectedCheck"] = "overlay"
+            details["overlay"] = validate_overlay_artwork(result,editable,name,underlay if definition["registration"] == "mouth" else None)
+            details["resizedProportionally"] = source.size != reference.size
+            mode = "overlay"
+        else:
+            protected_editable = editable.point(lambda value: 255 if value > 0 else 0) if definition["extraction"] == "soft" else editable
+            band = protected_band(reference, protected_editable, args.protected_band * pixel_scale)
+            details["alignment"] = alignment_check(reference, result, band, args.alignment_radius, pixel_scale,
+                                                   args.max_alignment_shift, args.max_alignment_scale)
+            result = compensate_result(reference, result, details["alignment"], pixel_scale)
+            details.update(protected_diff(reference, result, band))
+            support = protected_band(reference, protected_editable, (args.protected_band + 2) * pixel_scale)
+            face_core = Image.open(args.layer_dir / "face.png").convert("RGBA").getchannel("A").crop(item["cropBox"])
+            face_core = face_core.point(lambda value: 255 if value >= 240 else 0).filter(ImageFilter.MinFilter(5))
+            details.update(local_band_diff(reference, result, band, pixel_scale, support, face_core))
+            if not details["alignment"]["pass"]:
+                alignment = details["alignment"]
+                raise ValueError(f"{name}: global image misalignment: shift=({alignment['dx']}, {alignment['dy']}), scale={alignment['scale']}.")
+            mode = args.protected_check or definition["protectedCheck"]
+            if args.protected_check is not None or mode == "seam":
+                details["protectedCheck"] = mode
+            if mode == "seam":
+                coverage = None
+                visibility = None
+                if occlusion is not None:
+                    entry = occlusion["variants"][name]
+                    if (entry["width"], entry["height"]) != crop_size:
+                        raise ValueError("PSD visibility must match the native request crop.")
+                    coverage = Image.frombytes("L", crop_size, base64.b64decode(entry["alpha"], validate=True))
+                    visibility = {key: occlusion[key] for key in ("source", "psdSha256")}
+                    visibility.update({"layers": entry["layers"], "targetPresent": entry["targetPresent"]})
+                details["seam"] = check_seam(reference, result, editable, pixel_scale, underlay, coverage)
+                details["seam"]["occlusion"].update(visibility or {"source": "unavailable; all pixels checked"})
+                if not details["seam"]["pass"]:
+                    raise ValueError(f"{name}: seam check failed: " + ", ".join(details["seam"]["failedChecks"]) + ".")
+            else:
+                if details["meanMatchedDiff"] > args.max_outside_mean or details["p99MatchedDiff"] > args.max_outside_p99:
+                    raise ValueError(f"{name}: pixels outside the mask changed: mean={details['meanMatchedDiff']}, "
+                                     f"p99={details['p99MatchedDiff']} (limits {args.max_outside_mean}, {args.max_outside_p99}).")
+                if details["maxLocalMeanDiff"] > args.max_band_local_mean or details["maxFlatMeanDiff"] > args.max_band_flat_mean:
+                    raise ValueError(f"{name}: local pixels outside the mask changed: local={details['maxLocalMeanDiff']}, "
+                                     f"flat={details['maxFlatMeanDiff']} (limits {args.max_band_local_mean}, {args.max_band_flat_mean}).")
+            result, extraction = extractors[definition["extraction"]](result, underlay, editable, args.artwork_threshold, args.minimum_component_pixels * pixel_scale * pixel_scale)
+            details.update(extraction)
         result = result.resize(crop_size, Image.Resampling.LANCZOS)
         # Enforce the boundary after resampling too: no skin outside editable pixels.
         editable = editable.resize(crop_size, Image.Resampling.NEAREST)
         result.putalpha(ImageChops.multiply(result.getchannel("A"), editable))
+        if definition["extraction"] == "soft":
+            result.putalpha(result.getchannel("A").point(lambda value: min(round(soft_maximum * 255), value)))
+        if mode == "seam":
+            result = feather_artwork(result, editable)
+        if args.preview_dir is not None:
+            base = underlay.resize(crop_size, Image.Resampling.LANCZOS)
+            previews[name] = {"input": reference.resize(crop_size, Image.Resampling.LANCZOS),
+                              "artwork": result.copy(), "composite": Image.alpha_composite(base, result)}
         canvas = Image.new("RGBA", tuple(requests["canvas"]))
         canvas.alpha_composite(result, (box[0], box[1]))
+        if name == "mouth_close":
+            from closed_mouth import closed_mouth_quality
+            face = Image.open(args.layer_dir / "face.png").convert("RGBA")
+            quality = json.loads((CONFIG_ROOT / "default.json").read_text())["quality"]
+            details["closedMouth"] = closed_mouth_quality(canvas, face, quality)
+            if not details["closedMouth"]["usable"]:
+                failed = [key for key, passed in details["closedMouth"]["checks"].items() if not passed]
+                raise ValueError("mouth_close: closed mouth artwork check failed: " + ", ".join(failed))
         outputs[name] = canvas
         details["status"] = "accepted"
         details["canvas"] = requests["canvas"]
     if not outputs:
-        raise ValueError("No results found. Save eye_close.png or mouth_open.png in the results directory.")
+        raise ValueError("No results found. Save " + " or ".join(f"{item['name']}.png" for item in definitions) + " in the results directory.")
     # Validate every supplied variant before replacing any previously imported art.
     if not args.read_only:
+        selection_file = args.output_dir / 'selections.json'
+        if selection_file.is_symlink():
+            raise ValueError('Candidate selection history must not be a symlink.')
+        selections = json.loads(selection_file.read_text()) if selection_file.is_file() else {}
+        if not isinstance(selections, dict):
+            raise ValueError('Candidate selection history must be an object.')
+        for name in picks:
+            if (args.result_dir / f"{name}.png").is_symlink():
+                raise ValueError("Selected result destinations must not be symlinks.")
         args.output_dir.mkdir(parents=True, exist_ok=True)
-        for name in ("eye_close", "mouth_open"):
+        for definition in definitions:
+            name = definition["name"]
             destination = args.output_dir / f"{name}.png"
             if name in outputs:
                 outputs[name].save(destination)
             elif destination.exists():
                 destination.unlink()
+        for name, number in picks.items():
+            shutil.copyfile(args.result_dir / "candidates" / f"{name}-{number}.png", args.result_dir / f"{name}.png")
+        if picks:
+            for name in picks:
+                selection = report['variants'][name]['candidate']
+                selection['artworkSha256'] = file_hash(args.output_dir / f'{name}.png')
+                selections[name] = selection
+        else:
+            for name in outputs:
+                selections.pop(name, None)
+        if picks or selection_file.is_file():
+            selection_file.write_text(json.dumps(selections, indent=2) + '\n')
+    if args.preview_dir is not None:
+        # Refuse output aliases before any diagnostic image is written.
+        if any((args.preview_dir / f"{name}-{label}.png").is_symlink()
+               for name, images in previews.items() for label in (*images, "canvas-artwork")):
+            raise ValueError("Preview images must not be symlinks.")
+        args.preview_dir.mkdir(parents=True, exist_ok=True)
+        for name, images in previews.items():
+            files = {}
+            for label, image in {**images, "canvas-artwork": outputs[name]}.items():
+                file = args.preview_dir / f"{name}-{label}.png"
+                image.save(file)
+                files[label] = file.relative_to(Path.cwd()).as_posix()
+            report["variants"][name]["preview"] = files
     report["accepted"] = list(outputs)
     report["ok"] = True
 
@@ -359,6 +487,11 @@ def main():
     parser.add_argument("--max-alignment-shift", type=float, default=12)
     parser.add_argument("--max-alignment-scale", type=float, default=0.03)
     parser.add_argument("--read-only", action="store_true")
+    parser.add_argument("--pick")
+    parser.add_argument("--only")
+    parser.add_argument("--protected-check", choices=("strict", "seam"))
+    parser.add_argument("--preview-dir", type=Path)
+    parser.add_argument("--psd-occlusion-stdin", action="store_true")
     parser.add_argument("--artwork-threshold", type=float, default=8)
     parser.add_argument("--minimum-component-pixels", type=int, default=4)
     args = parser.parse_args()
@@ -369,6 +502,13 @@ def main():
                              "artworkThreshold": args.artwork_threshold, "minimumComponentPixels": args.minimum_component_pixels},
               "note": "Import only restores masked artwork. Existing expression QA and visual review are still required."}
     try:
+        if args.preview_dir is not None:
+            preview = args.preview_dir.resolve()
+            state = (Path.cwd() / ".still2rig-psd").resolve()
+            job = args.output_dir.parent.resolve()
+            if not args.read_only or not preview.is_relative_to(state) or preview.is_relative_to(job):
+                raise ValueError("Preview directory needs --read-only and must stay under .still2rig-psd outside this job.")
+            args.preview_dir = preview
         if any(not math.isfinite(value) or value < 0 or value > 255
                for value in (args.max_outside_mean, args.max_outside_p99, args.max_band_local_mean, args.max_band_flat_mean)):
             raise ValueError("Outside-mask thresholds must be finite numbers from 0 to 255.")

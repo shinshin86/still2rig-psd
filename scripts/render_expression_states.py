@@ -9,6 +9,8 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
+from expression_definitions import load_expressions
+
 
 def checkerboard(size: tuple[int, int], cell: int = 32) -> Image.Image:
     image = Image.new("RGBA", size, (42, 47, 59, 255))
@@ -38,10 +40,13 @@ def selected_layers(layer_dir: Path, layer_map: dict) -> list[tuple[str, Path]]:
 def render(layers: list[tuple[str, Path]], state: str) -> Image.Image:
     first = Image.open(layers[0][1]).convert("RGBA")
     composite = Image.new("RGBA", first.size)
+    definitions = load_expressions()
+    hidden = {item["name"] for item in definitions if item["prompt"] is not None and item["name"] != "mouth_close"}
+    if state == "open":
+        hidden = {item["name"] for item in definitions if item["prompt"] is not None and item["registration"] != "mouth"}
+        hidden.update(item["placeholderFrom"] for item in definitions if item["registration"] == "mouth" and item["placeholderFrom"])
     for name, source in layers:
-        if state == "close" and name in {"mouth_open", "eye_close"}:
-            continue
-        if state == "open" and name in {"mouth_close", "eye_close"}:
+        if name in hidden:
             continue
         composite.alpha_composite(Image.open(source).convert("RGBA"))
     background = checkerboard(composite.size)

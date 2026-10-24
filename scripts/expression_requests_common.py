@@ -8,6 +8,7 @@ from pathlib import Path
 from PIL import Image
 
 from render_expression_states import selected_layers
+from expression_definitions import load_expressions
 
 
 def mouth_limits(face: Image.Image, quality: dict) -> dict:
@@ -39,23 +40,27 @@ def layer_hash(layer_dir: Path, layer_map: Path) -> str:
     return digest.hexdigest()
 
 
-def neutral_layers(layer_dir: Path, layer_map: dict):
+def neutral_layers(layer_dir: Path, layer_map: dict, definitions=None, include_front=False):
+    definitions = load_expressions(layer_map) if definitions is None else definitions
     selected = selected_layers(layer_dir, layer_map)
     if not selected:
         raise ValueError("No current PSD layers found. Finalize first.")
     order = list(dict.fromkeys(entry["target"] for entry in layer_map["layers"]))
     # Expressions must stay independent of hair/accessories animated above them.
-    allowed = set(order[:order.index("eye_close") + 1])
-    layers = {name: Image.open(file).convert("RGBA") for name, file in selected if name in allowed}
+    allowed = set(order[:max(order.index(item["name"]) for item in definitions) + 1])
+    layers = {name: Image.open(file).convert("RGBA") for name, file in selected
+              if name in allowed and (include_front or name not in ("front hair", "headwear"))}
     size = next(iter(layers.values())).size
     if any(image.size != size for image in layers.values()):
         raise ValueError("Current PSD layers have different canvas sizes.")
-    return composite_layers(layers), layers
+    return composite_layers(layers, definitions=definitions), layers
 
 
-def composite_layers(layers: dict, excluded=()) -> Image.Image:
+def composite_layers(layers: dict, excluded=(), definitions=None) -> Image.Image:
+    definitions = load_expressions() if definitions is None else definitions
+    hidden = {item["name"] for item in definitions if item["prompt"] is not None and item["name"] != "mouth_close"}
     composite = Image.new("RGBA", next(iter(layers.values())).size)
     for name, image in layers.items():
-        if name not in {"mouth_open", "eye_close", *excluded}:
+        if name not in {*hidden, *excluded}:
             composite.alpha_composite(image)
     return composite

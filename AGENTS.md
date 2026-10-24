@@ -45,6 +45,39 @@ Treat this folder as a future public repository.
   it only with `--preview-expressions`, and never describe it as drawn blink or
   lip-sync art.
 
+## Expression transitions
+
+- Every expression strength from 0 to 1 must look like a natural face, not
+  only the end points. Inspect a strip of intermediate strengths (for example
+  every 0.05) before reporting a transition as done.
+- Never show two eye or mouth drawings at once. Avoid half-transparent
+  crossfades between drawings whose shapes or positions differ.
+- Follow how a real face moves. For example, smiling eyes narrow as the lower
+  lid rises; they do not close from the top like a blink first.
+- A transition must not pass through an unrelated expression such as a closed
+  blink, and switching between drawings must not be noticeable.
+- Build every expression's final shape from drawn expression artwork (supplied
+  or image-generated). Never fake an expression such as angry, sad or
+  half-closed eyes by bending the neutral eyes, brows or mouth; that lowers the
+  avatar's quality. Mesh deformation is only for the brief switch between
+  drawings. When a PSD lacks the artwork, disable that expression and say why.
+
+## Working pace
+
+- When a user asks for expression artwork, finish every requested expression in
+  one run without stopping for per-item approval. Generate one candidate per
+  drawing and accept it when the import checks pass and it visibly matches the
+  expression and the original style. Regenerate a failing drawing at most twice,
+  skip it with a reason if it still fails, and end with one overview of all
+  results. The user asks for redos afterwards.
+- When changing the tool itself, show visual candidates for a new art
+  direction before building on it. If a gate rejects artwork that looks right,
+  stop and ask instead of redesigning the gate.
+- If the same problem fails twice, stop and report the cause and options
+  instead of starting a third round of tuning.
+- Keep verification proportional: close-ups of the final result and a short
+  strip of intermediate states, with tests and `motion-qa` run once at the end.
+
 ## Local PSD preview
 
 - Use `npm run preview` to inspect finalized PSDs. The built-in WebUI lists

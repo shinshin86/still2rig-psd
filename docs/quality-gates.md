@@ -108,6 +108,14 @@ Each variant also has a local `underlay.png` containing the face without that
 variant's source eyes or mouth. This reference is used only for extraction;
 do not edit it or send it to the generator.
 
+The expanded smiling-eye mask protects eyebrows and front hair with a
+4-native-pixel margin. The original eye alpha union, including thin eyelash
+tips, retains at least 4 pixels of lateral margin (or the larger configured
+dilation). This eye envelope takes precedence over front-hair protection so
+that a hair cutout cannot slice through the original lashes; eyebrow protection
+still takes precedence. The cheek mask stops 4 native pixels inside the face
+alpha contour. Request metadata records these distances.
+
 Ask the image owner before sending these crops to a generation service. Save
 the returned images as `expression-requests/results/eye_close.png` and
 `mouth_open.png`. `import-expressions JOB [DIR]` accepts another results directory
@@ -121,9 +129,9 @@ radius is 24 pixels (`--alignment-radius`). The original generator output is
 sampled once with the estimated affine transform before extraction. Distances
 use original PSD pixels, independently of request enlargement.
 
-Comparisons use RGB on a shared white background: alpha 248–249 on almost opaque
+The `strict` and `seam` modes both use RGB on a shared white background: alpha 248–249 on almost opaque
 skin must not introduce a dark premultiplication error. Reports retain direct
-channel-wise mean/p99 for diagnosis. The gate uses symmetric nearest-color
+channel-wise mean/p99 for diagnosis. The `strict` gate uses symmetric nearest-color
 matching within two native pixels, excluding editable and translucent input
 pixels; its outer support extends two pixels beyond the measured band. The
 mean/p99 of these per-pixel RGB errors must be at most 6/20
@@ -138,12 +146,73 @@ face interior, inset two pixels from its contour. Their maximum mean is 24
 at most 24 (`--max-band-flat-mean`). Positive samples measured maxima below 8;
 removed/moved brows, painted skin patches and excessive shifts must still fail.
 Outer hair silhouettes retain the global band check, but are excluded from face
-interior tiles. Far context is neither measured nor imported. These checks do
+interior tiles. In `strict` mode, far context is neither measured nor imported. These checks do
 not cover every drawing defect; visual review remains required.
+
+`configs/expressions.json` selects `protectedCheck` per expression: `eye_close`
+and `mouth_open` use `strict`; `eye_smile` and `blush` use `seam`.
+`import-expressions JOB [DIR] --protected-check strict|seam` overrides that
+choice for the supplied results. Alignment and provenance checks are identical
+in both modes. The outside/band CLI thresholds above apply only to `strict`.
+
+`seam` evaluates the entire non-editable region for large changes: mean RGB
+error must be at most 18. Its 99th percentile is recorded with the diagnostic
+reference value 80 under `diagnostics.outsideP99`, but does not affect acceptance:
+the original artwork is retained outside the mask during extraction. The mean
+still rejects broad changes. This applies only to `seam`; `strict` keeps its
+existing percentile gate. It then checks both
+sides of the edit boundary in native PSD pixels. The inner and outer bands are
+3 pixels wide; only reference pixels with alpha at least 240 are measured.
+A Gaussian blur of radius 1 removes pixel texture before comparing the RGB
+residual (generated minus base). The base keeps the original outside the mask
+and uses the PSD underlay inside, so intentionally removing the source eye or
+mouth is not classified as a seam. Each band's mean must be at most 6 and
+95th percentile at most 20. Inside the mask, the maximum mean of 4x4 tiles with
+at least 4 band pixels must be at most 12. Outside tile means and their worst
+location remain diagnostic values only: pixels outside the mask retain the
+original artwork during extraction. `diagnostics.outerTiles` records whether
+the diagnostic limit of 12 is exceeded, without affecting the import decision.
+For adjoining opaque pixels across the boundary, the 95th
+percentile of the difference between residuals must be at most 12. This
+subtracts gradients already present in the original. Empty bands or a boundary
+without opaque sample pairs fail explicitly. Reports include each band, sample
+count, worst tile, limits, and failed checks under `variants.NAME.seam`.
+
+When the finalized PSD matches the requested layer snapshot, `seam` excludes
+pixels completely covered by permanent layers in front of the expression.
+Coverage uses the PSD's actual layer order, offsets, and alpha exactly 255;
+an expression absent from the PSD uses its insertion position in the layer map.
+Hidden, translucent, clipped, masked, non-normal, and animated expression
+layers do not establish coverage. Grouped PSDs are unsupported. Covered
+pixels contribute neither outside error nor boundary samples, and their
+residual is zeroed before blurring so hidden differences do not bleed into
+visible samples. Both pixels of a boundary pair must remain visible.
+Reports record the PSD hash, contributing layers, sample counts, and ignored
+boundary fraction. `boundaryVisibility` requires at least 64 visible opaque
+boundary pairs in native pixels; the covered fraction is diagnostic only.
+Calibration uses the existing 40×40 synthetic edit support (160 boundary pairs):
+64 visible pairs pass even with 60% covered, while shorter support and fully
+covered boundaries fail. A visible color defect must still fail the unchanged
+color checks. Existing two-character archived samples retain 743–1391 visible
+pairs. This floor keeps at least sixteen 4-pixel boundary segments available;
+it is a support requirement, not evidence of natural artwork. The mean and
+boundary color limits remain unchanged, and empty bands still fail. Historical requests for
+other layer snapshots keep the full check without occlusion exclusions.
+
+Extraction still uses only editable pixels. After restoring native dimensions,
+`seam` fades the first three pixels inside the mask to one-third, two-thirds,
+and full extracted alpha; it never extends artwork outside the mask. This also
+applies to soft blush and retains its opacity cap. A passing import cannot
+establish whether an expression is natural or hide edits that cut through the
+boundary; inspect the composite before using it.
 
 Reports record direct/matched errors and estimated/applied transforms, including
 failures. `--read-only` validates recorded request layers and hashes without
-changing files; `--request-dir DIR` with that flag can evaluate archived requests.
+changing job files; `--request-dir DIR` with that flag can evaluate archived requests.
+With `--read-only --preview-dir .still2rig-psd/review`, accepted results also
+write diagnostic input, extracted artwork, and composited crops, plus full-canvas
+artwork. The preview directory must be under `.still2rig-psd/` outside this job;
+existing outputs and the job manifest remain untouched.
 Changed layers require new requests and new generated results.
 
 Inside the editable area, import compares against the underlay. Where both
@@ -240,6 +309,82 @@ background, and writes frames and `motion-qa.json` under
 `.still2rig-psd/jobs/<job>/reports/motion-qa/`. The job manifest records the
 result under `result.motionQa`.
 
+When visible `eye_smile` or `blush` artwork is present, the adapter also records
+strengths 0, 0.5, and 1. Smiling eyes require every 0.05 step from 0 to 1,
+plus 0.48 and 0.52, and half and fully closed blinks at strength 1.
+At strengths 0.5, 0.75, and 0.95, pixels in the eye region must still differ
+from strength 1 to detect an immediate jump to the final drawing. Both
+full-strength blinks must match strength 1. Each expression must change pixels in its own
+region while the rest stays stable. These comparisons use an RGB delta greater
+than 1 to retain faint blush (the regular eye/mouth checks use 24). Missing
+optional artwork adds no capture requirement and does not affect `productionReady`.
+The captures still need visual inspection: pixel checks alone do not establish
+that every intermediate face looks natural or that the drawing switch is unobtrusive.
+
+In the preview, open **細かい設定** and **目・眉** to adjust **笑い目** and
+**頬の赤らみ** from 0 to 1 (default 0). Missing artwork disables its control
+and displays a reason. Below strength 0.5, the lower lid rises toward a shallow
+smile contour detected separately for each eye at PSD load. The upper lash
+retains its ink band, lower-lash fragments are suppressed before they collapse,
+and the rising white-eye mask hides the iris from below. Closed-eye artwork is
+hidden throughout this transition. At 0.5, only the smiling-eye drawing appears,
+matched to the narrowed eye's position and width with a thin, shallow curve.
+Its mesh then continuously returns to the original artwork at strength 1.
+The crease above the lash keeps its separation; detached outer marks are hidden
+while the artwork is displaced. There is no opacity overlap between drawings,
+including when closed-eye artwork is absent. Small differences in eyelash tips
+or highlights can remain between distinct source drawings; inspect adjacent
+captures before accepting an expression set. Blink-driven brow
+motion decreases toward the threshold. Smiling eyes follow eye size/position/angle
+and head movement without changing the closed-eye anchor. Blush follows the head
+and changes opacity only. The same values reach the stream page. Selecting either
+part in **重なりを直す** reveals its artwork.
+
+### Expression controls and camera input
+
+The **表情** buttons select a complete face: neutral, joy, shy, angry, sad,
+surprised, flustered, unamused or wink. Definitions live in
+`configs/expression-presets.json`. Selection updates the expression sliders over
+250 ms; the renderer smooths the movement as well. Changing an expression slider
+marks the selection **自分で調整中**. Selecting another face replaces expression
+values, while pose, gaze, blink, hair and microphone controls retain their values.
+The angry preset uses `eyes_angry` and optional `mouth_frown` drawings, with no
+anger symbol or neutral brow, lid or mouth-form deformation. The button displays
+a reason and is disabled when the eye drawing is absent. The transition matches
+measured drawing geometry and exchanges one drawing at halfway; strength 1
+restores the original expression art. During an angry blink, the open-eye drawing
+fades smoothly with eye openness and the closed-eye drawing uses the inverse
+opacity. Only the open drawing appears at full openness and only the closed
+drawing at full closure. The neutral brow returns briefly at closure because the
+angry eye and brow share one artwork layer. No shader clipping is used.
+Joy uses drawn smiling eyes, optional laughing mouth and blush, without a
+deformed neutral-eye substitute. Wink uses smiling-eye artwork or closes one eye
+with a single-drawing handoff to the blink artwork.
+The upper lash approaches the closed-eye position and endpoints without thinning.
+The closed artwork retains its ink thickness and endpoints as its curve returns. Missing
+blush is ignored. Unavailable artwork controls display a reason beside their slider.
+
+The separate manual worried and angry brow controls bend the inner and outer ends in mirrored directions;
+the flat-brow control straightens their centerline while retaining ink thickness. The upper-lid control moves the upper
+lash down without thinning its ink and clips the iris through the white-eye
+stencil. Its signed tilt lowers the inner end for anger or the outer end for
+sadness. Widening slightly expands the eye and reduces the iris. These deformations
+run before normal blink closure and decrease as the lower lid rises into a smile.
+Left and right smile strengths are independent; the shared smile strength takes
+the maximum with each side. Mouth form bends both open and closed mouth artwork.
+
+Camera mouth form and brow height are added to the expression values and clamped
+to -1..1. Camera pose, gaze and eye openness retain their existing weighted blend;
+normal blinking can still close the eyes. Voice and camera mouth openness use the
+existing maximum rule. Expression values travel to the stream through the same
+validated live settings as the sliders. Older profiles default new controls to zero.
+
+Motion QA records each new part at 0/0.5/1, all nine expressions with open,
+half-blinking and closed eyes, and representative transitions. Coverage and the
+unchanged opposite eye of a wink have automatic checks. Naturalness still needs
+inspection of all 0.05 strength steps, expression endpoints and transition frames
+on both a PSD with optional artwork and a PSD without it.
+
 | Check | How it is measured |
 | --- | --- |
 | Eye and mouth change | Pixels whose largest RGB change exceeds 24 inside the eye or mouth region, open vs. closed. |
@@ -257,3 +402,50 @@ visible hair, and whether the motion looks natural, still need visual review.
 Physics frames depend on timing, so borderline results can vary between runs.
 Missing required eye layers or feature anchors produce a failed report with a
 message instead of crashing the eye-region calculation.
+
+### Transparent tears, sweat and anger artwork
+
+`tears`, `sweat` and `anger_mark` are optional generated overlays. Their requests
+use the current face with visible hair as a placement reference; returned PNGs
+contain only the added water or red strokes with genuine alpha transparency.
+Import checks proportions, request hashes, transparent background, visible alpha
+outside the allowed region, sparse coverage, neutral background patches and warm
+skin/hair-like colors. These color checks are heuristics: inspect the isolated
+layer over a checkerboard and its composite before repair. Unlike edited face
+crops, transparent artwork has no unchanged background from which to estimate
+alignment or a seam. Placement is checked in the registered canvas coordinates.
+
+Tears sit in front of the eyes but behind front hair, appear from the lower-lid
+edge downwards, and keep their upper edge attached during blinking. Sweat moves
+down a few pixels as it appears; the anger symbol grows slightly into place.
+Both sit above the hair and follow head motion. Sadness uses tears, flustered uses
+sweat, and anger uses the symbol. Missing artwork keeps the previous face and
+disables the corresponding slider with a reason. No overlay changes production
+readiness. Review strengths every 0.05, blink states, head turns and transitions;
+a successful pixel check does not establish natural-looking artwork or motion.
+
+## Mouth shapes and speech
+
+`mouth_laugh` and `mouth_round` are optional mouth artwork. Their transparent
+requests contain only the outline, cavity and tongue. Import checks genuine
+alpha, placement, sparse artwork and contamination from the local skin color.
+It registers the alpha centroid to the existing closed mouth with at most
+12 native pixels of translation, records that translation, and checks the
+placement again. A historical request can be inspected with `import-expressions
+JOB --read-only --preview-dir DIR`; use the validated full-canvas artwork with
+`repair JOB --expressions DIR` and retain its report alongside the inputs.
+
+The renderer displays one mouth drawing at a time. Contour meshes meet at a
+narrow lip shape, with a small hysteresis band to resist noisy inputs. Narrow
+openings use dark lip/cavity colors; tongue color returns as the opening grows.
+Shape controls and speech opening remain separate. Laughing and round mouths
+have resting opening floors of 0.22 and 0.40 at full strength. If round artwork
+is absent, the surprised expression uses a separate 0.75 floor with the existing
+open mouth; it never rewrites the speech slider. Neutral clears these floors,
+and camera closure suppresses them. Microphone opening still combines by max.
+
+Inspect 0.05 strength steps, 0.01 opening steps near handoffs, both directions,
+and at least two seconds of 30fps speech with fixed and changing shapes. Verify
+one visible drawing, retained lip weight, missing-art behavior, camera closure
+and the stream view. Motion QA records the mouth parts and fine opening strip;
+frame coverage and numerical checks do not establish natural facial motion.

@@ -303,7 +303,7 @@ const round = (value, digits = 3) => Number(value.toFixed(digits));
  * @param {Uint8Array} input.hairTipMask  hair tip band in frame coordinates
  * @param {object} input.contract
  */
-export function evaluateMotionQa({ reference, captures, hairTipMask, visibleHairMask = null, contract }) {
+export function evaluateMotionQa({ reference, captures, hairTipMask, visibleHairMask = null, expressionMasks = {}, expressionSetRequired = false, contract }) {
   const { width, height } = reference.frame;
   const anchors = reference.anchors;
   const missingFeatures = ['eyeL', 'eyeR', 'mouth'].filter((name) => {
@@ -408,13 +408,16 @@ export function evaluateMotionQa({ reference, captures, hairTipMask, visibleHair
     mouthToEyesRelativeResidual: mouthToEyesResidual <= t.mouthToEyesRelativeResidualPxMaximum,
     unexpectedSeamPixels: unexpectedSeams <= t.unexpectedSeamPixelsMaximum,
   };
+  const expressions = evaluateExpressionCaptures(captures, expressionMasks);
+  Object.assign(checks, expressions.checks);
+  if (expressionSetRequired) Object.assign(checks, evaluateExpressionSetCaptures(captures, anchors));
   return {
     pass: Object.values(checks).every(Boolean),
     missingCaptures,
     metrics,
     checks,
     thresholds: t,
-    details: { seamByCapture, residualFrames, hairTipPixels: tipTotal },
+    details: { seamByCapture, residualFrames, hairTipPixels: tipTotal, expressions: expressions.metrics },
     units: {
       mae: 'percent of full RGB scale (0-100)',
       changedPixels: `pixels whose max channel delta exceeds ${CHANGE_THRESHOLD}`,
@@ -482,4 +485,85 @@ export function visibleHairMaskFromLayers(layers, width, height, alphaThreshold 
 
 export function dilate(mask, width, height, radius) {
   return invertMask(erode(invertMask(mask), width, height, radius));
+}
+
+/** Optional expression regions include a small sampling margin at native scale. */
+export function expressionMasksFromLayers(layers, width, height, anchors) {
+  const masks = {};
+  if (layers.some(layer => layer.name === 'eye_smile' && layerAlphaMask(layer, width, height, 8).some(Boolean))) {
+    masks['eye-smile'] = boxMask(width, height, [anchors.eyeL, anchors.eyeR]
+      .map(box => padBox(box, 16, width, height)));
+  }
+  for (const name of ['tears','sweat','anger_mark']) {
+    const alpha = layerAlphaMask(layers.find(layer=>layer.name===name),width,height,0);
+    if(alpha.some(Boolean)) masks[name] = dilate(alpha,width,height,8);
+  }
+  for (const name of ['mouth_laugh','mouth_round']) {
+    if (!layers.some(layer=>layer.name===name)) continue;
+    const union=new Uint8Array(width*height);
+    for(const layer of layers.filter(layer=>/^mouth_(close|open|laugh|round)$/.test(layer.name))) {
+      layerAlphaMask(layer,width,height,8).forEach((a,i)=>{if(a)union[i]=1;});
+    }
+    masks[name]=dilate(union,width,height,16);
+  }
+  const blush = layerAlphaMask(layers.find(layer => layer.name === 'blush'), width, height, 0);
+  if (blush.some(Boolean)) masks.blush = dilate(blush, width, height, 4);
+  return masks;
+}
+
+/** Fail absent/stuck expressions and changes beyond their own art region. */
+export function evaluateExpressionCaptures(captures, masks) {
+  const checks = {};
+  const metrics = {};
+  for (const [name, mask] of Object.entries(masks)) {
+    const frames = captures[name] || [];
+    const before = frames.find(item => item.label === 'strength-0.00')?.frame;
+    const after = frames.find(item => item.label === 'strength-1.00')?.frame;
+    checks[`${name}Captured`] = Boolean(before && after);
+    if (!before || !after) continue;
+    // One RGB level detects subtle blush without the opaque-ink threshold.
+    const changed = changedPixels(before, after, mask, 1);
+    const nonRegion = maePercent(before, after, invertMask(mask));
+    metrics[name] = { changedPixels: changed, nonRegionMaePercent: round(nonRegion, 4), changeThreshold: 1 };
+    checks[`${name}Changed`] = changed > 0;
+    checks[`${name}RegionStable`] = nonRegion <= 0.35;
+    if (['tears','sweat','anger_mark','mouth_laugh','mouth_round'].includes(name)) {
+      checks[`${name}ProgressionCaptured`] = Array.from({length:21},(_,i)=>(i/20).toFixed(2))
+        .every(strength=>frames.some(item=>item.label===`strength-${strength}`));
+      checks[`${name}BlinkCaptured`] = ['strength-1.00-blink-0.5','strength-1.00-blink-0']
+        .every(label=>frames.some(item=>item.label===label));
+    }
+    if (name === 'eye-smile') {
+      const blink = frames.find(item => item.label === 'strength-1.00-blink')?.frame;
+      const halfBlink = frames.find(item => item.label === 'strength-1.00-blink-half')?.frame;
+      checks.smileProgressionCaptured = [...Array.from({ length: 21 }, (_, i) => (i / 20).toFixed(2)), '0.48', '0.52'].every(strength =>
+        frames.some(item => item.label === `strength-${strength}`));
+      const morphChanges = Object.fromEntries(['0.50', '0.75', '0.95'].map(strength => {
+        const frame = frames.find(item => item.label === `strength-${strength}`)?.frame;
+        return [strength, frame ? changedPixels(after, frame, mask, 1) : null];
+      }));
+      metrics[name].morphChangedPixels = morphChanges;
+      checks.smileMorphProgresses = Object.values(morphChanges).every(count => count !== null && count > 0);
+      checks.smileBlinkStable = Boolean(blink && halfBlink) && changedPixels(after, blink, null, 1) === 0
+        && changedPixels(after, halfBlink, null, 1) === 0;
+    }
+  }
+  return { checks, metrics };
+}
+
+/** Coverage and unilateral-eye checks; naturalness still needs visual review. */
+export function evaluateExpressionSetCaptures(captures, anchors) {
+  const has = (name, labels) => labels.every(label => (captures[name] || []).some(item => item.label === label));
+  const parts = ['browWorry','browAngry','browFlat','upperLid','eyeWide','eyeNarrow','eyeWinkL','eyeWinkR','eyeSmileL','eyeSmileR','lidTilt-inward','lidTilt-outward','mouth-up','mouth-down','tears','sweat','angerMark','mouthLaugh','mouthRound'];
+  const presets = ['neutral','joy','shy','angry','sad','surprised','flustered','unamused','wink'];
+  const pairs = ['neutral-joy','joy-neutral','joy-angry','sad-surprised','wink-joy','unamused-surprised'];
+  const neutral = captures['preset-neutral']?.find(item => item.label === 'eye-1.00')?.frame;
+  const wink = captures['preset-wink']?.find(item => item.label === 'eye-1.00')?.frame;
+  const mask = neutral && anchors.eyeR ? boxMask(neutral.width, neutral.height, [anchors.eyeR]) : null;
+  return {
+    expressionPartsCaptured: parts.every(id=>has(`part-${id}`,['strength-0.00','strength-0.50','strength-1.00'])),
+    expressionPresetsCaptured: presets.every(id=>has(`preset-${id}`,['eye-1.00','eye-0.50','eye-0.00'])),
+    expressionTransitionsCaptured: pairs.every(id=>has(`transition-${id}`,['progress-0.00','progress-0.25','progress-0.50','progress-0.75','progress-1.00'])),
+    winkKeepsOtherEye: Boolean(neutral && wink && mask) && changedPixels(neutral, wink, mask, 1) === 0,
+  };
 }

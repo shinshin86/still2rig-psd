@@ -8,6 +8,7 @@ import { chromium } from 'playwright';
 import { mapFace } from '../src/tracking/pose.mjs';
 import { runVoiceQa } from './voice-qa.mjs';
 import { runLiveQa } from './live-qa.mjs';
+import { runExpressionQa } from './expression-qa.mjs';
 
 const webuiRoot = path.resolve(import.meta.dirname, '..');
 const repositoryRoot = path.resolve(webuiRoot, '..');
@@ -52,6 +53,20 @@ await fs.writeFile(path.join(fixtureJobRoot, 'job.json'), `${JSON.stringify({
     productionReady: true,
     psd: `.still2rig-psd/jobs/${fixtureJobId}/output/${fixtureJobId}.psd`,
   },
+}, null, 2)}\n`);
+
+const expressionJobId = 'qa-expression-preview';
+const expressionJobRoot = path.join(jobsRoot, expressionJobId);
+const expressionFile = path.join(expressionJobRoot, 'output', `${expressionJobId}.psd`);
+await runNode(path.join(webuiRoot, 'scripts', 'generate-fixture.mjs'), [expressionFile, '--expressions', '--exposed-eyes']);
+const expressionBaseline = path.join(outputRoot, 'expression-baseline.psd');
+await runNode(path.join(webuiRoot, 'scripts', 'generate-fixture.mjs'), [expressionBaseline, '--exposed-eyes']);
+const expressionWithoutClose = path.join(outputRoot, 'expression-without-close.psd');
+await runNode(path.join(webuiRoot, 'scripts', 'generate-fixture.mjs'), [expressionWithoutClose, '--expressions', '--exposed-eyes', '--without-eye-close']);
+await fs.writeFile(path.join(expressionJobRoot, 'job.json'), `${JSON.stringify({
+  schemaVersion: 1, jobId: expressionJobId, createdAt: '2025-01-01T00:00:00.000Z',
+  state: 'production-structure-ready', result: { productionReady: true,
+    psd: `.still2rig-psd/jobs/${expressionJobId}/output/${expressionJobId}.psd` },
 }, null, 2)}\n`);
 
 let serverLog = '';
@@ -233,6 +248,15 @@ try {
   const claudeExpressionRequest = await copyExpressionRequest('claude');
   const codexExpressionRequest = await copyExpressionRequest('codex');
   const expressionRequestMessage = codexExpressionRequest.message;
+  const choice = value => page.locator(`[data-expression-choice="${value}"]`);
+  await choice('eye_close,mouth_open').uncheck();
+  const emptyExpressionSelectionDisabled = await page.locator('#expression-request-copy').isDisabled();
+  await choice('eye_smile').check(); await choice('blush').check();
+  const additionalCodexRequest = await copyExpressionRequest('codex');
+  const additionalClaudeRequest = await copyExpressionRequest('claude');
+  await page.locator('#expression-request-control').screenshot({ path: path.join(qaRoot, 'additional-expression-choices-desktop.png') });
+  await choice('eye_smile').uncheck(); await choice('blush').uncheck(); await choice('eye_close,mouth_open').check();
+  await page.click('[data-recipient="codex"]');
   await page.waitForFunction(() =>
     document.body.dataset.avatarReady === 'true' &&
     getComputedStyle(document.querySelector('.empty-state')).opacity === '0',
@@ -880,6 +904,7 @@ try {
     (element) => element.scrollWidth <= element.clientWidth,
   );
   await mobilePage.screenshot({ path: path.join(qaRoot, 'mobile-expression-request.png'), fullPage: true });
+  await mobilePage.locator('#expression-request-control').screenshot({ path: path.join(qaRoot, 'additional-expression-choices-mobile.png') });
   await mobilePage.evaluate(() => { document.querySelector('#expression-request-control').open = false; });
   await mobilePage.click('#layer-edit-tab');
   await mobilePage.waitForTimeout(220);
@@ -1301,6 +1326,7 @@ try {
   }
   await cameraPage.evaluate(() => window.rigQa.setLiveEnabled(false));
   const voice = await runVoiceQa({ browser, baseUrl, qaRoot, fixtureFile });
+  const expressions = await runExpressionQa({ browser, baseUrl, fixtureFile: expressionBaseline, expressionFile, expressionWithoutClose, qaRoot });
   const live = await runLiveQa({ browser, baseUrl, psd: apiGeneratedId, fixtureFile, qaRoot, restart: async () => {
     const previous = server;
     await new Promise(resolve => { previous.once('exit', resolve); previous.kill('SIGTERM'); });
@@ -1308,6 +1334,7 @@ try {
   } });
   const checks = {
     ...live.checks,
+    ...expressions.checks,
     ...voice.checks,
     cameraDeviceSharesSelectStyle: cameraDeviceStyle.matches && cameraDeviceStyle.height >= 44,
     cameraSensitivityStartsStronger: cameraSensitivity.value === 1.5 && cameraSensitivity.max === 3,
@@ -1316,9 +1343,9 @@ try {
       trackingDirections['head-up'].y < directionNeutral.y && trackingDirections['head-down'].y > directionNeutral.y &&
       trackingDirections['gaze-up'].y < directionNeutral.y && trackingDirections['gaze-down'].y > directionNeutral.y,
     cameraOnlyDisablesTrackedControls: fakeCamera.skipped || (
-      ['angleX', 'angleY', 'angleZ', 'body', 'eyeX', 'eyeY', 'mouthForm', 'brow'].every(name => fakeCamera.running.advancedDisabled.includes(name)) &&
-      fakeCamera.running.advancedDisabled.length === 8 &&
-      ['physAmp', 'soft', 'bust', 'eyeCY', 'eyeScaleL', 'mouthCY', 'mouthScale'].every(name => fakeCamera.running.advancedEditable.includes(name)) &&
+      ['angleX', 'angleY', 'angleZ', 'body', 'eyeX', 'eyeY', 'eyeSmile', 'eyeSmileL', 'eyeSmileR', 'blush', 'tears', 'sweat', 'angerMark', 'mouthLaugh', 'mouthRound'].every(name => fakeCamera.running.advancedDisabled.includes(name)) &&
+      fakeCamera.running.advancedDisabled.length === 15 &&
+      ['physAmp', 'soft', 'bust', 'eyeCY', 'eyeScaleL', 'mouthCY', 'mouthScale', 'brow', 'mouthForm', 'upperLid', 'eyeWide', 'eyeNarrow'].every(name => fakeCamera.running.advancedEditable.includes(name)) &&
       fakeCamera.running.adjustedParameters.physAmp === 1.5 && fakeCamera.running.adjustedParameters.eyeCY === 0.2 &&
       fakeCamera.running.adjustedParameters.mouthScale === 1.1 && fakeCamera.running.adjustedParameters.bust === 2),
     cameraUsesOwnTab: cameraTabsLayout.count === 3 && cameraTabsLayout.selected.join() === 'camera-tab' && cameraTabsLayout.ownPanel && cameraTabsLayout.motionHidden && !cameraTabsLayout.cameraHidden,
@@ -1358,6 +1385,15 @@ try {
       claudeStartRequest.expressionClaudePressed === 'true' &&
       startRecipientAfterReload === 'true' &&
       codexStartRequest.expressionClaudePressed === 'false',
+    additionalExpressionSelection:
+      emptyExpressionSelectionDisabled &&
+      additionalCodexRequest.message.includes('--only eye_smile,blush') &&
+      additionalCodexRequest.message.includes('笑い目・頬の赤らみ') &&
+      additionalCodexRequest.message.includes('results/eye_smile.png と blush.png') &&
+      additionalCodexRequest.message.includes('同意済み') &&
+      additionalClaudeRequest.message.includes('--only eye_smile,blush') &&
+      additionalClaudeRequest.message.includes('そこで止まって') &&
+      !additionalClaudeRequest.message.includes('同意済み'),
     expressionRequestCopiesCurrentSavedPsd:
       waitingState.expressionRequestHidden === true &&
       selectedGeneratedState.expressionRequestHidden === false &&
@@ -1396,10 +1432,10 @@ try {
       waitingState.avatarReady === 'false',
     legacyWebglBadgeRemoved:
       waitingState.legacyBadgeCount === 0 && waitingState.titleParent === 'brand-block',
-    generatedLibraryListsOutputs: waitingState.generatedOptions === 1,
+    generatedLibraryListsOutputs: waitingState.generatedOptions === 2,
     generatedLibraryHidesLocalPaths:
       libraryResponse.ok &&
-      libraryPayload.items?.length === 1 &&
+      libraryPayload.items?.length === 2 &&
       !Object.hasOwn(libraryPayload.items[0], 'file') &&
       !JSON.stringify(libraryPayload).includes(repositoryRoot),
     generatedFolderApiOpensOnlyKnownOutputs:
@@ -1575,7 +1611,7 @@ try {
       blinkReopened.left > 0.9 &&
       blinkReopened.right > 0.9,
     advancedParametersExposeInternalDefaults:
-      advancedInitial.itemCount === 32 &&
+      advancedInitial.itemCount === 50 &&
       advancedInitial.groupCount === 4 &&
       advancedInitial.angleZ === 0 &&
       advancedInitial.physAmp === 2 &&
@@ -1703,6 +1739,7 @@ try {
     autoBlinkDisabled,
     blinkClosed,
     blinkReopened,
+    expressions,
     advancedInitial,
     advancedAdjusted,
     advancedResetState,

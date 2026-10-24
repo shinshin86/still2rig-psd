@@ -4,6 +4,7 @@ import {
   SEAM_COLOR,
   changedPixels,
   evaluateMotionQa,
+  evaluateExpressionCaptures,
   erode,
   featureResiduals,
   loadMotionContract,
@@ -97,4 +98,40 @@ test('the motion contract lists every capture the adapter records', () => {
     'full-body-idle',
     'drag-inertia',
   ]);
+});
+
+test('optional expression QA detects faint artwork, missing captures, frozen frames and leakage', () => {
+  const neutral = frame(12, 12, [200, 170, 160]);
+  const blush = frame(12, 12, [200, 170, 160]);
+  paint(blush, 4, 4, 8, 8, [202, 168, 158]);
+  const mask = new Uint8Array(144);
+  for (let y = 4; y < 8; y += 1) mask.fill(1, y * 12 + 4, y * 12 + 8);
+  const capture = after => ({ blush: [{ label: 'strength-0.00', frame: neutral }, { label: 'strength-1.00', frame: after }] });
+  const good = evaluateExpressionCaptures(capture(blush), { blush: mask });
+  assert.ok(Object.values(good.checks).every(Boolean));
+  assert.equal(good.metrics.blush.changedPixels, 16);
+  assert.equal(evaluateExpressionCaptures({}, { blush: mask }).checks.blushCaptured, false);
+  assert.equal(evaluateExpressionCaptures(capture(neutral), { blush: mask }).checks.blushChanged, false);
+  paint(blush, 0, 0, 4, 4, [10, 10, 10]);
+  assert.equal(evaluateExpressionCaptures(capture(blush), { blush: mask }).checks.blushRegionStable, false);
+  assert.deepEqual(evaluateExpressionCaptures({}, {}), { checks: {}, metrics: {} });
+});
+
+test('smile QA requires intermediate strengths, continued morphing and full-smile blink stability', () => {
+  const neutral = frame(12, 12, [200, 170, 160]);
+  const smile = frame(12, 12, [200, 170, 160]);
+  paint(smile, 4, 4, 8, 8, [30, 20, 20]);
+  const mask = new Uint8Array(144);
+  for (let y = 4; y < 8; y += 1) mask.fill(1, y * 12 + 4, y * 12 + 8);
+  const frames = [...Array.from({ length: 21 }, (_, i) => (i / 20).toFixed(2)), '0.48', '0.52'].map(strength => {
+    const image = frame(12, 12, [200, 170, 160]);
+    paint(image, 4, 4, 8, 8, [200 - Math.round(Number(strength) * 170), 20, 20]);
+    return { label: `strength-${strength}`, frame: strength === '0.00' ? neutral : image };
+  });
+  frames.push({ label: 'strength-1.00-blink-half', frame: smile }, { label: 'strength-1.00-blink', frame: smile });
+  const evaluate = values => evaluateExpressionCaptures({ 'eye-smile': values }, { 'eye-smile': mask });
+  assert.ok(Object.values(evaluate(frames).checks).every(Boolean));
+  assert.equal(evaluate(frames.filter(item => item.label !== 'strength-0.25')).checks.smileProgressionCaptured, false);
+  assert.equal(evaluate(frames.map(item => item.label === 'strength-0.75' ? { ...item, frame: smile } : item)).checks.smileMorphProgresses, false);
+  assert.equal(evaluate(frames.map(item => item.label.endsWith('blink-half') ? { ...item, frame: neutral } : item)).checks.smileBlinkStable, false);
 });

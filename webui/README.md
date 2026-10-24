@@ -52,7 +52,7 @@ browsing. Symlinks in output directories are not served.
 - Calm, standard, and active motion presets
 - Detailed intensity, idle, breathing, wind, hair amplitude, softness, and
   drag-inertia multipliers
-- Expandable advanced parameters for 32 internal baseline values, grouped into
+- Expandable advanced parameters for 34 internal baseline values, grouped into
   pose/body, eyes/brows, mouth, and hair/physics controls; each value has a
   slider, exact numeric input, displayed default, and one-click reset
 - Canvas drag, wheel zoom, zoom slider, and view reset
@@ -68,6 +68,15 @@ browsing. Symlinks in output directories are not served.
 
 Motion settings remain active when another PSD is loaded in the same page.
 Reloading the page restores the standard preset.
+
+Optional `eye_smile` and `blush` layers add **笑い目** and **頬の赤らみ** under
+**細かい設定 → 目・眉**. Both strengths range from 0 to 1 and default to 0.
+The slider and numeric input are disabled with an explanation when the PSD has
+no corresponding artwork. Smiling eyes replace ordinary open/closed eyes in
+proportion to their strength, including during blinking, and follow eye and
+head adjustments. Blush follows the head without feature deformation and only
+changes opacity. The stream page receives both settings. Selecting either
+part in **重なりを直す** reveals it without changing the motion settings.
 
 ## Expected PSD structure
 
@@ -116,8 +125,11 @@ npm run preview
 全身＋髪の各モーションとは独立してON/OFFできます。
 
 「動きの強さを細かく調整」では、7項目の強さを変更できます。さらに「細かい設定」を
-開くと、顔や体の向き、目・眉、口、髪・物理の計32項目を、スライダーと数値入力で
-調整できます。各項目には最初の値を表示し、「最初の値に戻す」でまとめて元に戻せます。
+開くと、顔や体の向き、目・眉、口、髪・物理の計34項目を、スライダーと数値入力で
+調整できます。「目・眉」の「笑い目」「頬の赤らみ」は0〜1で調整でき、最初の値は0です。
+対応する絵がPSDになければ操作できず、理由を表示します。これらの値は配信画面にも反映されます。
+「重なりを直す」で部分を選ぶと、その表情の絵を表示します。
+各項目には最初の値を表示し、「最初の値に戻す」でまとめて元に戻せます。
 
 「重なりを直す」では、人物上の直したい部分をクリックして選べます。
 複数の部分が重なる場所では候補を表示します。PSDの専門用語を使わず「腕・手を服の手前／奥へ」

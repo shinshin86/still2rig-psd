@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import { initializeCanvas, readPsd, writePsdBuffer } from 'ag-psd';
+import { expressions } from './expressions.mjs';
 import { loadLayerMap, relativeProjectPath, sha256File, writeJson } from './utils.mjs';
 
 function imageData(width, height) {
@@ -12,6 +13,54 @@ initializeCanvas(
   (width, height) => ({ width, height, getContext: () => ({ createImageData: imageData }) }),
   imageData,
 );
+
+// PSD children use the builder's back-to-front order. Only permanent, fully
+// opaque normal layers can hide an expression throughout its animation.
+export function expressionOcclusion(psdFile, requests, map, definitions) {
+  const psd = readPsd(new Uint8Array(fs.readFileSync(psdFile)), {
+    useImageData: true, skipCompositeImageData: true, skipThumbnail: true,
+  });
+  const layers = psd.children || [];
+  if (requests.canvas && (psd.width !== requests.canvas[0] || psd.height !== requests.canvas[1])) {
+    throw new Error('PSD visibility canvas must match the expression request.');
+  }
+  if (layers.some(layer => layer.children)) throw new Error('Expression visibility requires a flat PSD.');
+  const order = [...new Set(map.layers.map(entry => entry.target))];
+  const dynamic = new Set(definitions.map(item => item.name));
+  const variants = {};
+  for (const [name, item] of Object.entries(requests.variants)) {
+    const targetIndex = layers.findIndex(layer => layer.name === name);
+    const targetOrder = order.indexOf(name);
+    if (targetOrder < 0) throw new Error('Unknown expression in PSD visibility request.');
+    const [left, top, right, bottom] = item.cropBox;
+    const width = right - left, height = bottom - top;
+    const mask = Buffer.alloc(width * height);
+    const contributors = [];
+    for (const [index, layer] of layers.entries()) {
+      const inFront = targetIndex >= 0 ? index > targetIndex : order.indexOf(layer.name) > targetOrder;
+      if (!inFront || dynamic.has(layer.name) || layer.hidden || (layer.opacity ?? 1) !== 1
+          || layer.blendMode !== 'normal' || layer.mask || layer.vectorMask || layer.clipping
+          || layer.effects || layer.adjustment || !layer.imageData) continue;
+      const image = layer.imageData;
+      let pixels = 0;
+      for (let y = 0; y < height; y += 1) {
+        const sy = top + y - (layer.top || 0);
+        if (sy < 0 || sy >= image.height) continue;
+        for (let x = 0; x < width; x += 1) {
+          const sx = left + x - (layer.left || 0);
+          if (sx >= 0 && sx < image.width && image.data[(sy * image.width + sx) * 4 + 3] === 255) {
+            mask[y * width + x] = 255;
+            pixels += 1;
+          }
+        }
+      }
+      if (pixels) contributors.push(layer.name);
+    }
+    variants[name] = { width, height, alpha: mask.toString('base64'), layers: contributors,
+      targetPresent: targetIndex >= 0 };
+  }
+  return { source: 'final PSD layer order and fully opaque alpha', psdSha256: sha256File(psdFile), variants };
+}
 
 function paeth(a, b, c) {
   const p = a + b - c;
@@ -92,8 +141,8 @@ export function decodePngRgba(buffer, label = 'PNG') {
   return { width, height, data: rgba };
 }
 
-function hasVisiblePixels(data) {
-  for (let index = 3; index < data.length; index += 4) if (data[index] > 16) return true;
+function hasVisiblePixels(data, threshold = 16) {
+  for (let index = 3; index < data.length; index += 4) if (data[index] > threshold) return true;
   return false;
 }
 
@@ -128,13 +177,16 @@ export function buildPsd({ layerDir, output, reportFile, previewPlaceholders = f
     if (!selected.has(entry.target) || entry.override) selected.set(entry.target, { ...entry, source });
   }
   const placeholders = [];
-  if (previewPlaceholders && !selected.has('mouth_open') && selected.has('mouth_close')) {
-    selected.set('mouth_open', { target: 'mouth_open', source: selected.get('mouth_close').source, placeholder: true });
-    placeholders.push({ layer: 'mouth_open', copiedFrom: 'mouth_close' });
+  if (previewPlaceholders) for (const definition of expressions) {
+    const { name, placeholderFrom } = definition;
+    if (placeholderFrom && !selected.has(name) && selected.has(placeholderFrom)) {
+      selected.set(name, { target: name, source: selected.get(placeholderFrom).source, placeholder: true });
+      placeholders.push({ layer: name, copiedFrom: placeholderFrom });
+    }
   }
 
   const requiredTargets = [...new Set(map.layers.filter((entry) => entry.required).map((entry) => entry.target))];
-  const productionTargets = [...new Set(map.layers.filter((entry) => entry.requiredForProduction).map((entry) => entry.target))];
+  const productionTargets = orderedTargets.filter(target => expressions.some(item => item.name === target && item.requiredForProduction));
   const missingRequired = requiredTargets.filter((target) => !selected.has(target));
   if (missingRequired.length) throw new Error(`Missing required layers: ${missingRequired.join(', ')}`);
 
@@ -145,7 +197,7 @@ export function buildPsd({ layerDir, output, reportFile, previewPlaceholders = f
     const item = selected.get(target);
     if (!item) continue;
     const data = readPngRgba(item.source);
-    if (!hasVisiblePixels(data.data)) continue;
+    if (!hasVisiblePixels(data.data, expressions.some(item => item.name === target && item.extraction === 'soft') ? 0 : 16)) continue;
     if (!width) ({ width, height } = data);
     if (data.width !== width || data.height !== height) throw new Error(`Layer dimensions differ: ${path.basename(item.source)}`);
     layers.push({ name: target, left: 0, top: 0, right: width, bottom: height, imageData: data });

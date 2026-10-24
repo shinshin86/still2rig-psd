@@ -1,3 +1,7 @@
+import { expressionPresets, expressionParameterNames, expressionPresetValues, expressionPresetAvailability } from '../../src/expressionPresets.mjs';
+import { expressionRequestGroups, expressionGroupState, selectedExpressionArtwork, expressionFlowRequest, expressionArtworkLabel } from '../../src/expressionFlow.mjs';
+import { requestedExpressions } from '../../src/expressions.mjs';
+import { expressionShortcut } from './expressionShortcuts.mjs';
 import { installVoiceControls } from './voice/controls';
 import { createLivePublisher } from './live/publisher';
 import { installStreamControls } from './live/controls';
@@ -45,7 +49,9 @@ interface GeneratedPsd {
 }
 
 interface RigQaApi {
+  getDrawingState: () => ReturnType<Anime25RigAvatar['getDrawingState']> | null;
   setVoiceMouth: (value: number | null) => void;
+  getMouthState: () => ReturnType<Anime25RigAvatar['getMouthState']> | null;
   getVoiceState: () => { state: string; active: boolean; liveTracks: number };
   setLiveEnabled: (enabled: boolean) => void;
   setTrackingInput: (input: Partial<TrackingInput> | null, weight: number) => void;
@@ -54,7 +60,8 @@ interface RigQaApi {
   error: string | null;
   summary: unknown;
   anchors: Record<string, unknown>;
-  setState: (eyeOpen: number, mouthOpen: number) => void;
+  setState: (eyeOpen: number, mouthOpen: number, expressions?: Partial<PsdMotionParameters>) => void;
+  setExpression: (id: string) => void;
   setMode: (mode: QaMode) => void;
   setAutoBlink: (enabled: boolean) => void;
   getAutoBlink: () => boolean;
@@ -114,6 +121,30 @@ const expressionRequestSummary = requireElement<HTMLElement>('#expression-reques
 const expressionRequestBody = requireElement<HTMLElement>('#expression-request-body');
 const expressionRequestDisclosure = requireElement<HTMLElement>('#expression-request-disclosure');
 const expressionRecipientButtons = [...document.querySelectorAll<HTMLButtonElement>('[data-recipient]')];
+const expressionChoicesContainer = requireElement<HTMLElement>('#expression-choices');
+const expressionChoicesControl = requireElement<HTMLDetailsElement>('#expression-choices-control');
+const expressionChoicesSummary = requireElement<HTMLElement>('#expression-choices-summary');
+for (const group of expressionRequestGroups) {
+  const row=document.createElement('div');row.className='expression-request-choice';
+  const title=document.createElement('strong'),description=document.createElement('small'),status=document.createElement('small');
+  title.textContent=group.label;description.textContent=group.parts.map(expressionArtworkLabel).join('・');
+  status.dataset.expressionGroupStatus=group.id;status.className='expression-group-status';
+  const choiceLabel=document.createElement('label'),choice=document.createElement('input');choiceLabel.className='camera-check';
+  choice.type='checkbox';choice.dataset.expressionChoice=group.id;choiceLabel.append(choice,'足りない絵を作ってもらう');
+  const redrawLabel=document.createElement('label'),redraw=document.createElement('input');redrawLabel.className='camera-check';
+  redraw.type='checkbox';redraw.dataset.expressionRedraw=group.id;redrawLabel.append(redraw,'作り直す');
+  const noteLabel=document.createElement('label'),note=document.createElement('input');noteLabel.className='expression-redraw-note';
+  note.type='text';note.maxLength=300;note.dataset.expressionNote=group.id;note.placeholder='例：もう少し静かな怒りに';
+  noteLabel.append('作り直すときの希望（任意）',note);
+  row.append(title,description,status,choiceLabel,redrawLabel,noteLabel);expressionChoicesContainer.append(row);
+}
+const expressionChoices = [...document.querySelectorAll<HTMLInputElement>('[data-expression-choice]')];
+const expressionRedrawChoices = [...document.querySelectorAll<HTMLInputElement>('[data-expression-redraw]')];
+const expressionNotes = [...document.querySelectorAll<HTMLInputElement>('[data-expression-note]')];
+const selectedGroupIds = () => expressionChoices.filter(choice=>choice.checked && !choice.disabled).map(choice=>choice.dataset.expressionChoice!);
+const redrawGroupIds = () => expressionRedrawChoices.filter(choice=>choice.checked && !choice.disabled).map(choice=>choice.dataset.expressionRedraw!);
+const selectedExpressions = () => selectedExpressionArtwork(selectedGroupIds(),avatarParts,redrawGroupIds());
+let expressionChoicesSource = '';
 const expressionRecipientSteps = [...document.querySelectorAll<HTMLElement>('[data-recipient-steps]')];
 const startRequestCopy = requireElement<HTMLButtonElement>('#start-request-copy');
 const startRequestStatus = requireElement<HTMLElement>('#start-request-status');
@@ -205,6 +236,7 @@ if (presetButtons.length !== 3) {
 }
 
 let avatar: Anime25RigAvatar | null = null;
+let avatarParts = new Set<string>();
 let cameraControls: ReturnType<typeof installCameraControls> | null = null;
 let cameraActive = false;
 let voiceControls: ReturnType<typeof installVoiceControls> | null = null;
@@ -327,6 +359,29 @@ const PARAMETER_LABELS: Partial<Record<PsdMotionParameterName, string>> = {
   body: '上半身の傾き',
   armY: '腕の上下',
   armPos: '腕の位置',
+  eyeSmile: '笑い目',
+  eyeSmileL: '左目の笑い目',
+  eyeSmileR: '右目の笑い目',
+  browWorry: '困り眉',
+  browAngry: '怒り眉',
+  browFlat: '眉を平らにする',
+  upperLid: '上まぶたを下げる',
+  lidTilt: 'まぶたの傾き',
+  eyeWide: '目を見開く',
+  eyeNarrow: '下まぶたを上げる',
+  eyeAngry: '怒った目元',
+  eyeSad: '悲しい目元',
+  eyeSurprised: '驚いた目元',
+  eyeShy: '照れた目元',
+  eyeFlustered: '焦った目元',
+  eyeHalf: 'ジト目',
+  mouthFrown: '口角を下げた閉じ口',
+  eyeWinkL: '左目を閉じる',
+  eyeWinkR: '右目を閉じる',
+  blush: '頬の赤らみ',
+  tears: '涙',
+  sweat: '汗',
+  angerMark: '怒りマーク',
   eyeOpenL: '左目の開き',
   eyeOpenR: '右目の開き',
   eyeX: '視線の左右',
@@ -342,7 +397,9 @@ const PARAMETER_LABELS: Partial<Record<PsdMotionParameterName, string>> = {
   browAngR: '右眉の角度',
   browAngSym: '眉の対称角度',
   mouthOpen: '口の開き',
-  mouthForm: '口の形',
+  mouthForm: '口角',
+  mouthLaugh: '笑った口',
+  mouthRound: '丸く開いた口',
   mouthCY: '口の中心位置',
   mouthEase: '口の変形の滑らかさ',
   mouthCAng: '口の傾き',
@@ -368,6 +425,7 @@ interface AdvancedParameterControl {
   definition: PsdMotionParameterDefinition;
   range: HTMLInputElement;
   number: HTMLInputElement;
+  unavailable: HTMLElement;
 }
 
 const advancedControls = new Map<PsdMotionParameterName, AdvancedParameterControl>();
@@ -401,11 +459,46 @@ function syncAdvancedParameterControl(name: PsdMotionParameterName): void {
   control.number.value = formatted;
 }
 
+let expressionAnimation = 0;
+let selectedExpressionId: string | null = 'neutral';
+function syncExpressionSelection(id: string | null): void {
+  selectedExpressionId = id;
+  for (const button of document.querySelectorAll<HTMLButtonElement>('[data-expression-preset]')) {
+    button.setAttribute('aria-pressed', String(button.dataset.expressionPreset === id));
+  }
+  requireElement<HTMLElement>('#expression-status').textContent =
+    expressionPresets.find(item => item.id === id)?.label ?? '自分で調整中';
+}
+
+function selectExpression(id: string): void {
+  if (!expressionPresetAvailability(id, avatarParts).available) return;
+  cancelAnimationFrame(expressionAnimation);
+  const start = { ...profileParameters };
+  const values = expressionPresetValues(id, avatarParts);
+  avatar?.setEyeExpressionTarget(values);
+  const began = performance.now();
+  syncExpressionSelection(id);
+  const advance = (now: number) => {
+    const t = Math.min(1, (now - began) / 250), eased = t * t * (3 - 2 * t);
+    for (const name of expressionParameterNames) {
+      const key = name as PsdMotionParameterName;
+      profileParameters[key] = start[key] + (values[key] - start[key]) * eased;
+      syncAdvancedParameterControl(key);
+    }
+    applyAvatarMotionMode(currentMode);
+    if (t < 1) expressionAnimation = requestAnimationFrame(advance);
+  };
+  expressionAnimation = requestAnimationFrame(advance);
+}
+
 function applyProfileParameter(
   definition: PsdMotionParameterDefinition,
   value: number,
   announce = true,
 ): void {
+  cancelAnimationFrame(expressionAnimation);
+  if (expressionParameterNames.includes(definition.key)) avatar?.setEyeExpressionTarget(null);
+  if (expressionParameterNames.includes(definition.key)) syncExpressionSelection(null);
   profileParameters = {
     ...profileParameters,
     [definition.key]: normalizeParameterValue(definition, value),
@@ -422,6 +515,9 @@ function applyProfileParameter(
 }
 
 function resetAdvancedProfileParameters(): void {
+  cancelAnimationFrame(expressionAnimation);
+  avatar?.setEyeExpressionTarget(null);
+  syncExpressionSelection('neutral');
   profileParameters = { ...DEFAULT_PSD_MOTION_PARAMETERS };
   for (const name of advancedControls.keys()) syncAdvancedParameterControl(name);
   applyAvatarMotionMode(currentMode);
@@ -430,7 +526,7 @@ function resetAdvancedProfileParameters(): void {
 
 function createAdvancedParameterControls(): void {
   const definitions = PSD_MOTION_PARAMETER_DEFINITIONS.filter(
-    (definition) => !BASIC_PARAMETER_KEYS.has(definition.key),
+    (definition) => !BASIC_PARAMETER_KEYS.has(definition.key) && !definition.hidden,
   );
   for (const group of ['face', 'eyes', 'mouth', 'physics'] as const) {
     const groupDefinitions = definitions.filter((definition) => definition.group === group);
@@ -473,7 +569,13 @@ function createAdvancedParameterControls(): void {
       number.max = String(definition.max);
       number.step = String(definition.step);
       number.setAttribute('aria-label', `${name.textContent}の数値`);
-      advancedControls.set(definition.key, { definition, range, number });
+      const unavailable = document.createElement('span');
+      unavailable.className = 'tuning-note';
+      unavailable.id = `parameter-${definition.key}-reason`;
+      unavailable.hidden = true;
+      range.setAttribute('aria-describedby', unavailable.id);
+      number.setAttribute('aria-describedby', unavailable.id);
+      advancedControls.set(definition.key, { definition, range, number, unavailable });
       syncAdvancedParameterControl(definition.key);
       const update = (input: HTMLInputElement) => {
         demoToken += 1;
@@ -483,7 +585,11 @@ function createAdvancedParameterControls(): void {
       number.addEventListener('change', () => update(number));
       inputRow.append(range, number);
       item.htmlFor = range.id;
-      item.append(heading, inputRow);
+      item.append(heading, inputRow, unavailable);
+      if (definition.key === 'lidTilt') {
+        const help = document.createElement('span'); help.className = 'tuning-note';
+        help.textContent = '＋で目頭、−で目尻を下げます。'; item.append(help);
+      }
       grid.append(item);
     }
     details.append(summary, grid);
@@ -645,8 +751,18 @@ function setSelectedLayer(
   selectedPartBadge.textContent = `選択中：${selected.label}`;
   selectedPartBadge.hidden = workspaceMode !== 'layers';
   avatar?.setMotionEnabled(false);
-  avatar?.setMouthOpen(selected.name.toLowerCase() === 'mouth_open' ? 1 : 0);
-  avatar?.setEyeOpen(selected.name.toLowerCase() === 'eye_close' ? 0 : 1);
+  const selectedProfile = createDefaultPsdMotionProfile();
+  selectedProfile.parameters.eyeSmileL = selectedProfile.parameters.eyeSmileR = 0;
+  selectedProfile.parameters.eyeSmile = selected.name.toLowerCase() === 'eye_smile' ? 1 : 0;
+  selectedProfile.parameters.blush = selected.name.toLowerCase() === 'blush' ? 1 : 0;
+  selectedProfile.parameters.mouthLaugh = selected.name.toLowerCase() === 'mouth_laugh' ? 1 : 0;
+  selectedProfile.parameters.mouthRound = selected.name.toLowerCase() === 'mouth_round' ? 1 : 0;
+  selectedProfile.parameters.tears = selected.name.toLowerCase() === 'tears' ? 1 : 0;
+  selectedProfile.parameters.sweat = selected.name.toLowerCase() === 'sweat' ? 1 : 0;
+  selectedProfile.parameters.angerMark = selected.name.toLowerCase() === 'anger_mark' ? 1 : 0;
+  avatar?.setMotionProfile(selectedProfile);
+  avatar?.setMouthOpen(selected.name.toLowerCase() === requestedExpressions.find(item => item.registration === 'mouth')?.name ? 1 : 0);
+  avatar?.setEyeOpen(selected.name.toLowerCase() === requestedExpressions.find(item => item.registration === 'eyes')?.name ? 0 : 1);
   flashLayerFocus(selected.name.toLowerCase());
   announceLayerEdit(`${selected.label}を選びました。水色の印と、明るく表示された部分を確認してください。`);
   if (layerOrderDetails.open) {
@@ -1193,6 +1309,7 @@ function setWorkspaceMode(mode: WorkspaceMode): void {
     cameraControls?.stop();
     voiceControls?.stop();
     avatar?.setMotionEnabled(false);
+    avatar?.setMotionProfile(createDefaultPsdMotionProfile());
     avatar?.setEyeOpen(1);
     avatar?.setMouthOpen(0);
     clearLayerFocus();
@@ -1371,6 +1488,8 @@ function setVoiceMouth(value: number | null): void {
 }
 
 const api: RigQaApi = {
+  getDrawingState() { return avatar?.getDrawingState() ?? null; },
+  getMouthState() { return avatar?.getMouthState() ?? null; },
   setVoiceMouth,
   getVoiceState() { return voiceControls?.getState() ?? { state: 'off', active: false, liveTracks: 0 }; },
   setLiveEnabled(enabled) { livePublisher?.enable(enabled); },
@@ -1384,7 +1503,17 @@ const api: RigQaApi = {
   error: null,
   summary: null,
   anchors: {},
-  setState(nextEyeOpen, nextMouthOpen) {
+  setState(nextEyeOpen, nextMouthOpen, expressions) {
+    if (expressions) {
+      avatar?.setEyeExpressionTarget(null);
+      for (const name of Object.keys(expressions) as PsdMotionParameterName[]) if (expressions[name] !== undefined) {
+        const definition = PSD_MOTION_PARAMETER_DEFINITIONS.find(item => item.key === name);
+        if (!definition) continue;
+        profileParameters[name] = normalizeParameterValue(definition, expressions[name]!);
+        syncAdvancedParameterControl(name);
+      }
+      applyAvatarMotionMode(currentMode);
+    }
     const previousEyeOpen = eyeOpen;
     eyeOpen = Math.max(0, Math.min(1, nextEyeOpen));
     mouthOpen = Math.max(0, Math.min(1, nextMouthOpen));
@@ -1395,6 +1524,7 @@ const api: RigQaApi = {
     }
     avatar?.setMouthOpen(mouthOpen);
   },
+  setExpression: selectExpression,
   setMode(mode) {
     currentMode = mode;
     applyAvatarMotionMode(mode);
@@ -1507,6 +1637,12 @@ async function activatePsd(
   cameraControls?.stop();
   voiceControls?.stop();
   avatar = nextAvatar;
+  avatarParts = new Set(detection.summary.partsFound);
+  cancelAnimationFrame(expressionAnimation);
+  if (!options.editorRefresh && selectedExpressionId) {
+    Object.assign(profileParameters, expressionPresetValues(selectedExpressionId, avatarParts));
+    for (const key of expressionParameterNames) syncAdvancedParameterControl(key as PsdMotionParameterName);
+  }
   previousAvatar?.dispose();
 
   viewOffsetX = options.preserveView ? previousView.offsetX : 0;
@@ -1589,8 +1725,8 @@ async function loadGeneratedPsd(item: GeneratedPsd): Promise<void> {
   generatedPsdSelect.value = item.id;
   activeGeneratedPsdId = item.id;
   generatedPsdOpenFolder.disabled = false;
-  // Open the panel by default only when the PSD still lacks checked expression art.
-  expressionRequestControl.open = Boolean(item.jobId) && item.productionReady !== true;
+  expressionRequestControl.open = false;
+  expressionChoicesControl.open = false;
   syncExpressionRequestControl();
 }
 
@@ -1619,10 +1755,33 @@ function syncExpressionRequestControl(): void {
   const unavailable = !usable && (expressionRequestSource === 'local' || Boolean(item));
   expressionRequestControl.hidden = !usable && !unavailable;
   expressionRequestBody.hidden = !usable;
+  requireElement<HTMLElement>('#expression-add-hint').hidden = !usable || expressionRequestGroups.filter(group=>group.id!=='mark').every(group=>expressionGroupState(group,avatarParts).complete);
+  const choiceSource = `${activeGeneratedPsdId}:${[...avatarParts].sort().join(',')}`;
+  const changedSource = expressionChoicesSource !== choiceSource;
+  if(changedSource){expressionChoicesSource=choiceSource;for(const input of expressionRedrawChoices)input.checked=false;for(const note of expressionNotes)note.value='';expressionChoicesControl.open=false;expressionRequestControl.open=false;}
+  let missingGroups=0;
+  for(const group of expressionRequestGroups) {
+    const state=expressionGroupState(group,avatarParts);
+    const choice=expressionChoices.find(input=>input.dataset.expressionChoice===group.id)!;
+    choice.disabled=state.complete;
+    choice.parentElement!.hidden=state.complete;
+    if(state.complete)choice.checked=false;
+    else {
+      missingGroups+=1;
+      if(changedSource)choice.checked=group.id!=='mark';
+    }
+    const redraw=expressionRedrawChoices.find(input=>input.dataset.expressionRedraw===group.id)!;
+    redraw.disabled=!state.present.length;redraw.parentElement!.hidden=!state.present.length;
+    const note=expressionNotes.find(input=>input.dataset.expressionNote===group.id)!;
+    note.parentElement!.hidden=!redraw.checked;note.disabled=!redraw.checked;
+    const status=expressionChoicesContainer.querySelector<HTMLElement>(`[data-expression-group-status="${group.id}"]`)!;
+    const labels=(names:string[])=>names.map(expressionArtworkLabel).join('・');
+    status.textContent=state.complete?'入っています':state.present.length?`入っています：${labels(state.present)}\n足りない絵：${labels(state.missing)}`:'まだ入っていません';
+    status.dataset.complete=String(state.complete);
+  }
+  expressionChoicesSummary.textContent=`作ってもらう表情（足りない絵がある表情：${missingGroups}）`;
   if (usable) {
-    expressionRequestSummary.textContent = item?.productionReady === true
-      ? 'このPSDには閉じた目と開いた口の絵が入っています。絵を描き直したいときに使えます。'
-      : 'このPSDには閉じた目と開いた口の絵がまだないため、まばたきや口パクが不自然になります。画像生成でその絵を描き足し、このPSDに組み込めます。';
+    expressionRequestSummary.textContent = '足りない絵をまとめて作ってもらえます。入っている絵を変えたいときは、表情ごとの「作り直す」を選んでください。';
   } else if (unavailable) {
     expressionRequestSummary.textContent =
       'この機能は、このツールで変換したPSD（上の一覧から選ぶPSD）で使えます。手元から開いたPSDには、絵を組み込むための変換時のデータがありません。';
@@ -1633,8 +1792,9 @@ function syncExpressionRequestControl(): void {
   for (const steps of expressionRecipientSteps) {
     steps.hidden = steps.dataset.recipientSteps !== expressionRecipient;
   }
+  expressionRequestCopy.disabled = selectedExpressions().length === 0;
   expressionRequestDisclosure.hidden = expressionRecipient !== 'codex';
-  expressionRequestStatus.textContent = '';
+  expressionRequestStatus.textContent = selectedExpressions().length ? '' : missingGroups===0 ? '必要な絵はすべて入っています。変更したい表情は「作り直す」を選べます。' : '作ってもらう表情を1つ以上選んでください。';
   for (const button of startRecipientButtons) {
     button.setAttribute('aria-pressed', String(button.dataset.startRecipient === expressionRecipient));
   }
@@ -1680,45 +1840,14 @@ async function copyStartRequest(): Promise<void> {
 }
 
 function expressionRequestMessage(item: GeneratedPsd, id: string): string {
-  const root = `.still2rig-psd/jobs/${id}`;
-  const target = `対象: ${item.name}（変換の識別名: ${id}）。`;
-  const prepare = `まず npm run still2rig-psd -- expression-requests ${id} を実行してください。`;
-  const results = `${root}/expression-requests/results/eye_close.png と mouth_open.png`;
-  const finish = [
-    `npm run still2rig-psd -- import-expressions ${id} を実行し、取り込みが通ったら npm run still2rig-psd -- repair ${id} --expressions ${root}/generated-expressions を実行してください。`,
-    '前回の修復で使った差し替え画像は自動で引き継がれます。引き継いだ内容も実行結果で確認してください。',
-    '既存の品質検査の結果と、閉じた目・開いた口の両方の見た目を確認して報告してください。',
-  ];
-  const common = [
-    '仮の表情（derive-expressions）で置き換えないでください。',
-    '対象は保存済みPSDのレイヤーです。ブラウザ内の未保存の並べ替えは含めません。コミット・pushはしないでください。',
-  ];
-  if (expressionRecipient === 'codex') {
-    return [
-      '$still2rig-psd を使い、このPSDの閉じた目と開いた口の絵を作って組み込んでください。',
-      `${target}リポジトリの AGENTS.md とスキルの「Image-generated expressions」の手順に従ってください。`,
-      prepare,
-      'ユーザーはこの画面で、顔の切り抜き画像を Codex の組み込みの画像生成（imagegen）に送ることに同意済みです。ほかの外部サービスは使わないでください。',
-      `eye_close と mouth_open それぞれの input.png、mask.png、prompt.txt を使って画像を生成し、${results} に保存してください。`,
-      ...finish,
-      ...common,
-    ].join('\n');
-  }
-  return [
-    'リポジトリの AGENTS.md と .agents/skills/still2rig-psd/SKILL.md を読み、このPSDの閉じた目と開いた口の絵を用意する準備をしてください。',
-    target,
-    prepare,
-    'Claude Code は画像を生成できません。画像の生成や外部サービスへの送信はしないでください。',
-    `eye_close と mouth_open それぞれについて、画像生成に渡すファイル（input.png と mask.png の場所、prompt.txt の内容）と、結果を保存するファイル名（${results}）を具体的に案内して、そこで止まってください。`,
-    '私が結果を保存したと伝えたら、続きを進めてください。',
-    ...finish,
-    ...common,
-  ].join('\n');
+  return expressionFlowRequest({jobId:id,name:item.name,recipient:expressionRecipient,
+    groupIds:selectedGroupIds(),parts:avatarParts,redrawGroupIds:redrawGroupIds(),
+    notes:Object.fromEntries(expressionNotes.map(note=>[note.dataset.expressionNote!,note.value]))});
 }
 
 async function copyExpressionRequest(): Promise<void> {
   const item = generatedPsds.find((candidate) => candidate.id === activeGeneratedPsdId);
-  if (!item?.jobId) return;
+  if (!item?.jobId || selectedExpressions().length === 0) return;
   const message = expressionRequestMessage(item, item.jobId);
   try {
     await navigator.clipboard.writeText(message);
@@ -1815,6 +1944,7 @@ function setAvatarControlsDisabled(disabled: boolean): void {
     viewReset,
     ...modeButtons,
     ...presetButtons,
+    ...document.querySelectorAll<HTMLButtonElement>('[data-expression-preset]'),
     ...Object.values(tuningInputs),
     ...[...advancedControls.values()].flatMap((control) => [control.range, control.number]),
     advancedReset,
@@ -1841,12 +1971,26 @@ function setCameraConflicts(active: boolean): void {
   demoStart.disabled = anyActive || !avatar;
   demoStop.disabled = anyActive || !avatar;
   advancedReset.disabled = anyActive || !avatar;
+  for (const button of document.querySelectorAll<HTMLButtonElement>('[data-expression-preset]')) {
+    const state = expressionPresetAvailability(button.dataset.expressionPreset!, avatarParts);
+    button.disabled = !avatar || !state.available;
+    button.title = state.reason;
+    let reason = button.nextElementSibling as HTMLElement | null;
+    if (!reason?.classList.contains('expression-unavailable')) {
+      reason = document.createElement('small'); reason.className = 'expression-unavailable'; button.after(reason);
+    }
+    reason.textContent = state.reason; reason.hidden = state.available;
+  }
   const trackedParameters = new Set<PsdMotionParameterName>([
     'angleX', 'angleY', 'angleZ', 'body', 'eyeOpenL', 'eyeOpenR',
-    'eyeX', 'eyeY', 'mouthOpen', 'mouthForm', 'brow',
+    'eyeX', 'eyeY', 'mouthOpen',
   ]);
   for (const [name, control] of advancedControls) {
-    const disabled = !avatar || (active && trackedParameters.has(name)) || (voiceActive && name === 'mouthOpen');
+    const part = name === 'eyeSurprised' ? 'eyes_surprised' : name === 'eyeShy' ? 'eyes_shy' : name === 'eyeFlustered' ? 'eyes_flustered' : name === 'eyeHalf' ? 'eyes_half' : name === 'eyeSad' ? 'eyes_sad' : name === 'eyeAngry' ? 'eyes_angry' : name === 'mouthFrown' ? 'mouth_frown' : name.startsWith('eyeSmile') ? 'eye_smile' : name === 'blush' || name === 'tears' || name === 'sweat' ? name : name === 'angerMark' ? 'anger_mark' : name === 'mouthLaugh' ? 'mouth_laugh' : name === 'mouthRound' ? 'mouth_round' : null;
+    const missing = Boolean(part && !avatarParts.has(part));
+    control.unavailable.hidden = !missing;
+    control.unavailable.textContent = missing ? `このPSDには${PARAMETER_LABELS[name]}の絵がありません。` : '';
+    const disabled = !avatar || missing || (active && trackedParameters.has(name)) || (voiceActive && name === 'mouthOpen');
     control.range.disabled = disabled;
     control.number.disabled = disabled;
   }
@@ -1855,6 +1999,18 @@ function setCameraConflicts(active: boolean): void {
 
 function installEventListeners(): void {
   createAdvancedParameterControls();
+  const expressionButtons = requireElement<HTMLElement>('#expression-buttons');
+  for (const [index, preset] of expressionPresets.entries()) {
+    const button = document.createElement('button'); button.type = 'button';
+    button.dataset.expressionPreset = preset.id; button.textContent = preset.label;
+    const shortcut = document.createElement('kbd'); shortcut.className = 'expression-shortcut';
+    shortcut.textContent = String(index + 1); shortcut.setAttribute('aria-hidden', 'true');
+    button.append(shortcut); button.setAttribute('aria-keyshortcuts', String(index + 1));
+    button.setAttribute('aria-pressed', String(preset.id === 'neutral'));
+    button.addEventListener('click', () => selectExpression(preset.id));
+    const option = document.createElement('span'); option.className = 'expression-option';
+    option.append(button); expressionButtons.append(option);
+  }
   cameraControls = installCameraControls({
     input(input, weight) { api.setTrackingInput(input, weight); },
     active(active) { setCameraConflicts(active); if (active) livePublisher?.enable(); },
@@ -1946,6 +2102,10 @@ function installEventListeners(): void {
   });
   window.addEventListener('keydown', (event) => {
     if (event.key === 'Escape' && !canvasPickMenu.hidden) hideCanvasPickMenu();
+    const choices = [...document.querySelectorAll<HTMLButtonElement>('[data-expression-preset]')]
+      .map(button => ({id:button.dataset.expressionPreset!,disabled:button.disabled}));
+    const expression = expressionShortcut(event, choices);
+    if (expression) { event.preventDefault(); selectExpression(expression); }
   });
   window.addEventListener('resize', () => {
     if (layerProcessingActive) syncLayerProcessingBounds();
@@ -1976,6 +2136,9 @@ function installEventListeners(): void {
   expressionRequestCopy.addEventListener('click', () => {
     void copyExpressionRequest();
   });
+  for (const choice of expressionChoices) choice.addEventListener('change', syncExpressionRequestControl);
+  for(const choice of expressionRedrawChoices)choice.addEventListener('change',syncExpressionRequestControl);
+  document.querySelector<HTMLAnchorElement>('#expression-add-hint a')?.addEventListener('click',()=>{expressionRequestControl.open=true;});
   for (const button of expressionRecipientButtons) {
     button.addEventListener('click', () => {
       setExpressionRecipient(button.dataset.recipient === 'claude' ? 'claude' : 'codex');

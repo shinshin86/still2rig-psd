@@ -1,0 +1,398 @@
+{
+  "schemaVersion": 1,
+  "expressions": [
+    {
+      "name": "eye_close",
+      "label": "閉じた目",
+      "requestLabel": "closed eyes",
+      "prompt": "Close both eyes with natural anime eyelid lines matching the existing line art and skin. Remove the open eyes inside the editable areas. Keep the same face, pose, hair, lighting and colors.",
+      "editableLayers": [
+        "eyewhite",
+        "irides",
+        "eyelash"
+      ],
+      "mask": {
+        "dilationRatio": 0.04,
+        "minimumDilation": 3,
+        "fillBounds": false,
+        "mouthLimits": false
+      },
+      "extraction": "diff",
+      "registration": "eyes",
+      "split": true,
+      "placeholderFrom": null,
+      "checkFrontHair": true,
+      "protectedCheck": "strict"
+    },
+    {
+      "name": "mouth_open",
+      "label": "開いた口",
+      "requestLabel": "an open mouth",
+      "prompt": "Replace the closed mouth with a small natural open mouth saying Japanese \"あ\", matching the existing anime line art, position and colors. Keep the same face, eyes, pose, hair and lighting.",
+      "editableLayers": [
+        "mouth_close"
+      ],
+      "mask": {
+        "dilationRatio": 0.2,
+        "minimumDilation": 3,
+        "fillBounds": true,
+        "mouthLimits": true
+      },
+      "extraction": "diff",
+      "registration": "mouth",
+      "split": false,
+      "placeholderFrom": "mouth_close",
+      "checkFrontHair": false,
+      "protectedCheck": "strict"
+    },
+    {
+      "name": "mouth_close",
+      "label": "閉じた口",
+      "requestLabel": "a neutral closed mouth",
+      "prompt": "Replace the missing or unusable mouth with one small natural CLOSED mouth: a fine gently curved neutral lip line, matching the reference anime ink and colors. Remove the previous mouth cleanly inside the mask. Do not draw an opening, teeth, tongue, skin patch or a second lip line. Keep the face, nose, eyes, hair and all other pixels unchanged.",
+      "editableLayers": [
+        "mouth_close"
+      ],
+      "mask": {
+        "dilationRatio": 0.2,
+        "minimumDilation": 3,
+        "fillBounds": true,
+        "mouthLimits": true
+      },
+      "extraction": "diff",
+      "registration": "mouth",
+      "split": false,
+      "placeholderFrom": null,
+      "checkFrontHair": true,
+      "protectedCheck": "strict"
+    },
+    {
+      "name": "eye_smile",
+      "label": "笑い目",
+      "requestLabel": "smiling eyes",
+      "prompt": "Close both eyes into cheerful upward anime eyelash arcs shaped like ^ ^. Match the existing eye positions, size, line weight and colors. Keep the same face, hair, pose, lighting and all other features.",
+      "editableLayers": [
+        "eyewhite",
+        "irides",
+        "eyelash"
+      ],
+      "mask": {
+        "dilationRatio": 0.04,
+        "minimumDilation": 3,
+        "fillBounds": false,
+        "mouthLimits": false,
+        "upperExpansionRatio": 0.1
+      },
+      "extraction": "diff",
+      "registration": "eyes",
+      "split": true,
+      "placeholderFrom": null,
+      "checkFrontHair": true,
+      "protectedCheck": "seam"
+    },
+    {
+      "name": "blush",
+      "label": "頬の赤らみ",
+      "requestLabel": "soft cheek blush",
+      "prompt": "Add a subtle rosy blush to both cheeks with soft smooth gradients. Do not add lines, shadows, hatching or highlights. Keep the eyes, mouth, hair, face outline, pose and all other pixels unchanged.",
+      "editableLayers": [
+        "face"
+      ],
+      "mask": {
+        "dilationRatio": 0,
+        "minimumDilation": 0,
+        "fillBounds": false,
+        "mouthLimits": false,
+        "region": "cheeks"
+      },
+      "extraction": "soft",
+      "registration": "face",
+      "split": false,
+      "placeholderFrom": null,
+      "checkFrontHair": true,
+      "protectedCheck": "seam"
+    },
+    {
+      "name": "tears",
+      "label": "涙",
+      "requestLabel": "涙",
+      "prompt": "Add delicate translucent pale-blue tears just under both lower eyelids, flowing a short way down the upper cheeks. Match the existing fine anime line weight with white water highlights. Output ONLY the added artwork on a genuinely transparent background, in exactly the same canvas coordinates as the reference. Do not render the face, skin, hair, eyes, mouth, any background, text or checkerboard. Do not move, redraw or reproduce any reference feature.",
+      "editableLayers": [
+        "face"
+      ],
+      "mask": {
+        "dilationRatio": 0,
+        "minimumDilation": 0,
+        "fillBounds": false,
+        "mouthLimits": false,
+        "region": "tears"
+      },
+      "extraction": "overlay",
+      "registration": "face",
+      "split": true,
+      "placeholderFrom": null,
+      "checkFrontHair": true,
+      "protectedCheck": "overlay"
+    },
+    {
+      "name": "sweat",
+      "label": "汗",
+      "requestLabel": "汗",
+      "prompt": "Add one small anime sweat droplet at the screen-right temple over the hair, pale blue translucent water with a white highlight and a fine soft outline. Match the existing anime line weight. Output ONLY the added artwork on a genuinely transparent background, in exactly the same canvas coordinates as the reference. Do not render the face, skin, hair, eyes, mouth, any background, text or checkerboard. Do not move, redraw or reproduce any reference feature.",
+      "editableLayers": [
+        "face"
+      ],
+      "mask": {
+        "dilationRatio": 0,
+        "minimumDilation": 0,
+        "fillBounds": false,
+        "mouthLimits": false,
+        "region": "temple"
+      },
+      "extraction": "overlay",
+      "registration": "face",
+      "split": false,
+      "placeholderFrom": null,
+      "checkFrontHair": false,
+      "protectedCheck": "overlay"
+    },
+    {
+      "name": "anger_mark",
+      "label": "怒りマーク",
+      "requestLabel": "怒りマーク",
+      "prompt": "Add one small clean red four-pronged anime anger symbol on the screen-right upper forehead over the hair. Use a few curved red strokes matching the existing anime line weight, with transparent gaps between strokes. Output ONLY the added artwork on a genuinely transparent background, in exactly the same canvas coordinates as the reference. Do not render the face, skin, hair, eyes, mouth, any background, text or checkerboard. Do not move, redraw or reproduce any reference feature.",
+      "editableLayers": [
+        "face"
+      ],
+      "mask": {
+        "dilationRatio": 0,
+        "minimumDilation": 0,
+        "fillBounds": false,
+        "mouthLimits": false,
+        "region": "forehead"
+      },
+      "extraction": "overlay",
+      "registration": "face",
+      "split": false,
+      "placeholderFrom": null,
+      "checkFrontHair": false,
+      "protectedCheck": "overlay"
+    },
+    {
+      "name": "mouth_laugh",
+      "label": "笑った口",
+      "requestLabel": "笑った口",
+      "prompt": "Replace only the mouth with a cheerful open laughing anime mouth. Make the mouth about one tenth wider than the current open mouth, with raised corners, a dark warm mouth interior and a small pink tongue. Keep the mouth center at the existing lip line; keep its total height about half the width of the current open mouth. Match the fine brown line art and existing flat anime palette. Do not add teeth, lipstick, skin shading, hair, nose changes or a second mouth. Preserve the face, eyes, nose, chin outline, pose and every pixel outside the mask. Output ONLY the single new mouth drawing (outline, dark interior and tongue) on genuine alpha transparency at the exact reference coordinates. Do not render any part of the face, skin, hair, nose, eyes, neck or background. No white or checkerboard background. The source face is a position/style reference only.",
+      "editableLayers": [
+        "mouth_close"
+      ],
+      "mask": {
+        "dilationRatio": 0.2,
+        "minimumDilation": 3,
+        "fillBounds": true,
+        "mouthLimits": true,
+        "region": "mouth"
+      },
+      "extraction": "overlay",
+      "registration": "mouth",
+      "split": false,
+      "placeholderFrom": null,
+      "checkFrontHair": true,
+      "protectedCheck": "overlay"
+    },
+    {
+      "name": "mouth_round",
+      "label": "丸く開いた口",
+      "requestLabel": "丸く開いた口",
+      "prompt": "Replace only the mouth with one small surprised Japanese O anime mouth, about two fifths of the current open mouth width, rounded and about one quarter taller than wide. Use a fine brown outline, a dark warm interior and only a subtle pink tongue at the bottom. Keep the same existing mouth center and anime style. Do not add teeth, lipstick, skin shading, hair, nose changes or a second mouth. Preserve the face, eyes, nose, chin outline, pose and every pixel outside the mask. Output ONLY the single new mouth drawing (outline, dark interior and tongue) on genuine alpha transparency at the exact reference coordinates. Do not render any part of the face, skin, hair, nose, eyes, neck or background. No white or checkerboard background. The source face is a position/style reference only.",
+      "editableLayers": [
+        "mouth_close"
+      ],
+      "mask": {
+        "dilationRatio": 0.2,
+        "minimumDilation": 3,
+        "fillBounds": true,
+        "mouthLimits": true,
+        "region": "mouth"
+      },
+      "extraction": "overlay",
+      "registration": "mouth",
+      "split": false,
+      "placeholderFrom": null,
+      "checkFrontHair": true,
+      "protectedCheck": "overlay"
+    },
+    {
+      "name": "mouth_frown",
+      "label": "口角を下げた閉じ口",
+      "requestLabel": "口角を下げた閉じ口",
+      "prompt": "Draw a small, almost flat closed mouth with the corners turned slightly down, a calm unhappy expression. Match the original mouth position, width, fine brown line and anime style. Output only the single closed lip line on a transparent background at the reference coordinates. Keep the rest of the canvas transparent. No face, skin, nose, hair, teeth, open mouth, text or background.",
+      "editableLayers": [
+        "mouth_close"
+      ],
+      "mask": {
+        "dilationRatio": 0.2,
+        "minimumDilation": 3,
+        "fillBounds": true,
+        "mouthLimits": true,
+        "region": "mouth"
+      },
+      "extraction": "overlay",
+      "registration": "mouth",
+      "split": false,
+      "placeholderFrom": null,
+      "checkFrontHair": true,
+      "protectedCheck": "overlay"
+    },
+    {
+      "name": "eyes_angry",
+      "label": "怒った目元",
+      "requestLabel": "怒った目元",
+      "prompt": "Quiet restrained anger: lower the brows only slightly and draw their inner ends a little closer, keeping a soft natural shape rather than a strong V. Lower the upper eyelids slightly for a calm, cool, displeased gaze. Keep both irises looking straight ahead at the viewer. Keep the expression subtle and composed, without an angry symbol, veins, tears or sweat. Draw both complete eyes including opaque whites, irises, pupils, highlights, fine lash lines and eyebrows. Match the reference anime style, line thickness, brown ink and iris colors. Preserve eye spacing and overall eye positions. Replace the original eye and brow artwork cleanly, preserving the natural skin behind slightly narrower eyes. Return the whole reference face with ONLY the eyes and brows edited. Keep the original closed mouth exactly unchanged; do not redraw it or change its corners. Preserve the face, hair, nose, cheek color, pose, canvas, skin gradients and all other pixels. Preserve existing transparency outside the head. Do not draw a transparent eye overlay.",
+      "editableLayers": [
+        "eyewhite",
+        "irides",
+        "eyelash",
+        "eyebrow"
+      ],
+      "mask": {
+        "dilationRatio": 0,
+        "minimumDilation": 0,
+        "fillBounds": false,
+        "mouthLimits": false,
+        "region": "eyes"
+      },
+      "extraction": "diff",
+      "registration": "eyes",
+      "split": true,
+      "placeholderFrom": null,
+      "checkFrontHair": true,
+      "protectedCheck": "seam"
+    },
+    {
+      "name": "eyes_sad",
+      "label": "悲しい目元",
+      "requestLabel": "悲しい目元",
+      "prompt": "Sad eyes: worried brows with raised inner ends, drooping outer corners, slightly heavy upper lids, watery irises. Draw both complete eyes including opaque whites, irises, pupils, highlights, fine lash lines and eyebrows. Match the reference anime style, line thickness, brown ink and iris colors. Preserve eye spacing and overall eye positions. Replace the original eyes and eyebrows completely with this new expression. Keep skin outside the changed eyes smooth and identical to the reference; erase the old eye artwork, preserving natural face skin behind the narrower eyes. Return the whole reference face with ONLY the eyes and brows edited. Do not draw a transparent overlay. Preserve the face, hair, mouth, nose, cheek color, pose, canvas and all other pixels.",
+      "editableLayers": [
+        "eyewhite",
+        "irides",
+        "eyelash",
+        "eyebrow"
+      ],
+      "mask": {
+        "dilationRatio": 0,
+        "minimumDilation": 0,
+        "fillBounds": false,
+        "mouthLimits": false,
+        "region": "eyes"
+      },
+      "extraction": "diff",
+      "registration": "eyes",
+      "split": true,
+      "placeholderFrom": null,
+      "checkFrontHair": true,
+      "protectedCheck": "seam"
+    },
+    {
+      "name": "eyes_half",
+      "label": "ジト目",
+      "requestLabel": "ジト目",
+      "prompt": "Unamused half-lidded eyes: flat upper eyelid lines cover the upper half of each iris; flat low eyebrows. Draw both complete eyes including opaque whites, irises, pupils, highlights, fine lash lines and eyebrows. Match the reference anime style, line thickness, brown ink and iris colors. Preserve eye spacing and overall eye positions. Replace the original eyes and eyebrows completely with this new expression. Keep skin outside the changed eyes smooth and identical to the reference; erase the old eye artwork, preserving natural face skin behind the narrower eyes. Return the whole reference face with ONLY the eyes and brows edited. Do not draw a transparent overlay. Preserve the face, hair, mouth, nose, cheek color, pose, canvas and all other pixels.",
+      "editableLayers": [
+        "eyewhite",
+        "irides",
+        "eyelash",
+        "eyebrow"
+      ],
+      "mask": {
+        "dilationRatio": 0,
+        "minimumDilation": 0,
+        "fillBounds": false,
+        "mouthLimits": false,
+        "region": "eyes"
+      },
+      "extraction": "diff",
+      "registration": "eyes",
+      "split": true,
+      "placeholderFrom": null,
+      "checkFrontHair": true,
+      "protectedCheck": "seam"
+    },
+    {
+      "name": "eyes_surprised",
+      "label": "驚いた目元",
+      "requestLabel": "驚いた目元",
+      "prompt": "Surprised eyes: wide open eyes, slightly smaller irises and raised eyebrows. Draw both complete eyes including opaque whites, irises, pupils, highlights, fine lash lines and eyebrows. Match the reference anime style, line thickness, brown ink and iris colors. Preserve eye spacing and overall eye positions. Replace the original eyes and eyebrows completely with this new expression. Keep skin outside the changed eyes smooth and identical to the reference; erase the old eye artwork, preserving natural face skin behind the narrower eyes. Return the whole reference face with ONLY the eyes and brows edited. Do not draw a transparent overlay. Preserve the face, hair, mouth, nose, cheek color, pose, canvas and all other pixels.",
+      "editableLayers": [
+        "eyewhite",
+        "irides",
+        "eyelash",
+        "eyebrow"
+      ],
+      "mask": {
+        "dilationRatio": 0,
+        "minimumDilation": 0,
+        "fillBounds": false,
+        "mouthLimits": false,
+        "region": "eyes"
+      },
+      "extraction": "diff",
+      "registration": "eyes",
+      "split": true,
+      "placeholderFrom": null,
+      "checkFrontHair": true,
+      "protectedCheck": "seam"
+    },
+    {
+      "name": "eyes_shy",
+      "label": "照れた目元",
+      "requestLabel": "照れた目元",
+      "prompt": "Shy eyes: slightly narrowed and downcast eyes with mildly worried brows. Draw both complete eyes including opaque whites, irises, pupils, highlights, fine lash lines and eyebrows. Match the reference anime style, line thickness, brown ink and iris colors. Preserve eye spacing and overall eye positions. Replace the original eyes and eyebrows completely with this new expression. Keep skin outside the changed eyes smooth and identical to the reference; erase the old eye artwork, preserving natural face skin behind the narrower eyes. Return the whole reference face with ONLY the eyes and brows edited. Do not draw a transparent overlay. Preserve the face, hair, mouth, nose, cheek color, pose, canvas and all other pixels.",
+      "editableLayers": [
+        "eyewhite",
+        "irides",
+        "eyelash",
+        "eyebrow"
+      ],
+      "mask": {
+        "dilationRatio": 0,
+        "minimumDilation": 0,
+        "fillBounds": false,
+        "mouthLimits": false,
+        "region": "eyes"
+      },
+      "extraction": "diff",
+      "registration": "eyes",
+      "split": true,
+      "placeholderFrom": null,
+      "checkFrontHair": true,
+      "protectedCheck": "seam"
+    },
+    {
+      "name": "eyes_flustered",
+      "label": "焦った目元",
+      "requestLabel": "焦った目元",
+      "prompt": "Flustered eyes: somewhat wide eyes with worried brows and slightly wandering gaze. Draw both complete eyes including opaque whites, irises, pupils, highlights, fine lash lines and eyebrows. Match the reference anime style, line thickness, brown ink and iris colors. Preserve eye spacing and overall eye positions. Replace the original eyes and eyebrows completely with this new expression. Keep skin outside the changed eyes smooth and identical to the reference; erase the old eye artwork, preserving natural face skin behind the narrower eyes. Return the whole reference face with ONLY the eyes and brows edited. Do not draw a transparent overlay. Preserve the face, hair, mouth, nose, cheek color, pose, canvas and all other pixels.",
+      "editableLayers": [
+        "eyewhite",
+        "irides",
+        "eyelash",
+        "eyebrow"
+      ],
+      "mask": {
+        "dilationRatio": 0,
+        "minimumDilation": 0,
+        "fillBounds": false,
+        "mouthLimits": false,
+        "region": "eyes"
+      },
+      "extraction": "diff",
+      "registration": "eyes",
+      "split": true,
+      "placeholderFrom": null,
+      "checkFrontHair": true,
+      "protectedCheck": "seam"
+    }
+  ]
+}

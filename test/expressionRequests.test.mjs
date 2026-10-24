@@ -56,7 +56,7 @@ test('requests use the current neutral PSD canvas, face crops, alpha masks and r
   assert.equal(resized.status, 0);
   const result = ok('expression-requests', f.id);
   assert.deepEqual(result.canvas, [96, 96]);
-  assert.match(result.next, /import-expressions/);
+  assert.match(result.next, /expression-candidates/);
   const requests = JSON.parse(fs.readFileSync(path.join(f.requestDir, 'requests.json')));
   assert.equal(requests.schemaVersion, 2);
   assert.equal(requests.jobId, f.id);
@@ -238,9 +238,9 @@ test('neutral request compositing honors mouth_close overrides in the PSD layer 
   const f = fixture();
   const overrides = path.join(f.root, 'expression-overrides');
   fs.mkdirSync(overrides);
-  // A synthetic visible marker replaces the source mouth via the normal repair path.
+  // Valid closed-mouth ink replaces the source mouth via the normal repair path.
   const marker = spawnSync('python3', ['-c',
-    'from PIL import Image, ImageDraw; import sys; im=Image.new("RGBA",(96,96)); ImageDraw.Draw(im).rectangle((42,48,54,52),fill=(12,34,56,255)); im.save(sys.argv[1])',
+    'from PIL import Image, ImageDraw; import sys; im=Image.new("RGBA",(96,96)); ImageDraw.Draw(im).arc((40,46,56,55),10,170,fill=(12,34,56,255),width=3); im.save(sys.argv[1])',
     path.join(overrides, 'mouth_close.png')]);
   assert.equal(marker.status, 0);
   ok('repair', f.id, '--expressions', overrides);
@@ -248,8 +248,16 @@ test('neutral request compositing honors mouth_close overrides in the PSD layer 
   const requests = JSON.parse(fs.readFileSync(path.join(f.requestDir, 'requests.json')));
   const item = requests.variants.mouth_open;
   const input = readPngRgba(path.join(f.requestDir, item.input));
-  const index = (((50 - item.cropBox[1]) * item.scale + 2) * input.width + (48 - item.cropBox[0]) * item.scale + 2) * 4;
-  assert.deepEqual(Array.from(input.data.slice(index, index + 4)), [12, 34, 56, 255]);
+  // Compare independently composed/resized pixels, including Lanczos ringing
+  // around the thin ink, rather than expecting the native color to survive.
+  const expectedFile = path.join(overrides, 'expected-input.png');
+  const expected = spawnSync('python3', ['-c',
+    'from PIL import Image; import json,sys; face=Image.open(sys.argv[1]).convert("RGBA"); mouth=Image.open(sys.argv[2]).convert("RGBA"); item=json.loads(sys.argv[3]); Image.alpha_composite(face,mouth).crop(tuple(item["cropBox"])).resize(tuple(item["size"]),Image.Resampling.LANCZOS).save(sys.argv[4])',
+    path.join(f.layers, 'face.png'), path.join(overrides, 'mouth_close.png'), JSON.stringify(item), expectedFile]);
+  assert.equal(expected.status, 0);
+  const expectedInput = readPngRgba(expectedFile);
+  const index = (((54 - item.cropBox[1]) * item.scale + 2) * input.width + (48 - item.cropBox[0]) * item.scale + 2) * 4;
+  assert.deepEqual(Array.from(input.data.slice(index, index + 4)), Array.from(expectedInput.data.slice(index, index + 4)));
 });
 
 test('imports a single result from DIR and rejects modified request masks and invalid thresholds', () => {
@@ -309,6 +317,9 @@ for (const mode of ['shifted', 'scaled']) {
     assert.match(result.stderr, /global image misalignment|outside the mask changed/);
     const report = JSON.parse(fs.readFileSync(path.join(f.root, 'generated-expressions', 'report.json')));
     if (mode === 'shifted') assert.equal(report.variants.eye_close.alignment.pass, false);
+    const seam = run('import-expressions', f.id, '--protected-check', 'seam', '--read-only');
+    assert.notEqual(seam.status, 0);
+    if (mode === 'shifted') assert.equal(JSON.parse(seam.stdout).variants.eye_close.alignment.pass, false);
   });
 }
 

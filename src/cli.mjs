@@ -3,12 +3,14 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { readPsd, writePsdBuffer } from 'ag-psd';
 import { ensureFaceModel } from './face-model.mjs';
-import { buildPsd } from './psd.mjs';
+import { expressions } from './expressions.mjs';
+import { buildPsd, expressionOcclusion } from './psd.mjs';
 import { colabBridgePaths, colabConnectionInfo } from './colab.mjs';
 import { listJobs, loadJob, prepareJob, updateJob } from './job.mjs';
 import { runQa } from './qa.mjs';
 import {
   PROJECT_ROOT,
+  STATE_ROOT,
   jobRoot,
   loadDefaults,
   loadLayerMap,
@@ -31,12 +33,14 @@ Usage:
   still2rig-psd finalize JOB [--expressions DIR | --preview-expressions DIR] [--layer-overrides DIR] [--preview-placeholders]
   still2rig-psd repair JOB [--expressions DIR | --preview-expressions DIR | --no-expressions] [--layer-overrides DIR | --no-layer-overrides] [--preview-placeholders]
   still2rig-psd derive-expressions JOB
-  still2rig-psd expression-requests JOB
+  still2rig-psd expression-requests JOB [--only eye_smile,blush | all]
+  still2rig-psd expression-candidates JOB [--only eyes_sad] [--request-dir DIR] [--preview-dir DIR]
   still2rig-psd import-expressions JOB [DIR] [--max-outside-mean 6] [--max-outside-p99 20]
+    [--only eyes_sad,mouth_frown | --pick eyes_sad=3,mouth_frown=1]
     [--max-band-local-mean 24] [--max-band-flat-mean 12]
     [--protected-band 8] [--alignment-radius 24] [--max-alignment-shift 12] [--max-alignment-scale 0.03]
     [--artwork-threshold 8] [--minimum-component-pixels 4]
-    [--read-only [--request-dir DIR]]
+    [--protected-check strict|seam] [--read-only [--request-dir DIR] [--preview-dir DIR]]
   still2rig-psd motion-qa JOB [--negative-fixture]
   still2rig-psd status [JOB] [--json]
   still2rig-psd self-test
@@ -111,11 +115,12 @@ function doctor() {
   };
 }
 
-function runPython(script, args) {
+function runPython(script, args, input) {
   const result = spawnSync('python3', [path.join(PROJECT_ROOT, 'scripts', script), ...args], {
     cwd: PROJECT_ROOT,
     encoding: 'utf8',
     maxBuffer: 20 * 1024 * 1024,
+    input,
   });
   if (result.status !== 0) throw new Error((result.stderr || result.stdout || `${script} failed`).trim());
   return (result.stdout || '').trim();
@@ -145,7 +150,7 @@ function importBundle(jobId, archiveValue) {
   return result;
 }
 
-function assembleArtifacts({ jobId, root, options, outputPsd, layerDir, reportsRoot }) {
+function inspectArtifacts({ root, options, layerDir, reportsRoot }) {
   const imported = path.join(root, 'raw', 'imported');
   if (!fs.existsSync(path.join(imported, 'run-manifest.json'))) throw new Error('Import a verified Colab bundle before finalizing.');
   const inspectionReport = path.join(reportsRoot, 'layer-inspection.json');
@@ -168,24 +173,25 @@ function assembleArtifacts({ jobId, root, options, outputPsd, layerDir, reportsR
   if (expressionDir) inspectArgs.push('--expressions', path.resolve(expressionDir));
   if (options['layer-overrides']) inspectArgs.push('--layer-overrides', path.resolve(options['layer-overrides']));
   runPython('inspect_layers.py', inspectArgs);
+  return { inspectionReport, contactSheet };
+}
+
+function assembleArtifacts({ jobId, root, options, outputPsd, layerDir, reportsRoot }) {
+  const { inspectionReport, contactSheet } = inspectArtifacts({ root, options, layerDir, reportsRoot });
   const buildReportFile = path.join(reportsRoot, 'psd-build.json');
   const build = buildPsd({
     layerDir,
     output: outputPsd,
     reportFile: buildReportFile,
     previewPlaceholders: Boolean(options['preview-placeholders']),
-    previewExpressionTargets: options['preview-expressions'] ? previewExpressionTargets(inspectionReport) : [],
+    previewExpressionTargets: options['expression-preview-targets'] ?? (options['preview-expressions'] ? previewExpressionTargets(inspectionReport) : []),
   });
   const qaReportFile = path.join(reportsRoot, 'qa-report.json');
   const qa = runQa({ psdFile: outputPsd, layerDir, buildReportFile, reportFile: qaReportFile });
   return { build, qa, outputPsd, qaReportFile, contactSheet, buildReportFile, inspectionReport };
 }
 
-const EXPRESSION_TARGETS = {
-  'mouth_open.png': 'mouth_open',
-  'mouth_close.png': 'mouth_close',
-  'eye_close.png': 'eye_close',
-};
+const EXPRESSION_TARGETS = Object.fromEntries(expressions.map(item => [`${item.name}.png`, item.name]));
 
 function previewExpressionTargets(inspectionReport) {
   const report = JSON.parse(fs.readFileSync(inspectionReport, 'utf8'));
@@ -300,9 +306,63 @@ function inheritedExpressions(root, manifest) {
   return { key, directory, fromRepair: latest.repairId, legacy: !latest.options };
 }
 
+function mergeExpressionInputs(root, manifest, repairRoot, options, inheritedArt) {
+  const latest = manifest.result?.repairs?.at(-1);
+  const oldPreview = new Set((manifest.result?.previewExpressions || []).map(item => item.layer));
+  const explicit = options.expressions || options['preview-expressions'];
+  if (inheritedArt) {
+    if (!latest?.expressionProvenance) return null;
+    options['expression-preview-targets'] = [...oldPreview];
+    return Object.fromEntries(Object.entries(latest.expressionProvenance).map(([name, value]) =>
+      [name, { ...value, inheritedFromRepair: latest.repairId }]));
+  }
+  if (!explicit) return null;
+  const incoming = path.resolve(explicit);
+  if (!fs.existsSync(incoming) || !fs.statSync(incoming).isDirectory()) return null;
+  const previous = currentLayerDir(root, manifest);
+  const supplied = expressions.filter(item => fs.existsSync(path.join(incoming, `${item.name}.png`)));
+  const retained = expressions.filter(item => !supplied.includes(item) && fs.existsSync(path.join(previous, `${item.name}.png`)));
+  const optional = supplied.some(item => item.prompt && !item.requiredForProduction);
+  if (!retained.length && !optional) return null;
+  const provenance = {};
+  let imported = [];
+  let importedVariants = {};
+  let selectedCandidates = {};
+  try { const report = JSON.parse(fs.readFileSync(path.join(incoming, 'report.json'), 'utf8')); imported = Array.isArray(report.accepted) ? report.accepted : []; importedVariants = report.variants || {}; } catch { /* Supplied PNGs need no import report. */ }
+  try { selectedCandidates=JSON.parse(fs.readFileSync(path.join(incoming,'selections.json'),'utf8')); } catch { /* Direct artwork has no candidate history. */ }
+  const preview = new Set();
+  for (const item of retained) {
+    const old = latest?.expressionProvenance?.[item.name];
+    const derived = oldPreview.has(item.name);
+    provenance[item.name] = { ...(old || { kind: derived ? 'derived-preview' : 'supplied-artwork', importedResult: false }), inheritedFromRepair: latest?.repairId ?? null };
+    if (derived) preview.add(item.name);
+  }
+  for (const item of supplied) {
+    const derived = Boolean(options['preview-expressions']);
+    provenance[item.name] = { kind: derived ? 'derived-preview' : 'supplied-artwork', importedResult: imported.includes(item.name), inheritedFromRepair: null };
+    const candidate = importedVariants[item.name]?.candidate ?? selectedCandidates[item.name];
+    if(candidate?.artworkSha256===sha256File(path.join(incoming,`${item.name}.png`)))provenance[item.name].candidate=candidate;
+    if (derived) preview.add(item.name);
+  }
+  if (retained.length) {
+    const snapshot = path.join(repairRoot, 'inputs', 'expressions');
+    fs.mkdirSync(snapshot, { recursive: true });
+    for (const item of retained) fs.copyFileSync(path.join(previous, `${item.name}.png`), path.join(snapshot, `${item.name}.png`));
+    for (const item of supplied) fs.copyFileSync(path.join(incoming, `${item.name}.png`), path.join(snapshot, `${item.name}.png`));
+    options.expressions = snapshot;
+    delete options['preview-expressions'];
+  }
+  options['expression-preview-targets'] = [...preview].sort();
+  return provenance;
+}
+
 function repair(jobId, options) {
   const { root, manifest } = loadJob(jobId);
-  if (!manifest.result?.psd) throw new Error('Finalize the job before repairing it.');
+  if (!manifest.result?.psd) {
+    const closed = options.expressions && path.join(path.resolve(options.expressions), 'mouth_close.png');
+    if (!closed || !fs.existsSync(closed)) throw new Error('Finalize the job before repairing it.');
+    return { ...finalize(jobId, options), initialAssembly: true };
+  }
   const currentPsd = path.resolve(PROJECT_ROOT, manifest.result.psd);
   if (!fs.existsSync(currentPsd) || !fs.statSync(currentPsd).isFile()) throw new Error('The current PSD is missing.');
   const repairId = nextRepairId(root);
@@ -310,6 +370,9 @@ function repair(jobId, options) {
   const afterRoot = path.join(repairRoot, 'after');
   if (options['layer-overrides'] && options['no-layer-overrides']) {
     throw new Error('Use --layer-overrides DIR or --no-layer-overrides, not both.');
+  }
+  if (options.expressions && options['preview-expressions']) {
+    throw new Error('Use either --expressions (drawn or image-generated artwork) or --preview-expressions (derived preview artwork), not both.');
   }
   if (options['no-expressions'] && (options.expressions || options['preview-expressions'])) {
     throw new Error('Use an expression directory or --no-expressions, not both.');
@@ -321,6 +384,7 @@ function repair(jobId, options) {
   const inheritedArt = !options.expressions && !options['preview-expressions'] && !options['no-expressions']
     ? inheritedExpressions(root, manifest) : null;
   if (inheritedArt) effective[inheritedArt.key] = inheritedArt.directory;
+  const expressionProvenance = options['no-expressions'] ? null : mergeExpressionInputs(root, manifest, repairRoot, effective, inheritedArt);
   const assembled = assembleArtifacts({
     jobId,
     root,
@@ -377,10 +441,10 @@ function repair(jobId, options) {
     result: {
       ...job.result,
       ...after,
-      repairs: [...(job.result.repairs || []), { repairId, createdAt, before, after, options: recordedOptions, inheritedOptions }],
+      repairs: [...(job.result.repairs || []), { repairId, createdAt, before, after, options: recordedOptions, inheritedOptions, ...(expressionProvenance ? { expressionProvenance } : {}) }],
     },
   }));
-  return { jobId, repairId, before, build: assembled.build, qa: assembled.qa, result: after, options: recordedOptions, inheritedOptions };
+  return { jobId, repairId, before, build: assembled.build, qa: assembled.qa, result: after, options: recordedOptions, inheritedOptions, ...(expressionProvenance ? { expressionProvenance } : {}) };
 }
 
 function currentLayerDir(root, manifest) {
@@ -411,13 +475,17 @@ function deriveExpressions(jobId) {
   };
 }
 
-function expressionRequests(jobId) {
+function expressionRequests(jobId, options) {
   const { root, manifest } = loadJob(jobId);
+  if (!manifest.result?.psd && !fs.existsSync(path.join(root, 'processed', 'layers'))) {
+    inspectArtifacts({root, options:{}, layerDir:path.join(root,'processed','layers'), reportsRoot:path.join(root,'reports')});
+  }
   const outputDir = path.join(root, 'expression-requests');
   const requests = JSON.parse(runPython('build_expression_requests.py', [
     '--job-id', jobId,
     '--layer-dir', currentLayerDir(root, manifest),
     '--output-dir', outputDir,
+    ...(options.only !== undefined ? ['--only', options.only] : []),
   ]));
   return {
     jobId,
@@ -426,7 +494,18 @@ function expressionRequests(jobId) {
     canvas: requests.canvas,
     layerDir: requests.layerDir,
     layerSha256: requests.layerSha256,
-    next: `still2rig-psd import-expressions ${jobId}`,
+    stage: requests.stage,
+    closedMouth: requests.closedMouth,
+    deferredExpressions: requests.deferredExpressions,
+    next: requests.stage === 'closed-mouth' ? `still2rig-psd import-expressions ${jobId} --only mouth_close --read-only` : `still2rig-psd expression-candidates ${jobId}`,
+    ...(requests.stage === 'closed-mouth' ? {
+      message: '閉じた口の絵を先に用意します。取り込んでPSDを組み直したあと、残りの表情を続けます。',
+      nextSteps: {
+        import: `still2rig-psd import-expressions ${jobId} --only mouth_close`,
+        repair: `still2rig-psd repair ${jobId} --expressions ${relativeProjectPath(path.join(root,'generated-expressions'))}`,
+        resume: requests.deferredExpressions.length ? `still2rig-psd expression-requests ${jobId}${options.only ? ` --only ${options.only}` : ''}` : null,
+      },
+    } : {}),
     note: 'Local requests only. Ask the image owner before sending these crops to an image generation service.',
   };
 }
@@ -449,24 +528,81 @@ function importExpressions(jobId, directory, options) {
     '--output-dir', outputDir, '--report', reportFile,
   ];
   if (options['read-only']) args.push('--read-only');
+  if (options.pick !== undefined) args.push('--pick', options.pick);
+  if (options.only !== undefined && !options.candidateReview) args.push('--only', options.only);
+  if (options['protected-check'] !== undefined) {
+    if (!['strict', 'seam'].includes(options['protected-check'])) throw new Error('--protected-check must be strict or seam.');
+    args.push('--protected-check', options['protected-check']);
+  }
+  if (options['preview-dir'] !== undefined) {
+    const preview = path.resolve(options['preview-dir']);
+    if (!options['read-only'] || !preview.startsWith(`${STATE_ROOT}${path.sep}`) || (preview === root || preview.startsWith(`${root}${path.sep}`))) {
+      throw new Error('--preview-dir needs --read-only and a directory under .still2rig-psd outside this job.');
+    }
+    args.push('--preview-dir', preview);
+  }
   for (const key of ['max-outside-mean', 'max-outside-p99', 'max-band-local-mean', 'max-band-flat-mean', 'artwork-threshold', 'minimum-component-pixels', 'protected-band', 'alignment-radius', 'max-alignment-shift', 'max-alignment-scale']) {
     if (options[key] !== undefined) args.push(`--${key}`, options[key]);
   }
   let report;
+  const requests = JSON.parse(fs.readFileSync(path.join(requestDir, 'requests.json'), 'utf8'));
+  let visibility;
+  if (manifest.result?.psd && (options['protected-check'] === 'seam' || (!options['protected-check']
+      && expressions.some(item => item.protectedCheck === 'seam' && requests.variants[item.name])))) {
+    // Historical requests may describe a different repair. Do not borrow the
+    // current PSD's occlusion for those layers; retain the full check instead.
+    if (path.resolve(layerDir) === path.resolve(currentLayerDir(root, manifest))) {
+      visibility = JSON.stringify(expressionOcclusion(path.resolve(PROJECT_ROOT, manifest.result.psd), requests, loadLayerMap(), expressions));
+      args.push('--psd-occlusion-stdin');
+    }
+  }
   if (options['read-only']) {
-    const result = spawnSync('python3', [path.join(PROJECT_ROOT, 'scripts', 'import_expression_results.py'), ...args], { cwd: PROJECT_ROOT, encoding: 'utf8', maxBuffer: 20 * 1024 * 1024 });
+    const result = spawnSync('python3', [path.join(PROJECT_ROOT, 'scripts', 'import_expression_results.py'), ...args], { cwd: PROJECT_ROOT, encoding: 'utf8', maxBuffer: 20 * 1024 * 1024, input: visibility });
     report = JSON.parse(result.stdout || '{}');
     if (!report.schemaVersion) throw new Error((result.stderr || 'Expression evaluation failed.').trim());
-    if (!report.ok) process.exitCode = 1;
+    if (!report.ok && !options.candidateReview) process.exitCode = 1;
     return report;
   }
-  report = JSON.parse(runPython('import_expression_results.py', args));
+  report = JSON.parse(runPython('import_expression_results.py', args, visibility));
   return {
     ...report,
     outputDir: relativeProjectPath(outputDir),
     report: relativeProjectPath(reportFile),
     next: `still2rig-psd repair ${jobId} --expressions ${relativeProjectPath(outputDir)}`,
   };
+}
+
+function expressionCandidates(jobId, options) {
+  const { root } = loadJob(jobId);
+  const requestDir = options['request-dir'] ? path.resolve(options['request-dir']) : path.join(root, 'expression-requests');
+  const requests = JSON.parse(fs.readFileSync(path.join(requestDir, 'requests.json'), 'utf8'));
+  const names = options.only ? options.only.split(',') : Object.keys(requests.variants);
+  if (!names.length || new Set(names).size !== names.length || names.some(name => !requests.variants[name] || !expressions.some(item=>item.name===name&&item.prompt))) throw new Error('--only must name expressions in the prepared requests.');
+  const candidateDir = path.join(requestDir, 'results', 'candidates');
+  if(!fs.existsSync(candidateDir))throw new Error('Save candidates as expression-requests/results/candidates/NAME-1.png, NAME-2.png, NAME-3.png first.');
+  const files = fs.readdirSync(candidateDir);
+  const selected = names.flatMap(name => files.flatMap(file => {
+    const match = file.match(new RegExp(`^${name}-([1-9][0-9]*)\\.png$`));
+    return match ? [{name,number:Number(match[1])}] : [];
+  })).sort((a,b)=>names.indexOf(a.name)-names.indexOf(b.name)||a.number-b.number);
+  if(!selected.length || (options.only && names.some(name=>!selected.some(item=>item.name===name))))throw new Error('No numbered candidates found for a requested expression.');
+  const output = options['preview-dir'] ? path.resolve(options['preview-dir']) : path.join(STATE_ROOT,'reviews',jobId,`candidates-${Date.now()}`);
+  if(!output.startsWith(`${STATE_ROOT}${path.sep}`)||output===root||output.startsWith(`${root}${path.sep}`)||output===requestDir||output.startsWith(`${requestDir}${path.sep}`))throw new Error('Candidate previews must stay under .still2rig-psd outside the source job and request directory.');
+  let ancestor=output;
+  while(!fs.existsSync(ancestor))ancestor=path.dirname(ancestor);
+  const resolved=path.resolve(fs.realpathSync(ancestor),path.relative(ancestor,output));
+  const sourceRoot=fs.realpathSync(root),sourceRequests=fs.realpathSync(requestDir);
+  if(!resolved.startsWith(`${fs.realpathSync(STATE_ROOT)}${path.sep}`)||[sourceRoot,sourceRequests].some(source=>resolved===source||resolved.startsWith(`${source}${path.sep}`)))throw new Error('Candidate previews must not alias source files.');
+  fs.mkdirSync(output,{recursive:true});
+  for(const name of ['report.json',...new Set(selected.map(item=>`${item.name}-comparison.png`))]) {
+    const destination=path.join(output,name);
+    if(fs.existsSync(destination)&&(fs.lstatSync(destination).isSymbolicLink()||fs.statSync(destination).nlink>1))throw new Error('Candidate review files must not alias source files.');
+  }
+  const candidates=selected.map(item=>({...item,report:importExpressions(jobId,undefined,{...options,'request-dir':requestDir,'read-only':true,'preview-dir':fs.mkdtempSync(path.join(output,`${item.name}-${item.number}-`)),pick:`${item.name}=${item.number}`,candidateReview:true})}));
+  const report={schemaVersion:1,jobId,readOnly:true,requestDir:relativeProjectPath(requestDir),layerDir:requests.layerDir,candidates};
+  const reportFile=path.join(output,'report.json');writeJson(reportFile,report);
+  const sheets=JSON.parse(runPython('build_expression_candidate_sheet.py',['--report',reportFile,'--output-dir',output]));
+  return {...report,report:relativeProjectPath(reportFile),comparisons:sheets, next:'Show the comparison images and wait for the user to choose. Do not import or repair yet.'};
 }
 
 function shiftedMouthFixture(psdFile, output) {
@@ -533,7 +669,7 @@ function selfTest() {
     armsBehindTopwear: index('handwear') < index('topwear'),
     neckBeforeFace: index('neck') < index('face'),
     faceBeforeEyes: index('face') < index('eyewhite'),
-    expressionsBeforeFrontHair: index('eye_close') < index('front hair'),
+    expressionsBeforeFrontHair: expressions.filter(item => item.checkFrontHair).every(item => index(item.name) < index('front hair')),
     pinnedRevision: /^[0-9a-f]{40}$/.test(loadDefaults().seeThrough.revision),
     privateStateIgnored: fs.readFileSync(path.join(PROJECT_ROOT, '.gitignore'), 'utf8').split(/\r?\n/).includes('.still2rig-psd/'),
   };
@@ -582,7 +718,9 @@ export async function main(argv = process.argv.slice(2)) {
   } else if (command === 'derive-expressions') {
     print(deriveExpressions(positional[0]), true);
   } else if (command === 'expression-requests') {
-    print(expressionRequests(positional[0]), true);
+    print(expressionRequests(positional[0], options), true);
+  } else if (command === 'expression-candidates') {
+    print(expressionCandidates(positional[0], options), true);
   } else if (command === 'import-expressions') {
     print(importExpressions(positional[0], positional[1], options), true);
   } else if (command === 'status') {

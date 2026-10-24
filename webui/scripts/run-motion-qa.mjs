@@ -1,3 +1,4 @@
+import { captureExpressionSet } from './expression-set-captures.mjs';
 // Renderer adapter for configs/motion-qa-contract.json.
 //
 // Loads a PSD into the built-in preview renderer, records every required
@@ -16,7 +17,7 @@ import { createRequire } from 'node:module';
 
 import { chromium } from 'playwright';
 
-import { evaluateMotionQa, hairTipMaskFromLayers, loadMotionContract, motionLayerPreflight, visibleHairMaskFromLayers } from '../../src/motionQa.mjs';
+import { evaluateMotionQa, expressionMasksFromLayers, hairTipMaskFromLayers, loadMotionContract, motionLayerPreflight, visibleHairMaskFromLayers } from '../../src/motionQa.mjs';
 import { decodePngRgba, inspectPsd } from '../../src/psd.mjs';
 
 const webuiRoot = path.resolve(import.meta.dirname, '..');
@@ -132,6 +133,7 @@ async function main() {
 
     const canvas = page.locator('#rig-canvas');
     let frameCounter = 0;
+    const mouthStates = [];
     const capture = async (name, label) => {
       // Clip to an integer-aligned CSS box so the capture is exactly model scale.
       const rect = await canvas.boundingBox();
@@ -143,6 +145,8 @@ async function main() {
       if (frame.width !== probeInfo.canvas.width || frame.height !== probeInfo.canvas.height) {
         throw new Error(`Capture is ${frame.width}x${frame.height}, expected ${probeInfo.canvas.width}x${probeInfo.canvas.height}.`);
       }
+      const mouthState = await page.evaluate(() => window.rigQa.getMouthState());
+      mouthStates?.push({name,label,...mouthState});
       frameCounter += 1;
       const file = path.join(framesDir, `${String(frameCounter).padStart(3, '0')}-${name}-${label}.png`);
       await fs.writeFile(file, buffer);
@@ -154,7 +158,7 @@ async function main() {
     const info = referencePsd === psdFile ? reference : await loadPsd(page, psdFile);
 
     const captures = {};
-    const setState = (eye, mouth) => page.evaluate(([e, m]) => window.rigQa.setState(e, m), [eye, mouth]);
+    const setState = (eye, mouth, expressions = {}) => page.evaluate(([e, m, x]) => window.rigQa.setState(e, m, x), [eye, mouth, expressions]);
     const setMode = (mode) => page.evaluate((m) => window.rigQa.setMode(m), mode);
 
     await setMode('static');
@@ -184,6 +188,30 @@ async function main() {
       captures['lip-sync-continuous'].push(await capture('lip-sync-continuous', `step-${step}-mouth-${mouth.toFixed(2)}`));
     }
     await setState(1, 0);
+
+    const expressionMasks = expressionMasksFromLayers(inspectPsd(psdFile).layers,
+      info.canvas.width, info.canvas.height, info.anchors);
+    for (const name of Object.keys(expressionMasks).filter(name=>!['tears','sweat','anger_mark','mouth_laugh','mouth_round'].includes(name))) {
+      captures[name] = [];
+      const key = name === 'eye-smile' ? 'eyeSmile' : name === 'anger_mark' ? 'angerMark' : name;
+      for (const strength of name === 'eye-smile' ? [...Array.from({ length: 21 }, (_, i) => i / 20), 0.48, 0.52] : ['tears','sweat','anger_mark'].includes(name) ? Array.from({length:21},(_,i)=>i/20) : [0, 0.5, 1]) {
+        await setState(1, 0, { eyeSmile: 0, blush: 0, tears:0, sweat:0, angerMark:0, [key]: strength });
+        await sleep(500);
+        captures[name].push(await capture(name, `strength-${strength.toFixed(2)}`));
+      }
+      if (name === 'eye-smile') {
+        // Settle the full smile with open eyes first; a change requested mid-blink waits for the blink.
+        await setState(1, 0, { eyeSmile: 1, blush: 0 });
+        await sleep(500);
+        await setState(0.5, 0, { eyeSmile: 1, blush: 0 });
+        await sleep(500);
+        captures[name].push(await capture(name, 'strength-1.00-blink-half'));
+        await setState(0, 0, { eyeSmile: 1, blush: 0 });
+        await sleep(500);
+        captures[name].push(await capture(name, 'strength-1.00-blink'));
+      }
+    }
+    await setState(1, 0, { eyeSmile: 0, blush: 0, tears:0, sweat:0, angerMark:0 });
 
     captures['hair-physics-only'] = [];
     await setMode('physics');
@@ -224,6 +252,34 @@ async function main() {
     }
     await setMode('static');
 
+    // Keep the legacy motion sequence before added expression captures: wind
+    // follows elapsed time, so an earlier capture changes its sampled phase.
+    // Reload to remove drag inertia before checking expression isolation.
+    await loadPsd(page, psdFile);
+    for (const name of ['tears','sweat','anger_mark','mouth_laugh','mouth_round'].filter(name=>expressionMasks[name])) {
+      const key = name === 'anger_mark' ? 'angerMark' : name === 'mouth_laugh' ? 'mouthLaugh' : name === 'mouth_round' ? 'mouthRound' : name;
+      captures[name] = [];
+      for (let step=0;step<=20;step++) {
+        await setState(1,0,{eyeSmile:0,blush:0,tears:0,sweat:0,angerMark:0,mouthLaugh:0,mouthRound:0,expressionMouthOpen:0,[key]:step/20});
+        await sleep(500);
+        captures[name].push(await capture(name,`strength-${(step/20).toFixed(2)}`));
+      }
+      for (const eye of [.5,0]) {
+        await setState(eye,0,{[key]:1});await sleep(500);
+        captures[name].push(await capture(name,`strength-1.00-blink-${eye}`));
+      }
+    }
+    captures['mouth-fine-opening'] = [];
+    for (let i=0;i<=30;i++) {
+      await setState(1,i/100,{mouthLaugh:0,mouthRound:0,expressionMouthOpen:0});
+      await sleep(350);
+      captures['mouth-fine-opening'].push(await capture('mouth-fine-opening',`open-${(i/100).toFixed(2)}`));
+    }
+    Object.assign(captures, await captureExpressionSet({ page, capture,
+      parts: info.summary.partsFound, partSteps: 2, settleMs: 500,
+      pairs: [['neutral','joy'],['joy','neutral'],['joy','angry'],['sad','surprised'],['wink','joy'],['unamused','surprised']],
+    }));
+
     const psd = inspectPsd(referencePsd);
     const hairTipMask = hairTipMaskFromLayers(psd.layers, info.canvas.width, info.canvas.height);
     const visibleHairMask = visibleHairMaskFromLayers(psd.layers, info.canvas.width, info.canvas.height);
@@ -232,8 +288,13 @@ async function main() {
       captures,
       hairTipMask,
       visibleHairMask,
+      expressionMasks,
+      expressionSetRequired: true,
       contract,
     });
+    evaluation.checks.mouthSingleDrawing = mouthStates.every(state=>state.visibleDrawings===1);
+    evaluation.checks.mouthFineOpeningCaptured = captures['mouth-fine-opening'].length===31;
+    evaluation.pass = Object.values(evaluation.checks).every(Boolean);
     const dragPeak = Math.max(...dragMotion.map((value) => Math.hypot(value.x, value.y)));
     const report = {
       schemaVersion: 1,
@@ -246,6 +307,7 @@ async function main() {
       drag: { peakMotion: Number(dragPeak.toFixed(4)), responded: dragPeak > 0.001, samples: dragMotion },
       captures: Object.fromEntries(Object.entries(captures).map(([name, items]) => [name, items.map((item) => item.file)])),
       consoleErrors,
+      mouthStates,
     };
     await fs.writeFile(path.join(outDir, 'motion-qa.json'), `${JSON.stringify(report, null, 2)}\n`);
     console.log(JSON.stringify({ pass: report.pass, metrics: report.metrics, checks: report.checks, report: path.join(outDir, 'motion-qa.json') }));

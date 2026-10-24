@@ -114,20 +114,99 @@ as approval for Codex imagegen only, not for other services. Otherwise, explain
 which face crops and service will be used, then ask and wait. Preparing local
 request files alone does not require this consent.
 
-If image generation is available (for example, Codex imagegen), inspect each
-input and mask, then generate each variant using its `input.png`, `mask.png` and
-the exact instructions in `prompt.txt`. Save the returned PNGs as
-`expression-requests/results/eye_close.png` and `mouth_open.png`. If the agent
-cannot generate images (for example, Claude Code), stop at this stage and tell
-the user which three files for each variant to hand to a generator, where to
-save the results, and how to resume. Do not substitute derived preview art.
+Before generating mouths, inspect the `closedMouth` and `stage` fields returned
+by `expression-requests`. Existing closed-mouth ink is retained only when it
+passes the configured compactness, line-art and brightness checks. If the stage
+is `closed-mouth`, generate only `results/mouth_close.png` from that request,
+validate it read-only, import it with `--only mouth_close`, and run the reported
+repair command. This also assembles the first PSD when the missing mouth had
+prevented initial assembly. Never use the old open, empty or invalid mouth as
+the closed reference.
 
-After results are available:
+Then follow `nextSteps.resume` to prepare fresh requests for the original
+selection. Read the newly generated inputs and hashes; do not reuse images made
+from the previous requests. If `resume` is null, the requested closed-mouth
+repair is already complete. Both stages belong to the same user request and
+need no per-stage approval or candidate selection. If closed-mouth generation
+still fails after the permitted retries, report why and omit the dependent
+mouths. Non-mouth images can be requested separately without a closed mouth;
+a reserved geometric region for masks is not generated mouth artwork.
+
+Prepare all requested drawings together before generating any image. Inspect
+each input, mask and prompt, including the editable area beneath the original
+front hair. Generate **one image per drawing** using those exact files and save
+it as `expression-requests/results/NAME.png`. Keep the requested dimensions and
+transparency: ask the generator for a transparent background (for Codex image
+generation, `transparent_background=true`). A result that fills the transparent
+corners of `input.png` with an opaque color fails the outside check even when
+the drawing is correct. Do not change the input, mask, underlay or recorded
+hashes.
+Preparing files alone never authorizes generation.
+
+Complete every requested expression in one run without asking the user to pick
+candidates or approve each expression. For a redraw, replace the selected
+expression's existing artwork, reflect any note only in its drawing direction,
+and preserve unrelated art. Shared drawings such as blush, smiling eyes and the
+frowning mouth affect every expression that uses them; the preview explains this.
+
+If the agent cannot generate images (for example, Claude Code), give all exact
+input/mask paths, prompt contents and single-result filenames together. Do not
+send images to an unapproved service or substitute derived art. Wait only for
+those images to be supplied; after the user reports they are saved, continue
+through review, import and repair without intermediate candidate selection.
+
+For each generated image, run the import checks without changing the source:
 
 ```bash
-npm run still2rig-psd -- import-expressions <job>
+npm run still2rig-psd -- import-expressions <job> --only eyes_sad --read-only --preview-dir .still2rig-psd/review/<job>/eyes_sad
+```
+
+Inspect the exported artwork and composite. A passing check is necessary but
+does not establish visual quality. Accept the first image that passes both the
+checks and all of these visual criteria:
+
+- It reads as the intended expression.
+- Its style, line weight and colors match the original.
+- It has no doubled eyes, brows or mouth.
+- It adds no artwork outside the requested region.
+
+If it fails checks or visual review, regenerate that drawing at most twice using
+the same unchanged request. Stop generating it as soon as one image passes. If
+it still fails, skip that drawing, record the reason and continue with the other
+drawings. Preserve any previous art for a skipped drawing. Never weaken checks,
+rewrite provenance or edit the mask to make a failing image pass. Source-layer
+hash mismatches require fresh requests rather than an artwork retry.
+
+After all drawings have been reviewed, import only the accepted names together,
+then repair once. For example, if both of these images passed:
+
+```bash
+npm run still2rig-psd -- import-expressions <job> --only eyes_sad,mouth_frown
 npm run still2rig-psd -- repair <job> --expressions .still2rig-psd/jobs/<job>/generated-expressions
 ```
+
+`--only` evaluates and replaces just the named images; other imported art stays
+intact. Leave failed drawings out of this list even when their result files are
+present. If no drawing passes, do not repair; report the reasons. Keep the source
+layers unchanged until this combined import is complete, so all requests retain
+valid provenance. A successful direct import clears old numbered-candidate
+metadata for the images it replaces.
+
+Open the repaired PSD in the preview. Check all expression buttons, final
+close-ups, both transition directions in 0.05 strength steps and blinking.
+Retain one overview of all completed expressions. At the end, report that image,
+a short table of retry counts and skipped drawings with reasons, tests/build
+results and remaining visual differences. Run the applicable tests, build and
+motion QA once at the end; rerun only after a meaningful change or failure.
+Aim for about 30 minutes for the whole request. Do not stop for per-item approval;
+the user can request a specific redo afterwards.
+
+`expression-candidates` and `import-expressions --pick` remain available for
+optional comparisons and development, not the standard workflow. Numbered raw
+candidates live in `results/candidates/NAME-N.png`. Read-only comparison does not
+change the PSD, job state, requests or imported art, and preserves the same import
+checks. Review output must stay under `.still2rig-psd/` outside the source job.
+Archived requests keep their recorded hashes and layer snapshots.
 
 Repair automatically inherits the preceding layer overrides and expression
 source, including preview status, and reports them in `inheritedOptions`. Verify
@@ -148,13 +227,48 @@ drift may be compensated only within a 12-pixel displacement magnitude and 3%
 uniform scale error; the original result is sampled once. Read the applied
 transform as well as the estimate. Shared-white-background RGB comparison avoids
 false differences from near-opaque alpha encoding. Symmetric 2-pixel color
-matching keeps the mean/p99 limits at 6/20; direct errors remain in the report.
+matching in `strict` mode keeps the mean/p99 limits at 6/20; direct errors remain in the report.
 Face-interior 4x4 tiles add local/flat limits of 24/12 to catch missing ink or
 painted patches. Outer hair contours use the global band check. Two character
 samples passed; synthetic removed/moved brows, patches and excessive drift must
 fail. See `docs/quality-gates.md` for metric boundaries and calibration.
 `--read-only` evaluates recorded provenance without changing files; use
 `--request-dir DIR` with it to inspect archived requests.
+
+Expression definitions select `protectedCheck`: `eye_close` and `mouth_open`
+use `strict`, while `eye_smile` and `blush` use `seam`. Use
+`import-expressions JOB [DIR] --protected-check strict|seam` for a temporary
+override. Alignment and provenance remain mandatory. In `seam`, whole-outside
+mean has limit 18; p99 with reference limit 80 is diagnostic only. Both 3-native-pixel boundary bands use radius-1 blurred
+RGB residuals against the original outside and the PSD underlay inside (source
+eye/mouth removal is intentional), with mean/p95 limits 6/20. Inner 4x4 tile means have limit 12; outer tile
+means and worst locations are diagnostic only because extraction keeps original
+artwork outside the mask. `diagnostics.outerTiles` reports its limit comparison
+without gating import. Adjacent
+inside/outside residual jumps have p95 limit 12. Only opaque reference pixels
+are sampled; missing band support fails. Reports identify failed bands and tiles.
+Permanent layers in front of the expression can exclude fully covered pixels
+from seam metrics. Coverage uses finalized PSD order, offsets, layer opacity 1,
+and alpha exactly 255; absent expressions use layer-map insertion order. Hidden,
+translucent, masked, clipped, non-normal and animated expression layers do not
+establish coverage. Covered residuals are zeroed before blurring. Reports include
+the PSD hash, contributors and ignored boundary-pair fraction; fewer than 64
+visible boundary pairs fails (coverage fraction is diagnostic). Historical layer snapshots retain the
+full check without borrowing the current PSD coverage.
+
+Smiling-eye requests preserve the source white/lash alpha union, including faint
+tips, with at least 4 native pixels of lateral margin (or the larger dilation).
+This eye envelope takes precedence over front-hair protection; eyebrow protection
+remains. Cheek edits stop 4 native pixels inside the face contour.
+
+After restoration, the first three inside pixels fade from one-third to full
+extracted alpha, including soft blush; no outside pixels are imported.
+
+Use `--read-only` to evaluate archived results without changing job files.
+Optional `--preview-dir .still2rig-psd/review` writes accepted input/art/composite
+crops and full-canvas artwork outside the source job. Inspect these crops before
+repair. Do not relax limits solely to force an import pass. No import pass
+establishes natural expression art or motion quality.
 
 Import removes matching skin using the same RGB comparison where both result
 and underlay are nearly opaque, and premultiplied RGBA elsewhere. It removes
@@ -179,6 +293,53 @@ again with `--negative-fixture` when the checks themselves changed; that run mus
 FAIL. Only a passing `motion-qa` report for the current PSD SHA-256 supports a
 motion, seam, or hair-motion claim, and only for the built-in renderer.
 
+If the PSD includes visible `eye_smile` or `blush` artwork, motion QA also
+captures strengths 0, 0.5, and 1 and checks changes inside the expression region
+and stability outside it. Smiling eyes capture every 0.05 step from 0 to 1 plus
+0.48 and 0.52. Strengths 0.5, 0.75 and 0.95 must still differ from strength 1,
+so an immediate jump to the final drawing fails. Half and fully closed blinks at strength 1
+must stay identical. These optional checks
+use an RGB delta greater than 1 for faint blush; the regular eye/mouth threshold
+remains 24. Missing optional artwork adds no capture requirement and does not
+change expression production readiness. Inspect the full strength strip and
+adjacent switch frames: automated pixel checks cannot establish natural-looking
+intermediate faces or an unobtrusive drawing switch.
+
+The preview and stream page support both strengths (0..1, default 0). In
+**細かい設定 → 目・眉**, **笑い目** and **頬の赤らみ** are disabled with a reason
+when the PSD has no matching artwork. Below strength 0.5, the lower lid rises
+toward a shallow smile contour detected at PSD load. The upper lash retains
+its ink band; lower-lash fragments are suppressed before they collapse, and the
+white-eye stencil hides the iris from below. Closed-eye artwork stays hidden.
+At 0.5 only the smile drawing appears, initially matched to the narrowed eye's
+position and width with a thin, shallow curve. Its mesh continuously restores
+the original artwork at strength 1. The upper crease keeps its separation;
+detached outer marks are hidden while displaced. Drawings never overlap in
+opacity, including without closed-eye artwork. Inspect adjacent captures for
+remaining differences in lash tips or highlights before accepting the artwork.
+Blink-driven brow motion decreases toward the threshold. Smiling eyes follow eye/head controls;
+blush follows the head with opacity only. Selecting either part in
+**重なりを直す** reveals it.
+
+### Expression combinations
+
+`configs/expression-presets.json` defines the nine faces in the **表情** buttons.
+Selection updates only expression sliders over 250 ms; manual changes show
+**自分で調整中**. Pose, gaze, normal blinking and voice input stay independent.
+An expression that lacks its required artwork is disabled with a reason. Final
+eye and mouth shapes use the supplied or generated drawings; neutral-feature
+deformation is limited to the brief handoff between drawings. Each side shows
+one eye drawing, with only blink closure allowed to overlap. Whole-eye drawings
+for anger, sadness, surprise, shyness, fluster and half-closed eyes share the same
+retargetable slot and blink-safe transition. Missing optional blush is ignored.
+Camera mouth form and brow height add to expression values (clamped to -1..1);
+other tracking values keep their existing weighted blend.
+All values reach the stream in validated live settings; old profiles use zero
+for new controls. Motion QA captures parts, preset blink states and representative
+transitions. It checks coverage and wink-side isolation, not visual naturalness.
+Inspect every 0.05 strength step, endpoints and representative transitions on
+PSDs both with and without optional artwork, and retain close-up evidence.
+
 ## Completion report
 
 Report the job id, input SHA-256, pinned See-through revision, PSD path and
@@ -193,3 +354,26 @@ details in the UI. Do not launch a browser automatically.
 For failure modes and the exact trust model, read
 `../../../docs/codex-workflow.md` and `../../../docs/security.md` only when they
 are relevant.
+
+## Optional mouth artwork
+
+`mouth_laugh` and `mouth_round` use the approved character's masked request and
+repair workflow. They are optional; never replace missing art with a claim of
+verified generated artwork. Transparent mouth results contain only lip ink,
+cavity and tongue. Import validates alpha/placement/skin contamination and
+registers their centroid to the closed mouth with a recorded translation of
+at most 12 native pixels. It rechecks the mask after registration.
+
+For an archived request, use `import-expressions JOB --read-only --preview-dir
+DIR` against its recorded layer snapshot. Inspect the isolated artwork and
+composite, retain the report, and pass the validated full-canvas mouth images
+with the preceding expression files to `repair JOB --expressions DIR`. Do not
+rewrite recorded hashes or silently attach a result to a newer request.
+
+Verify one visible mouth drawing, 0.05 shape steps, 0.01 opening steps around
+handoffs, resting/voice/camera opening, both transition directions and at least
+two seconds of 30fps speech. Keep pale skin/highlight pixels out of narrow-mouth
+recoloring. Test both artwork-present and artwork-missing PSDs and the stream
+view. The surprised fallback uses a separate resting-opening floor, not an
+overwrite of the speech slider. Neutral and camera closure clear/suppress the
+resting floor. Motion capture coverage alone does not establish naturalness.

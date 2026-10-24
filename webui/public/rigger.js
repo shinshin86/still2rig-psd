@@ -30,9 +30,22 @@
     'earwear':     { depth: 0.97, group: 'head' },
     'ears':        { depth: 0.96, group: 'head' },
     'face':        { depth: 1.00, group: 'head' },
+    'blush':       { depth: 1.03, group: 'head', fade: 'blush' },
+    'tears':       { depth: 1.12, group: 'head', split: true, fade: 'tears' },
+    'sweat':       { depth: 1.30, group: 'head', fade: 'sweat' },
+    'anger_mark':  { depth: 1.30, group: 'head', fade: 'angerMark' },
     'facedetail':  { depth: 1.02, group: 'head' },
     'headwear':    { depth: 1.20, group: 'head' },
+    'mouth_frown': { depth: 1.08, group: 'head', fade: 'mouthFrown' },
+    'eyes_angry': { depth: 1.12, group: 'head', split: true, fade: 'eyeAngry' },
+    'eyes_surprised': { depth: 1.12, group: 'head', split: true, fade: 'eyeSurprised' },
+    'eyes_shy': { depth: 1.12, group: 'head', split: true, fade: 'eyeShy' },
+    'eyes_flustered': { depth: 1.12, group: 'head', split: true, fade: 'eyeFlustered' },
+    'eyes_half': { depth: 1.12, group: 'head', split: true, fade: 'eyeHalf' },
+    'eyes_sad': { depth: 1.12, group: 'head', split: true, fade: 'eyeSad' },
     'mouth_close': { depth: 1.08, group: 'head', fade: 'mouthClose' },
+    'mouth_laugh': { depth: 1.08, group: 'head', fade: 'mouthLaugh' },
+    'mouth_round': { depth: 1.08, group: 'head', fade: 'mouthRound' },
     'mouth_open':  { depth: 1.08, group: 'head', fade: 'mouthOpen' },
     'nose':        { depth: 1.15, group: 'head' },
     'eyewhite':    { depth: 1.06, group: 'head', split: true, fade: 'eyeOpen' },
@@ -40,6 +53,7 @@
     'irides':      { depth: 1.08, group: 'head', split: true, fade: 'eyeOpen' },
     'eyelash':     { depth: 1.12, group: 'head', split: true, fade: 'eyeOpen' },
     'eye_close':   { depth: 1.12, group: 'head', split: true, fade: 'eyeClose' },
+    'eye_smile':   { depth: 1.12, group: 'head', split: true, fade: 'eyeSmile' },
     'front hair':  { depth: 1.28, group: 'head', phys: 'hair' }
   };
 
@@ -342,7 +356,7 @@
       eff = new Uint8Array(W * H);
       for (var i = 0; i < W * H; i++) eff[i] = mask[i] ? fullAlpha[i] : 0;
     }
-    var bb = bboxOf(eff, W, H, 8);
+    var bb = bboxOf(eff, W, H, slot.fade === 'blush' ? 0 : 8);
     if (!bb) return null;
     var pad = 2;
     var x0 = Math.max(0, bb.x0 - pad), y0 = Math.max(0, bb.y0 - pad);
@@ -382,7 +396,8 @@
     var entries = [];
     for (var i = 0; i < kids.length; i++) {
       var name = normName(kids[i].name);
-      var fa = cleanAlpha(fullAlphaOf(kids[i], W, H), W, H, 40);
+      var fa = fullAlphaOf(kids[i], W, H);
+      if (name !== 'blush') fa = cleanAlpha(fa, W, H, 40);
       entries.push({ name: name, layer: kids[i], alpha: fa });
     }
     var byName = {};
@@ -412,6 +427,10 @@
       }
       if (slot.split) {
         var masks = splitSides(e.alpha, W, H, FACE.cx);
+        if(bn.startsWith('eyes_')) {
+          masks={l:new Uint8Array(W*H),r:new Uint8Array(W*H)};
+          for(var p=0;p<W*H;p++) if(e.alpha[p]) masks[p%W<FACE.cx?'l':'r'][p]=1;
+        }
         var got = false;
         ['l', 'r'].forEach(function (s) {
           if (!masks[s]) return;
@@ -440,6 +459,151 @@
       }
     }
 
+    // Locate the upper part of each smiling eyelid's ink, avoiding the skin
+    // pixels that generated artwork may carry around its actual line.
+    // Use the connected eyelash ink rather than detached marks near the hair.
+    function smileInk(entry, alpha, eye) {
+      if (!entry || !alpha) return null;
+      var data = entry.layer.imageData, left = entry.layer.left | 0, top = entry.layer.top | 0;
+      var box = bboxOf(alpha, W, H, 8);
+      if (!box) return null;
+      var pending = new Uint8Array(W * H), largest = [];
+      for (var y = box.y0; y <= box.y1; y++) for (var x = box.x0; x <= box.x1; x++) {
+        var ix = x - left, iy = y - top, index = y * W + x;
+        if (alpha[index] < 32 || ix < 0 || iy < 0 || ix >= data.width || iy >= data.height) continue;
+        var i = (iy * data.width + ix) * 4;
+        if (data.data[i] * 0.3 + data.data[i + 1] * 0.6 + data.data[i + 2] * 0.1 < 128) pending[index] = 1;
+      }
+      for (var y = box.y0; y <= box.y1; y++) for (var x = box.x0; x <= box.x1; x++) {
+        var start = y * W + x;
+        if (!pending[start]) continue;
+        var queue = [start]; pending[start] = 0;
+        for (var q = 0; q < queue.length; q++) {
+          var at = queue[q], px = at % W, py = Math.floor(at / W);
+          for (var dy = -1; dy <= 1; dy++) for (var dx = -1; dx <= 1; dx++) {
+            var nx = px + dx, ny = py + dy, next = ny * W + nx;
+            if (nx < box.x0 || nx > box.x1 || ny < box.y0 || ny > box.y1 || !pending[next]) continue;
+            pending[next] = 0; queue.push(next);
+          }
+        }
+        if (queue.length > largest.length) largest = queue;
+      }
+      if (!largest.length) return alpha;
+      var ink = new Uint8Array(W * H);
+      for (var i = 0; i < largest.length; i++) ink[largest[i]] = alpha[largest[i]];
+      return ink;
+    }
+
+    function smileHeight(entry, alpha, eye) {
+      if (!entry || !alpha) return null;
+      var image = entry.layer.imageData, data = image.data;
+      var left = entry.layer.left | 0, top = entry.layer.top | 0;
+      var width = eye.x1 - eye.x0, height = Math.max(1, eye.y1 - eye.y0);
+      var x0 = Math.max(0, Math.ceil(eye.x0 + width * 0.2));
+      var x1 = Math.min(W - 1, Math.floor(eye.x1 - width * 0.2));
+      var y0 = Math.max(0, Math.floor(eye.y0 - height * 0.75));
+      var y1 = Math.min(H - 1, Math.ceil(eye.y1));
+      var rows = [], total = 0;
+      for (var y = y0; y <= y1; y++) {
+        var weight = 0;
+        for (var x = x0; x <= x1; x++) {
+          var a = alpha[y * W + x];
+          var ix = x - left, iy = y - top;
+          if (a < 32 || ix < 0 || iy < 0 || ix >= image.width || iy >= image.height) continue;
+          var index = (iy * image.width + ix) * 4;
+          if (data[index] * 0.3 + data[index + 1] * 0.6 + data[index + 2] * 0.1 < 128) weight += a;
+        }
+        rows.push({ y: y, weight: weight }); total += weight;
+      }
+      if (total) {
+        var accumulated = 0;
+        for (var i = 0; i < rows.length; i++) {
+          accumulated += rows[i].weight;
+          if (accumulated >= total * 0.25) return rows[i].y;
+        }
+      }
+      var box = bboxOf(alpha, W, H, 8);
+      return box ? box.y0 + (box.y1 - box.y0) * 0.35 : null;
+    }
+
+    function upperLidCurve(entry, alpha, eye, inkOnly) {
+      if (!entry || !alpha) return null;
+      var box = bboxOf(alpha, W, H, 8);
+      if (!box) return null;
+      var image = entry.layer.imageData, data = image.data;
+      var left = entry.layer.left | 0, top = entry.layer.top | 0;
+      var height = Math.max(1, eye.y1 - eye.y0), curve = [];
+      for (var bin = 0; bin < 9; bin++) {
+        var x0 = Math.floor(box.x0 + (box.x1 - box.x0 + 1) * bin / 9);
+        var x1 = Math.floor(box.x0 + (box.x1 - box.x0 + 1) * (bin + 1) / 9);
+        var rows = [], total = 0, first = null;
+        for (var y = Math.max(0, Math.floor(eye.y0 - height * 0.75)); y <= eye.y1; y++) {
+          var weight = 0;
+          for (var x = x0; x < x1; x++) {
+            var a = alpha[y * W + x], ix = x - left, iy = y - top;
+            if (a < 32 || ix < 0 || iy < 0 || ix >= image.width || iy >= image.height) continue;
+            if (first === null) first = y;
+            var i = (iy * image.width + ix) * 4;
+            if (data[i] * 0.3 + data[i + 1] * 0.6 + data[i + 2] * 0.1 < 128) weight += a;
+          }
+          rows.push({ y: y, weight: weight }); total += weight;
+        }
+        var accumulated = 0, upper = inkOnly ? null : first;
+        for (var row = 0; total && row < rows.length; row++) {
+          accumulated += rows[row].weight;
+          if (accumulated >= total * 0.15) { upper = rows[row].y; break; }
+        }
+        if (upper !== null) curve.push({ x: (x0 + x1 - 1) / 2, y: upper });
+      }
+      return curve.length ? curve : null;
+    }
+
+    function upperCreaseCurve(entry, alpha, eye) {
+      if (!entry || !alpha) return null;
+      var data=entry.layer.imageData.data, width=entry.layer.imageData.width;
+      var left=entry.layer.left|0, top=entry.layer.top|0, curve=[];
+      var height=eye.y1-eye.y0;
+      for(var bin=0;bin<17;bin++) {
+        var x0=Math.floor(eye.x0+(eye.x1-eye.x0)*bin/17);
+        var x1=Math.ceil(eye.x0+(eye.x1-eye.x0)*(bin+1)/17);
+        var sum=0,total=0;
+        for(var x=x0;x<x1;x++) {
+          var dark=null;
+          for(var y=Math.max(top,Math.floor(eye.y0-height*.5));y<eye.y0+height*.45;y++) {
+            var ix=x-left,iy=y-top,i=(iy*width+ix)*4;
+            if(ix<0||ix>=width||iy<0||i>=data.length||alpha[y*W+x]<64)continue;
+            if(alpha[y*W+x]>=235 && data[i]*.3+data[i+1]*.6+data[i+2]*.1<115){dark=y;break;}
+          }
+          if(dark===null)continue;
+          for(var y=Math.max(top,Math.floor(dark-height*.3));y<dark-2;y++) {
+            var ix=x-left,iy=y-top,i=(iy*width+ix)*4,a=alpha[y*W+x];
+            if(ix<0||ix>=width||iy<0||i>=data.length||a<32)continue;
+            var light=data[i]*.3+data[i+1]*.6+data[i+2]*.1;
+            if(light<220){sum+=(y+.5)*a;total+=a;}
+          }
+        }
+        if(total)curve.push({x:(x0+x1)/2,y:sum/total});
+      }
+      return curve.length>=3?curve:null;
+    }
+
+    function browCenterCurve(alpha) {
+      var box = alpha ? bboxOf(alpha, W, H, 8) : null;
+      if (!box) return null;
+      var curve = [];
+      for (var bin = 0; bin < 17; bin++) {
+        var x0 = Math.floor(box.x0 + (box.x1 - box.x0 + 1) * bin / 17);
+        var x1 = Math.floor(box.x0 + (box.x1 - box.x0 + 1) * (bin + 1) / 17);
+        var weight = 0, sum = 0;
+        for (var y = box.y0; y <= box.y1; y++) for (var x = x0; x < x1; x++) {
+          var a = alpha[y * W + x]; if (a < 8) continue;
+          weight += a; sum += y * a;
+        }
+        if (weight) curve.push({ x: (x0 + x1 - 1) / 2, y: sum / weight });
+      }
+      return curve;
+    }
+
     // anchors
     var anchors = { face: FACE };
     ['l', 'r'].forEach(function (s) {
@@ -452,6 +616,21 @@
         a.icx = ic.cx; a.icy = ic.cy;
         var cc = ec ? centroidOf(ec, W, H) : null;
         a.closeY = cc ? cc.cy : (b.y0 + (b.y1 - b.y0) * 0.62);
+        a.closedBounds = ec ? bboxOf(ec, W, H, 8) : null;
+        a.closedCurve = browCenterCurve(ec);
+        var ink = smileInk(byName['eye_smile'], sided['eye_smile|' + s], a);
+        a.browBounds = sided['eyebrow|' + s] ? bboxOf(sided['eyebrow|' + s], W, H, 8) : null;
+        a.browCurve = browCenterCurve(sided['eyebrow|' + s]);
+        a.upperLid = upperLidCurve(byName['eyelash'] || byName['eyewhite'], sided['eyelash|' + s] || ew, a);
+        a.creaseCurve = upperCreaseCurve(byName['eyelash'], sided['eyelash|' + s], a);
+        var smileY = smileHeight(byName['eye_smile'], ink, a);
+        if (smileY !== null) {
+          a.smileY = smileY;
+          a.upperLid = upperLidCurve(byName['eyelash'] || byName['eyewhite'],
+            sided['eyelash|' + s] || ew, a);
+          a.smileLid = upperLidCurve(byName['eye_smile'], ink, a, true);
+          a.smileInkBounds = bboxOf(ink, W, H, 8);
+        }
         anchors[K] = a;
       }
     });
@@ -461,6 +640,8 @@
     if (mSrc) {
       var mb = bboxOf(mSrc.alpha, W, H, 8), mc = centroidOf(mSrc.alpha, W, H);
       anchors.mouth = { x0: mb.x0, x1: mb.x1, y0: mb.y0, y1: mb.y1, cx: mc.cx, cy: mc.cy };
+      var closedMouth = byName['mouth_close'] ? bboxOf(byName['mouth_close'].alpha, W, H, 8) : null;
+      anchors.mouth.closedHeight = closedMouth ? closedMouth.y1 - closedMouth.y0 : 0;
     } else {
       warnings.push('mouth_open / mouth_close がありません');
       anchors.mouth = { x0: FACE.cx - 20, x1: FACE.cx + 20, y0: FACE.cy + 40, y1: FACE.cy + 60, cx: FACE.cx, cy: FACE.cy + 50 };
@@ -532,7 +713,7 @@
       stats.layers++;
       var a = new Uint8Array(W * H), j, before = 0, after = 0;
       for (j = 0; j < W * H; j++) { a[j] = d[j * 4 + 3]; if (a[j]) before++; }
-      cleanAlpha(a, W, H, 40);
+      if (normName(c.name) !== 'blush') cleanAlpha(a, W, H, 40);
       for (j = 0; j < W * H; j++) { if (a[j]) after++; d[j * 4 + 3] = a[j]; }
       if (after < before) stats.noisy++;
       var bb = bboxOf(a, W, H, 0);

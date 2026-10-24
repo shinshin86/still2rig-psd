@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { expressions } from './expressions.mjs';
 import { inspectPsd, readPngRgba } from './psd.mjs';
 import { loadDefaults, readJson, relativeProjectPath, writeJson } from './utils.mjs';
 
@@ -61,9 +62,60 @@ function artworkStats(image, alphaThreshold) {
   };
 }
 
+const mouthDefinition = expressions.find(item => item.registration === 'mouth');
+const eyeDefinition = expressions.find(item => item.registration === 'eyes');
+const mouthReference = expressions.find(item => item.name === mouthDefinition.editableLayers[0]);
+
+function overlayExpressionQuality(layerDir, definition, quality) {
+  const image = readPngRgba(findLayerFile(layerDir,definition.sources));
+  const art = artworkStats(image,8);
+  if (definition.registration === 'mouth') {
+    const faceImage = readPngRgba(findLayerFile(layerDir,['face.png']));
+    const faceStats = artworkStats(faceImage,quality.alphaThreshold);
+    const closed = readPngRgba(findLayerFile(layerDir,mouthReference.sources));
+    const center = centroid(closed);
+    const width = faceStats.bbox[2]-faceStats.bbox[0];
+    const height = faceStats.bbox[3]-faceStats.bbox[1];
+    let outside=0,skin=0,solid=0,transparent=0;
+    for(let i=0;i<image.data.length;i+=4) {
+      const a=image.data[i+3];
+      if(!a)transparent++;
+      if(a>8 && faceImage.data[i+3]<=quality.alphaThreshold)outside++;
+      if(a>=128) {
+        solid++;
+        if(faceImage.data[i+3]>=240 && Math.max(...[0,1,2].map(c=>Math.abs(image.data[i+c]-faceImage.data[i+c])))<=24)skin++;
+      }
+    }
+    const mouthError=distance(centroid(image),center);
+    return {artwork:art,errorsPx:{mouth:mouthError},checks:{
+      artworkPresent:art.visiblePixels>=8,
+      transparentBackground:transparent/(image.width*image.height)>=.9,
+      insideFace:outside===0,
+      compactMouth:Boolean(art.bbox)&&art.bbox[2]-art.bbox[0]<=width*.26&&art.bbox[3]-art.bbox[1]<=height*.14,
+      noSkinColor:skin/Math.max(1,solid)<.03,
+      mouthWithinTolerance:mouthError<=quality.registrationTolerancePixels,
+    }};
+  }
+  const face = artworkStats(readPngRgba(findLayerFile(layerDir,['face.png'])),8);
+  const eyes = ['eyewhite.png','irides.png','eyelash.png'].map(name=>findLayerFile(layerDir,[name])).filter(Boolean).map(file=>artworkStats(readPngRgba(file),16).bbox).filter(Boolean);
+  const eye = {bbox:[Math.min(...eyes.map(b=>b[0])),Math.min(...eyes.map(b=>b[1])),Math.max(...eyes.map(b=>b[2])),Math.max(...eyes.map(b=>b[3]))]};
+  const [x0,,x1] = face.bbox, width=x1-x0;
+  const top=eye.bbox[1],height=eye.bbox[3]-top;
+  const region = definition.mask.region;
+  const bounds = region==='tears' ? [eye.bbox[0],eye.bbox[3]-2,eye.bbox[2],eye.bbox[3]+(face.bbox[3]-face.bbox[1])*.22+2]
+    : region==='temple' ? [x0+width*.86-2,top-height*.35-2,x1+width*.06+2,top+height*.9+2]
+    : [x0+width*.63-2,top-height*1.9-2,x0+width*.90+2,top-height*.85+2];
+  let transparent=0,warm=0,solid=0;
+  for(let i=0;i<image.data.length;i+=4){const [r,g,b,a]=image.data.subarray(i,i+4);if(!a)transparent++;if(a>=128){solid++;if(r-g>10&&g-b>8&&r<Math.max(1,g)*2)warm++;}}
+  return { artwork:art, allowedBounds:bounds, checks:{ artworkPresent:art.visiblePixels>=8,
+    transparentBackground:transparent/(image.width*image.height)>=.9,
+    overlayWithinRegion:Boolean(art.bbox)&&art.bbox[0]>=bounds[0]&&art.bbox[1]>=bounds[1]&&art.bbox[2]<=bounds[2]&&art.bbox[3]<=bounds[3],
+    noSkinOrHairColor:warm/Math.max(1,solid)<.03 } };
+}
+
 function mouthArtworkQuality(layerDir, canvasWidth, canvasHeight, quality) {
-  const mouthOpenFile = findLayerFile(layerDir, ['mouth_open.png']);
-  const mouthCloseFile = findLayerFile(layerDir, ['mouth_close.png', 'mouth.png']);
+  const mouthOpenFile = findLayerFile(layerDir, mouthDefinition.sources);
+  const mouthCloseFile = findLayerFile(layerDir, mouthReference.sources);
   const open = mouthOpenFile ? artworkStats(readPngRgba(mouthOpenFile), quality.alphaThreshold) : null;
   const close = mouthCloseFile ? artworkStats(readPngRgba(mouthCloseFile), quality.alphaThreshold) : null;
   const faceFile = findLayerFile(layerDir, ['face.png']);
@@ -107,11 +159,12 @@ function mouthArtworkQuality(layerDir, canvasWidth, canvasHeight, quality) {
   };
 }
 
-function expressionRegistration(layerDir, canvasWidth, tolerance) {
-  const mouthOpenFile = findLayerFile(layerDir, ['mouth_open.png']);
-  const mouthCloseFile = findLayerFile(layerDir, ['mouth_close.png', 'mouth.png']);
+function expressionRegistration(layerDir, canvasWidth, tolerance, mouthTarget = mouthDefinition, eyeTarget = eyeDefinition) {
+  const mouthOpenFile = findLayerFile(layerDir, mouthTarget.sources);
+  const reference = expressions.find(item => item.name === mouthTarget.editableLayers[0]);
+  const mouthCloseFile = findLayerFile(layerDir, reference.sources);
   const iridesFile = findLayerFile(layerDir, ['irides.png']);
-  const eyeCloseFile = findLayerFile(layerDir, ['eye_close.png']);
+  const eyeCloseFile = findLayerFile(layerDir, eyeTarget.sources);
   const mouthOpen = mouthOpenFile ? centroid(readPngRgba(mouthOpenFile)) : null;
   const mouthClose = mouthCloseFile ? centroid(readPngRgba(mouthCloseFile)) : null;
   const mouthError = distance(mouthOpen, mouthClose);
@@ -153,20 +206,61 @@ function expressionRegistration(layerDir, canvasWidth, tolerance) {
   };
 }
 
+function softExpressionQuality(layerDir, definition, quality) {
+  const file = findLayerFile(layerDir, definition.sources);
+  const image = readPngRgba(file);
+  const face = readPngRgba(findLayerFile(layerDir, ['face.png']));
+  const features = [...['eyewhite.png', 'irides.png', 'eyelash.png'].map(name => findLayerFile(layerDir, [name])), findLayerFile(layerDir, mouthReference.sources)]
+    .filter(Boolean).map(readPngRgba);
+  let pixels = 0, outside = 0, overlap = 0, maximum = 0;
+  for (let i = 3; i < image.data.length; i += 4) {
+    const alpha = image.data[i];
+    if (!alpha) continue;
+    pixels++;
+    maximum = Math.max(maximum, alpha);
+    if (face.data[i] <= quality.alphaThreshold) outside++;
+    if (features.some(feature => feature.data[i] > quality.alphaThreshold)) overlap++;
+  }
+  return {
+    checks: { insideFace: outside === 0, avoidsEyesAndMouth: pixels > 0 && overlap / pixels <= quality.softExpressionMaximumFeatureOverlap,
+      opacityWithinLimit: maximum <= Math.round(quality.softExpressionMaximumAlpha * 255) },
+    metrics: { visiblePixels: pixels, outsideFacePixels: outside, featureOverlapPixels: overlap, maximumAlpha: maximum / 255 },
+    thresholds: { maximumAlpha: quality.softExpressionMaximumAlpha, maximumFeatureOverlap: quality.softExpressionMaximumFeatureOverlap },
+  };
+}
+
 export function runQa({ psdFile, layerDir, buildReportFile, reportFile }) {
   const defaults = loadDefaults();
   const build = readJson(buildReportFile);
   const psd = inspectPsd(psdFile);
   const names = psd.layers.map((layer) => layer.name);
   const positions = new Map(names.map((name, index) => [name, index]));
-  const required = ['face', 'eyewhite', 'irides', 'mouth_close'];
+  const required = ['face', 'eyewhite', 'irides', mouthReference.name];
   const before = (back, front) => !positions.has(back) || !positions.has(front) || positions.get(back) < positions.get(front);
   const visible = psd.layers.every((layer) => {
     if (!layer.imageData) return false;
-    for (let index = 3; index < layer.imageData.data.length; index += 4) if (layer.imageData.data[index] > defaults.quality.alphaThreshold) return true;
+    const threshold = expressions.some(item => item.name === layer.name && item.extraction === 'soft') ? 0 : defaults.quality.alphaThreshold;
+    for (let index = 3; index < layer.imageData.data.length; index += 4) if (layer.imageData.data[index] > threshold) return true;
     return false;
   });
   const registration = expressionRegistration(layerDir, psd.width, defaults.quality.registrationTolerancePixels);
+  for (const definition of expressions) {
+    if (definition.registration === 'none' || definition === mouthReference || definition === mouthDefinition || definition === eyeDefinition
+        || !findLayerFile(layerDir, definition.sources)) continue;
+    const isMouth = definition.registration === 'mouth';
+    const detail = definition.extraction === 'overlay' ? overlayExpressionQuality(layerDir,definition,defaults.quality)
+      : definition.registration === 'face' ? softExpressionQuality(layerDir, definition, defaults.quality)
+      : expressionRegistration(layerDir, psd.width, defaults.quality.registrationTolerancePixels,
+        isMouth ? definition : mouthDefinition, isMouth ? eyeDefinition : definition);
+    const checks = definition.registration === 'face' || definition.extraction === 'overlay' ? { ...detail.checks }
+      : Object.fromEntries(Object.entries(detail.checks).filter(([name]) => isMouth ? name.startsWith('mouth') : name.startsWith('eyes')));
+    checks.inFrontOfFace = before('face', definition.name);
+    checks.behindFrontHair = !definition.checkFrontHair || before(definition.name, 'front hair');
+    if (definition.extraction === 'overlay' && definition.registration === 'face' && !definition.checkFrontHair) checks.inFrontOfHair = before('front hair',definition.name);
+    registration.additionalExpressions ??= {};
+    registration.additionalExpressions[definition.name] = { ...detail, checks, pass: Object.values(checks).every(Boolean) };
+    if (definition.requiredForProduction) registration.checks[`${definition.name}Registered`] = Object.values(checks).every(Boolean);
+  }
   const mouthArtwork = mouthArtworkQuality(layerDir, psd.width, psd.height, defaults.quality);
   const checks = {
     requiredLayers: required.every((name) => positions.has(name)),
@@ -175,8 +269,8 @@ export function runQa({ psdFile, layerDir, buildReportFile, reportFile }) {
     armsBehindTopwear: before('handwear', 'topwear'),
     bodyBehindNeck: before('topwear', 'neck') && before('handwear', 'neck'),
     neckBehindFace: before('neck', 'face'),
-    facePartsInFront: ['eyewhite', 'irides', 'eyelash', 'eyebrow', 'mouth_close', 'mouth_open', 'eye_close'].every((name) => before('face', name)),
-    frontHairInFront: ['face', 'eyewhite', 'irides', 'mouth_close', 'eye_close'].every((name) => before(name, 'front hair')),
+    facePartsInFront: ['eyewhite', 'irides', 'eyelash', 'eyebrow', ...expressions.filter(item => item.requiredForProduction || item.prompt === null || item === mouthReference).map(item => item.name)].every((name) => before('face', name)),
+    frontHairInFront: ['face', 'eyewhite', 'irides', ...expressions.filter(item => item.checkFrontHair && (item.requiredForProduction || item.prompt === null || item === mouthReference)).map(item => item.name)].every((name) => before(name, 'front hair')),
     productionExpressions: build.missingProduction.length === 0 && build.placeholders.length === 0 && (build.previewExpressions || []).length === 0,
     expressionRegistration: Object.values(registration.checks).every(Boolean),
     expressionArtwork: Object.values(mouthArtwork.checks).every(Boolean),
