@@ -1,3 +1,4 @@
+import { SMILE_SWITCH } from './eyeExpression.mjs';
 const clamp = value => Math.max(0, Math.min(1, value ?? 0));
 export const drawnEyeDefinitions = ['angry','sad','surprised','shy','flustered','half'].map(drawing => ({drawing,part:`eyes_${drawing}`,parameter:`eye${drawing[0].toUpperCase()}${drawing.slice(1)}`}));
 const kinds = ['smile', ...drawnEyeDefinitions.map(def => def.drawing)];
@@ -52,9 +53,10 @@ export function createEyeDrawingSlot(initial = 'neutral') {
 export function eyeDrawingAlpha(fade, baseName, drawing, blink, fallback) {
   const drawn = drawnEyeDefinitions.find(def=>def.parameter===fade);
   if (drawn) return drawing === drawn.drawing ? blink.open : 0;
-  if (fade === 'eyeSmile') return drawing === 'smile' ? blink.open : 0;
+  // Smiling eyes are already closed arcs, so a blink leaves them unchanged.
+  if (fade === 'eyeSmile') return drawing === 'smile' ? 1 : 0;
   if (fade === 'eyeOpen') return drawing === 'neutral' ? fallback * blink.open : 0;
-  if (fade === 'eyeClose') return drawing === 'neutral' ? Math.max(fallback,blink.closed) : blink.closed;
+  if (fade === 'eyeClose') return drawing === 'neutral' ? Math.max(fallback,blink.closed) : drawing === 'smile' ? 0 : blink.closed;
   if (baseName === 'eyebrow' && drawnEyeDefinitions.some(def=>def.drawing===drawing)) return blink.closed;
   return fallback;
 }
@@ -67,7 +69,8 @@ export function eyeSlotParameters(params, side, drawing, frame) {
   const active=strengths.find(def=>def.drawing===drawing)??(drawing==='neutral'&&strongest.value>smile?strongest:null);
   const drawn=!!active;
   return { ...params, ...Object.fromEntries(strengths.map(def=>[def.parameter,def===active?def.value:0])),
-    eyeSmile: drawn ? 0 : smile, eyeSmileL: 0, eyeSmileR: 0,
+    // While the slot still shows the open eyes, keep them below the smile drawing's switch point.
+    eyeSmile: drawn ? 0 : drawing === 'neutral' ? Math.min(smile, SMILE_SWITCH - 1e-6) : smile, eyeSmileL: 0, eyeSmileR: 0,
     eyeWinkL: drawn ? 0 : side==='L' ? frame?.wink ?? params.eyeWinkL : 0,
     eyeWinkR: drawn ? 0 : side==='R' ? frame?.wink ?? params.eyeWinkR : 0 };
 }

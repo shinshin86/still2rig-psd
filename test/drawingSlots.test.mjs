@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createEyeDrawingSlot, eyeDrawingAlpha, eyeSlotParameters } from '../webui/src/rig/eyeDrawing.mjs';
 import { drawnBlinkOpacity } from '../webui/src/rig/drawnEye.mjs';
+import { SMILE_SWITCH } from '../webui/src/rig/eyeExpression.mjs';
 import { createMouthController } from '../webui/src/rig/mouthExpression.mjs';
 import { expressionParameterNames, expressionPresetValues } from '../src/expressionPresets.mjs';
 
@@ -85,14 +86,12 @@ test('requests on reopening start their transition at full opening and survive r
   assert.equal(replacement.getFrame().angry,1);
 });
 
-test('smile drawings use the same blink endpoints without a third eye drawing', () => {
+test('a blink leaves smiling eyes unchanged instead of fading to the closed drawing', () => {
   for(const open of [0,.25,.5,.75,1]) {
     const blink=drawnBlinkOpacity(open);
     const alpha=fade=>eyeDrawingAlpha(fade,'','smile',blink,1);
     assert.equal(alpha('eyeOpen'),0);assert.equal(alpha('eyeAngry'),0);
-    assert.equal(alpha('eyeSmile')+alpha('eyeClose'),1);
-    if(open===0)assert.equal(alpha('eyeSmile'),0);
-    if(open===1)assert.equal(alpha('eyeClose'),0);
+    assert.equal(alpha('eyeSmile'),1);assert.equal(alpha('eyeClose'),0);
   }
 });
 
@@ -140,5 +139,12 @@ test('every drawn expression remains exclusive through interrupted transitions a
     const values=expressionPresetValues(id,parts);
     assert.equal(values[key],1);assert.equal(expressionPresetValues(id,[])[key],0);
     for(const legacy of ['upperLid','browWorry','browFlat','brow','eyeWide','mouthForm'])assert.equal(values[legacy],0);
+  }
+});
+
+test('open eyes stay below the smile switch point while the slot still shows them', () => {
+  for(const smile of [.5,.5004,.8]) {
+    assert.ok(eyeSlotParameters({eyeSmile:smile},'L','neutral').eyeSmile<SMILE_SWITCH);
+    assert.equal(eyeSlotParameters({eyeSmile:smile},'L','smile').eyeSmile,smile);
   }
 });

@@ -200,6 +200,9 @@ async function main() {
         captures[name].push(await capture(name, `strength-${strength.toFixed(2)}`));
       }
       if (name === 'eye-smile') {
+        // Settle the full smile with open eyes first; a change requested mid-blink waits for the blink.
+        await setState(1, 0, { eyeSmile: 1, blush: 0 });
+        await sleep(500);
         await setState(0.5, 0, { eyeSmile: 1, blush: 0 });
         await sleep(500);
         captures[name].push(await capture(name, 'strength-1.00-blink-half'));
