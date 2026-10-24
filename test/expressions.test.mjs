@@ -43,7 +43,7 @@ test('both readers reject unknown fields, missing fields, unsafe names and inval
     c => { c.expressions[0].mask.dilationRatio = true; }, c => { c.expressions[0].mask.dilationRatio = -0.1; },
     c => { c.expressions[0].mask.minimumDilation = 0.5; }, c => { c.expressions[0].mask.minimumDilation = true; },
     c => { c.expressions[0].mask.fillBounds = 1; }, c => { c.expressions[0].prompt = null; },
-    c => { c.expressions[2].extraction = 'diff'; }, c => { c.expressions[0].requestLabel = null; },
+    c => { c.expressions[2].extraction = null; }, c => { c.expressions[0].requestLabel = null; },
   ];
   for (const [index, change] of changes.entries()) {
     const config = definitions(); change(config);
@@ -62,11 +62,12 @@ from pathlib import Path
 sys.path.insert(0,"scripts")
 from expression_definitions import load_expressions
 from build_expression_requests import build_requests
-from PIL import Image
+from PIL import Image,ImageDraw
 root=Path(sys.argv[1]).resolve(); layers=root/"layers"
 layers.mkdir()
 for name in ("face", "eyewhite", "irides", "eyelash", "mouth"):
     Image.new("RGBA",(32,32),(20,30,40,255)).save(layers/(name+".png"))
+mouth=Image.new("RGBA",(32,32)); ImageDraw.Draw(mouth).arc((8,20,24,28),10,170,fill=(80,30,25,255),width=3); mouth.save(layers/"mouth.png")
 mapping=json.loads(Path("configs/layer-map.json").read_text())
 mapping["layers"].insert(-2,{"source":"test_expression.png","target":"test_expression"})
 config=json.loads(Path("configs/expressions.json").read_text())

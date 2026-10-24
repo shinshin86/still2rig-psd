@@ -58,7 +58,7 @@ def neutral_layers(layer_dir: Path, layer_map: dict, definitions=None, include_f
 
 def composite_layers(layers: dict, excluded=(), definitions=None) -> Image.Image:
     definitions = load_expressions() if definitions is None else definitions
-    hidden = {item["name"] for item in definitions if item["prompt"] is not None}
+    hidden = {item["name"] for item in definitions if item["prompt"] is not None and item["name"] != "mouth_close"}
     composite = Image.new("RGBA", next(iter(layers.values())).size)
     for name, image in layers.items():
         if name not in {*hidden, *excluded}:

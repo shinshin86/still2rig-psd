@@ -40,6 +40,8 @@ export function expressionFlowRequest({jobId,name,recipient,groupIds,parts,redra
     ...redraw.map(group=>`作り直す表情: ${group.label}。既存の絵を新しい絵で置き換えてください。${notes[group.id]?.trim()?`希望（表情の描き方にだけ反映）: ${JSON.stringify(notes[group.id].trim())}`:''}`),
     '笑い目や頬の赤らみ、への字の口など、複数の表情で共有する絵を置き換えると、それを使うほかの表情にも反映されます。',
     `まず npm run still2rig-psd -- expression-requests ${jobId} --only ${selection} を実行し、必要な依頼をまとめて作ってください。`,
+    '閉じた口がない・使えない場合は、まず閉じた口だけの案内が出ます。そのときはresults/mouth_close.pngを1枚作り、同じ検査と目視確認をしてから取り込み、PSDを組み直してください。閉じた口を使える状態にできなければ、ほかの口は作らず理由を報告してください。',
+    `閉じた口を組み込んだら、もう一度 npm run still2rig-psd -- expression-requests ${jobId} --only ${selection} を実行し、新しい依頼用画像で残りを続けてください。この2段階も1回の依頼の中で行い、途中の確認は求めないでください。`,
     recipient==='codex'?'ユーザーはこの画面で、顔の切り抜き画像をCodexの組み込みの画像生成（imagegen）に送ることに同意済みです。ほかの外部サービスは使わないでください。':'Claude Codeは画像を生成できません。画像生成や外部サービスへの送信はせず、全ての絵についてinput.png・mask.pngの場所、prompt.txtの内容、下記の保存先をまとめて案内してください。画像を用意する必要がある場合だけ待ち、保存の連絡後は下記の判定・取り込み・修復をまとめて進めてください。',
     ...selected.map(item=>`${item.name}: 同名フォルダのinput.png・mask.png・prompt.txtを使って1枚生成し、${root}/expression-requests/results/${item.name}.png に保存してください。`),
     '各絵を1枚ずつ生成し、取り込み判定と目視を通った最初の1枚を採用してください。途中で候補を選ばせたり、表情ごとに承認を求めたりせず、全て進めてください。',

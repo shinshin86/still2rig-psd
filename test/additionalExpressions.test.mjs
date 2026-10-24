@@ -82,7 +82,8 @@ test('requests preserve the default pair and select additional expressions with 
   for (const point of [[48, 52], [20, 35]]) assert.equal(editable(...point), false);
   assert.match(run('expression-requests', f.id, '--only', 'blush,unknown').stderr, /Choose known expressions/);
   assert.match(run('expression-requests', f.id, '--only', 'blush,blush').stderr, /Choose known expressions/);
-  assert.match(run('expression-requests', f.id, '--only', 'mouth_close').stderr, /Choose known expressions/);
+  ok('expression-requests',f.id,'--only','mouth_close');
+  assert.deepEqual(Object.keys(JSON.parse(fs.readFileSync(path.join(f.requests,'requests.json'))).variants),['mouth_close']);
 });
 
 test('additional imports keep the original artwork and thin blush survives repair and PSD assembly', () => {

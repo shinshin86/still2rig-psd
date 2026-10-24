@@ -13,6 +13,7 @@ from PIL import Image, ImageChops, ImageDraw, ImageFilter
 from expression_definitions import load_expressions
 from expression_masks import alpha_union, cheek_mask, overlay_mask, whole_eye_mask, expand_up, exclude_eye_obstacles, expand_eye_sides
 from expression_requests_common import composite_layers, file_hash, layer_hash, mouth_limits, neutral_layers
+from closed_mouth import closed_mouth_quality, mouth_support
 
 
 def build_requests(job_id: str, layer_dir: Path, layer_map: Path, output_dir: Path, definitions=None, only=None):
@@ -26,9 +27,18 @@ def build_requests(job_id: str, layer_dir: Path, layer_map: Path, output_dir: Pa
         requested = [item for item in available if item["name"] in names]
     else:
         requested = [item for item in available if item["requiredForProduction"]]
+    if only == "all":
+        requested = [item for item in requested if item["name"] != "mouth_close"]
+    original_names = [item["name"] for item in requested]
+    # Inspect the mapped override, never a hard-coded source filename.
+    _, base_layers = neutral_layers(layer_dir, mapping, definitions)
+    quality = json.loads((Path(__file__).resolve().parent.parent / "configs" / "default.json").read_text(encoding="utf-8"))["quality"]
+    closed = closed_mouth_quality(base_layers.get("mouth_close"), base_layers["face"], quality)
+    needs_closed = not closed["usable"] and any(item["registration"] == "mouth" for item in requested)
+    if needs_closed:
+        requested = [next(item for item in available if item["name"] == "mouth_close")]
     overlays = any(item["extraction"] == "overlay" for item in requested)
     composite, layers = neutral_layers(layer_dir, mapping, definitions, include_front=overlays)
-    quality = json.loads((Path(__file__).resolve().parent.parent / "configs" / "default.json").read_text(encoding="utf-8"))["quality"]
     limits = mouth_limits(layers["face"], quality)
     face = alpha_union(layers, ["face", *[name for item in requested for name in item["editableLayers"]]], composite.size)
     box = face.getbbox()
@@ -54,7 +64,16 @@ def build_requests(job_id: str, layer_dir: Path, layer_map: Path, output_dir: Pa
         variant_layers = layers if definition["extraction"] == "overlay" else {key:value for key,value in layers.items() if key not in ("front hair","headwear")}
         variant_composite = composite_layers(variant_layers,definitions=definitions)
         region = mask_options.get("region")
-        editable = overlay_mask(layers,composite.size,region) if definition["extraction"] == "overlay" and definition["registration"] == "face" else cheek_mask(layers, composite.size) if region == "cheeks" else alpha_union(layers, targets, composite.size)
+        mask_layers = layers
+        if region == "cheeks" and not closed["usable"]:
+            support, _ = mouth_support(layers, quality)
+            reserved = Image.new("RGBA", composite.size)
+            reserved.putalpha(support)
+            mask_layers = {**layers, "mouth_close": reserved}
+        editable = overlay_mask(layers,composite.size,region) if definition["extraction"] == "overlay" and definition["registration"] == "face" else cheek_mask(mask_layers, composite.size) if region == "cheeks" else alpha_union(layers, targets, composite.size)
+        placement = None
+        if name == "mouth_close":
+            editable, placement = mouth_support(layers, quality)
         if region == "eyes":
             editable = whole_eye_mask(layers, composite.size)
         editable_box = editable.getbbox()
@@ -123,35 +142,45 @@ def build_requests(job_id: str, layer_dir: Path, layer_map: Path, output_dir: Pa
             **({"eyeEnvelopeMarginPx": max(4, dilation)} if protect_eye_features else {}),
             **({"faceContourInsetPx": 4} if mask_options.get("region") == "cheeks" else {}),
             **({"mouthLimits": limits} if mask_options["mouthLimits"] else {}),
+            **({"mouthPlacement": placement} if placement else {}),
         }
     report = {
         "schemaVersion": 2, "jobId": job_id, "canvas": list(composite.size),
         "layerDir": layer_dir.relative_to(Path.cwd()).as_posix(),
         "layerSha256": layer_hash(layer_dir, layer_map), "variants": variants,
+        "closedMouth": closed, "stage": "closed-mouth" if needs_closed else "expressions",
+        "requestedExpressions": original_names,
+        "deferredExpressions": [name for name in original_names if name != "mouth_close"] if needs_closed else [],
+        "resumeOnly": only,
     }
     (output_dir / "requests.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     request_title = " and ".join(item["requestLabel"] for item in requested)
-    result_paths = " and ".join(f"results/candidates/{item['name']}-1.png, {item['name']}-2.png, {item['name']}-3.png" for item in requested)
+    result_paths = ", ".join(f"results/{item['name']}.png" for item in requested)
     (output_dir / "README.md").write_text(
         f"# Generate {request_title}\n\n"
         "Ask the image owner for permission before sending these images to an image generation service. "
         "The face crops leave this machine when you send them.\n\n"
-        "For each variant, give the generator input.png, mask.png and the instructions in prompt.txt. "
-        "The mask is transparent where editing is allowed and opaque where pixels must stay identical. "
-        "These crops use the current PSD canvas, not the original source image. "
-        "Small crops are enlarged by an integer factor (at most 4) toward a long side of at least 1024 pixels. "
-        "Keep the enlarged input dimensions; import restores the original canvas scale automatically. "
-        "Front hair and head accessories above the expression layers are intentionally hidden; do not add them. "
-        "underlay.png is a local background reference for extracting only new artwork; do not edit it or send it.\n\n"
-        f"Save the returned PNGs as {result_paths} in this directory. "
-        "Keep the input size and position. Do not overwrite input.png, mask.png or underlay.png. "
-        "If you rerun requests, use new results made from the new inputs.\n\n"
-        f"Run `npm run still2rig-psd -- expression-candidates {job_id}` to compare candidates read-only. "
-        "Show the comparison images and stop for the user's choice. Work on one expression at a time. "
-        f"After selection, run `npm run still2rig-psd -- import-expressions {job_id} --pick NAME=NUMBER` with the chosen names and numbers. "
-        "Direct single results in results/NAME.png still work without --pick. "
-        "Then use the reported repair command. Import is not a quality approval: the existing expression QA "
-        "and visual review are still required.\n", encoding="utf-8")
+        "For each drawing, use its input.png, mask.png and prompt.txt to generate one image. "
+        "Transparent mask pixels may change; opaque pixels must stay identical. "
+        "The crops use the current PSD layers, with front hair and accessories hidden. "
+        "Do not add hair or accessories. Keep the original dimensions and coordinates. "
+        "underlay.png is local extraction data; do not modify or send it.\n\n"
+        f"Save images as {result_paths}. "
+        "Never overwrite the input, mask or underlay. Validate each result with "
+        f"`npm run still2rig-psd -- import-expressions {job_id} --only NAME --read-only` "
+        "and inspect the extracted artwork. Regenerate a failed drawing at most twice; "
+        "skip it with a reason if it still fails, and continue with the others.\n\n"
+        + ("The closed mouth is missing or unusable. Generate and validate only mouth_close first, "
+           f"import with `npm run still2rig-psd -- import-expressions {job_id} --only mouth_close`, "
+           f"then run `npm run still2rig-psd -- repair {job_id} --expressions .still2rig-psd/jobs/{job_id}/generated-expressions`. "
+           + (f"Rerun `npm run still2rig-psd -- expression-requests {job_id}" + (f" --only {only}" if only else "") + "` "
+              "and use the fresh inputs for the remaining expressions. Do not generate other mouths before this step. "
+              if report["deferredExpressions"] else "The requested closed-mouth repair is now complete. ") +
+           "Continue in the same request without asking the user to choose candidates.\n"
+           if needs_closed else
+           "Import accepted names together with --only, then repair once. "
+           "Finish with one overview, retry counts, skipped drawings and QA results. "
+           "Do not pause for per-expression selection. Import alone does not establish visual quality.\n"), encoding="utf-8")
     return report
 
 

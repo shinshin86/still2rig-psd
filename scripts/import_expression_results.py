@@ -341,7 +341,10 @@ def import_results(args, report):
                 raise ValueError(f"{name}: a PNG with genuine alpha transparency is required.")
             if definition["registration"] == "mouth":
                 from overlay_expression import register_mouth_overlay
-                mouth = Image.open(args.layer_dir / f"{definition['editableLayers'][0]}.png").convert("RGBA")
+                from render_expression_states import selected_layers
+                # A fresh job stores the closed mouth as mouth.png; the layer map names it mouth_close.
+                layer_files = dict(selected_layers(args.layer_dir, json.loads(args.layer_map.read_text(encoding="utf-8"))))
+                mouth = Image.open(layer_files[definition["editableLayers"][0]]).convert("RGBA")
                 result, details["mouthRegistration"] = register_mouth_overlay(result,mouth,box,reference.size,args.max_alignment_shift)
             else:
                 result = result.resize(reference.size,Image.Resampling.LANCZOS)
@@ -403,6 +406,14 @@ def import_results(args, report):
                               "artwork": result.copy(), "composite": Image.alpha_composite(base, result)}
         canvas = Image.new("RGBA", tuple(requests["canvas"]))
         canvas.alpha_composite(result, (box[0], box[1]))
+        if name == "mouth_close":
+            from closed_mouth import closed_mouth_quality
+            face = Image.open(args.layer_dir / "face.png").convert("RGBA")
+            quality = json.loads((CONFIG_ROOT / "default.json").read_text())["quality"]
+            details["closedMouth"] = closed_mouth_quality(canvas, face, quality)
+            if not details["closedMouth"]["usable"]:
+                failed = [key for key, passed in details["closedMouth"]["checks"].items() if not passed]
+                raise ValueError("mouth_close: closed mouth artwork check failed: " + ", ".join(failed))
         outputs[name] = canvas
         details["status"] = "accepted"
         details["canvas"] = requests["canvas"]

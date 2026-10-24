@@ -4,7 +4,7 @@ import { expressionRequestGroups,expressionGroupState,selectedExpressionArtwork,
 import {generatableExpressions} from '../src/expressions.mjs';
 
 test('expression choices cover every generated drawing and request only missing shared art',()=>{
-  assert.deepEqual(new Set(expressionRequestGroups.flatMap(g=>g.parts)),new Set(generatableExpressions.map(item=>item.name)));
+  assert.deepEqual(new Set([...expressionRequestGroups.flatMap(g=>g.parts),'mouth_close']),new Set(generatableExpressions.map(item=>item.name)));
   const parts=['blush','mouth_frown'];
   assert.deepEqual(selectedExpressionArtwork(['shy','sad'],parts).map(item=>item.name),['tears','eyes_sad','eyes_shy']);
   assert.deepEqual(selectedExpressionArtwork(['angry'],['eyes_angry','mouth_frown']),[]);
@@ -19,6 +19,7 @@ test('both recipients request one image, bounded retries and one final overview'
     const text=expressionFlowRequest({jobId:'demo',name:'sample.psd',recipient,groupIds:['angry'],parts:[]});
     assert.match(text,/results\/eyes_angry\.png/);assert.match(text,/各絵を1枚ずつ生成/);
     assert.match(text,/import-expressions demo --only/);assert.match(text,/--read-only/);
+    assert.match(text,/閉じた口がない・使えない場合/);assert.match(text,/results\/mouth_close\.png/);assert.match(text,/新しい依頼用画像/);
     assert.match(text,/最大2回/);assert.match(text,/全ての判定後/);assert.match(text,/一覧1枚/);
     assert.match(text,/元の絵柄・線の太さ・色/);assert.match(text,/ほかの絵へ進んで/);
     assert.doesNotMatch(text,/--pick|expression-candidates|候補を3つ|私が候補を選/);

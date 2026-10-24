@@ -48,12 +48,19 @@
     {
       "name": "mouth_close",
       "label": "閉じた口",
-      "requestLabel": null,
-      "prompt": null,
-      "editableLayers": [],
-      "mask": null,
-      "extraction": null,
-      "registration": "none",
+      "requestLabel": "a neutral closed mouth",
+      "prompt": "Replace the missing or unusable mouth with one small natural CLOSED mouth: a fine gently curved neutral lip line, matching the reference anime ink and colors. Remove the previous mouth cleanly inside the mask. Do not draw an opening, teeth, tongue, skin patch or a second lip line. Keep the face, nose, eyes, hair and all other pixels unchanged.",
+      "editableLayers": [
+        "mouth_close"
+      ],
+      "mask": {
+        "dilationRatio": 0.2,
+        "minimumDilation": 3,
+        "fillBounds": true,
+        "mouthLimits": true
+      },
+      "extraction": "diff",
+      "registration": "mouth",
       "split": false,
       "placeholderFrom": null,
       "checkFrontHair": true,

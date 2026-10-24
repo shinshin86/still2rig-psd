@@ -25,6 +25,8 @@ def main():
     parser.add_argument("--mouth-shift", type=int, default=0)
     parser.add_argument("--mouth-patch", action="store_true")
     parser.add_argument("--without-expressions", action="store_true")
+    parser.add_argument("--missing-mouth", action="store_true")
+    parser.add_argument("--open-mouth", action="store_true")
     parser.add_argument("--hair-over-eyes", action="store_true")
     parser.add_argument("--inward-irises", action="store_true")
     parser.add_argument("--scale", type=int, default=1)
@@ -57,11 +59,14 @@ def main():
     image.save(args.output / "irides.png")
     image = layer()
     draw = ImageDraw.Draw(image)
-    if args.mouth_patch:
+    if args.open_mouth:
+        draw.ellipse((40, 45, 56, 59), fill=(90, 20, 25, 255))
+    elif args.mouth_patch:
         draw.rounded_rectangle((34, 44, 62, 60), radius=5, fill=(250, 245, 240, 255))
     else:
         draw.arc((40, 46, 56, 55), 10, 170, fill=(150, 45, 45, 255), width=3)
-    image.save(args.output / "mouth.png")
+    if not args.missing_mouth:
+        image.save(args.output / "mouth.png")
     if not args.without_expressions:
         save_rect(args.output, "mouth_open.png", (42 + args.mouth_shift, 48, 54 + args.mouth_shift, 56), (90, 20, 25, 255))
         image = layer()
@@ -85,7 +90,8 @@ def main():
                 source.alpha_composite(Image.open(args.output / name).convert("RGBA"))
         ImageDraw.Draw(source).rectangle((40, 72, 56, 78), fill=(40, 50, 70, 255))
         for name in ("face.png", "eyewhite.png", "irides.png", "mouth.png", "front hair.png"):
-            source.alpha_composite(Image.open(args.output / name).convert("RGBA"))
+            if (args.output / name).is_file():
+                source.alpha_composite(Image.open(args.output / name).convert("RGBA"))
         source.save(args.output / "src_img.png")
     if args.scale != 1:
         for file in args.output.glob("*.png"):

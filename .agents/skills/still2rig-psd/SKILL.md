@@ -114,6 +114,24 @@ as approval for Codex imagegen only, not for other services. Otherwise, explain
 which face crops and service will be used, then ask and wait. Preparing local
 request files alone does not require this consent.
 
+Before generating mouths, inspect the `closedMouth` and `stage` fields returned
+by `expression-requests`. Existing closed-mouth ink is retained only when it
+passes the configured compactness, line-art and brightness checks. If the stage
+is `closed-mouth`, generate only `results/mouth_close.png` from that request,
+validate it read-only, import it with `--only mouth_close`, and run the reported
+repair command. This also assembles the first PSD when the missing mouth had
+prevented initial assembly. Never use the old open, empty or invalid mouth as
+the closed reference.
+
+Then follow `nextSteps.resume` to prepare fresh requests for the original
+selection. Read the newly generated inputs and hashes; do not reuse images made
+from the previous requests. If `resume` is null, the requested closed-mouth
+repair is already complete. Both stages belong to the same user request and
+need no per-stage approval or candidate selection. If closed-mouth generation
+still fails after the permitted retries, report why and omit the dependent
+mouths. Non-mouth images can be requested separately without a closed mouth;
+a reserved geometric region for masks is not generated mouth artwork.
+
 Prepare all requested drawings together before generating any image. Inspect
 each input, mask and prompt, including the editable area beneath the original
 front hair. Generate **one image per drawing** using those exact files and save

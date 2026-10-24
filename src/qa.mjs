@@ -245,7 +245,7 @@ export function runQa({ psdFile, layerDir, buildReportFile, reportFile }) {
   });
   const registration = expressionRegistration(layerDir, psd.width, defaults.quality.registrationTolerancePixels);
   for (const definition of expressions) {
-    if (definition.registration === 'none' || definition === mouthDefinition || definition === eyeDefinition
+    if (definition.registration === 'none' || definition === mouthReference || definition === mouthDefinition || definition === eyeDefinition
         || !findLayerFile(layerDir, definition.sources)) continue;
     const isMouth = definition.registration === 'mouth';
     const detail = definition.extraction === 'overlay' ? overlayExpressionQuality(layerDir,definition,defaults.quality)
@@ -269,8 +269,8 @@ export function runQa({ psdFile, layerDir, buildReportFile, reportFile }) {
     armsBehindTopwear: before('handwear', 'topwear'),
     bodyBehindNeck: before('topwear', 'neck') && before('handwear', 'neck'),
     neckBehindFace: before('neck', 'face'),
-    facePartsInFront: ['eyewhite', 'irides', 'eyelash', 'eyebrow', ...expressions.filter(item => item.requiredForProduction || item.prompt === null).map(item => item.name)].every((name) => before('face', name)),
-    frontHairInFront: ['face', 'eyewhite', 'irides', ...expressions.filter(item => item.checkFrontHair && (item.requiredForProduction || item.prompt === null)).map(item => item.name)].every((name) => before(name, 'front hair')),
+    facePartsInFront: ['eyewhite', 'irides', 'eyelash', 'eyebrow', ...expressions.filter(item => item.requiredForProduction || item.prompt === null || item === mouthReference).map(item => item.name)].every((name) => before('face', name)),
+    frontHairInFront: ['face', 'eyewhite', 'irides', ...expressions.filter(item => item.checkFrontHair && (item.requiredForProduction || item.prompt === null || item === mouthReference)).map(item => item.name)].every((name) => before(name, 'front hair')),
     productionExpressions: build.missingProduction.length === 0 && build.placeholders.length === 0 && (build.previewExpressions || []).length === 0,
     expressionRegistration: Object.values(registration.checks).every(Boolean),
     expressionArtwork: Object.values(mouthArtwork.checks).every(Boolean),

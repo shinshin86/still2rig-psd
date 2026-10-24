@@ -150,7 +150,7 @@ function importBundle(jobId, archiveValue) {
   return result;
 }
 
-function assembleArtifacts({ jobId, root, options, outputPsd, layerDir, reportsRoot }) {
+function inspectArtifacts({ root, options, layerDir, reportsRoot }) {
   const imported = path.join(root, 'raw', 'imported');
   if (!fs.existsSync(path.join(imported, 'run-manifest.json'))) throw new Error('Import a verified Colab bundle before finalizing.');
   const inspectionReport = path.join(reportsRoot, 'layer-inspection.json');
@@ -173,6 +173,11 @@ function assembleArtifacts({ jobId, root, options, outputPsd, layerDir, reportsR
   if (expressionDir) inspectArgs.push('--expressions', path.resolve(expressionDir));
   if (options['layer-overrides']) inspectArgs.push('--layer-overrides', path.resolve(options['layer-overrides']));
   runPython('inspect_layers.py', inspectArgs);
+  return { inspectionReport, contactSheet };
+}
+
+function assembleArtifacts({ jobId, root, options, outputPsd, layerDir, reportsRoot }) {
+  const { inspectionReport, contactSheet } = inspectArtifacts({ root, options, layerDir, reportsRoot });
   const buildReportFile = path.join(reportsRoot, 'psd-build.json');
   const build = buildPsd({
     layerDir,
@@ -353,7 +358,11 @@ function mergeExpressionInputs(root, manifest, repairRoot, options, inheritedArt
 
 function repair(jobId, options) {
   const { root, manifest } = loadJob(jobId);
-  if (!manifest.result?.psd) throw new Error('Finalize the job before repairing it.');
+  if (!manifest.result?.psd) {
+    const closed = options.expressions && path.join(path.resolve(options.expressions), 'mouth_close.png');
+    if (!closed || !fs.existsSync(closed)) throw new Error('Finalize the job before repairing it.');
+    return { ...finalize(jobId, options), initialAssembly: true };
+  }
   const currentPsd = path.resolve(PROJECT_ROOT, manifest.result.psd);
   if (!fs.existsSync(currentPsd) || !fs.statSync(currentPsd).isFile()) throw new Error('The current PSD is missing.');
   const repairId = nextRepairId(root);
@@ -468,6 +477,9 @@ function deriveExpressions(jobId) {
 
 function expressionRequests(jobId, options) {
   const { root, manifest } = loadJob(jobId);
+  if (!manifest.result?.psd && !fs.existsSync(path.join(root, 'processed', 'layers'))) {
+    inspectArtifacts({root, options:{}, layerDir:path.join(root,'processed','layers'), reportsRoot:path.join(root,'reports')});
+  }
   const outputDir = path.join(root, 'expression-requests');
   const requests = JSON.parse(runPython('build_expression_requests.py', [
     '--job-id', jobId,
@@ -482,7 +494,18 @@ function expressionRequests(jobId, options) {
     canvas: requests.canvas,
     layerDir: requests.layerDir,
     layerSha256: requests.layerSha256,
-    next: `still2rig-psd expression-candidates ${jobId}`,
+    stage: requests.stage,
+    closedMouth: requests.closedMouth,
+    deferredExpressions: requests.deferredExpressions,
+    next: requests.stage === 'closed-mouth' ? `still2rig-psd import-expressions ${jobId} --only mouth_close --read-only` : `still2rig-psd expression-candidates ${jobId}`,
+    ...(requests.stage === 'closed-mouth' ? {
+      message: '閉じた口の絵を先に用意します。取り込んでPSDを組み直したあと、残りの表情を続けます。',
+      nextSteps: {
+        import: `still2rig-psd import-expressions ${jobId} --only mouth_close`,
+        repair: `still2rig-psd repair ${jobId} --expressions ${relativeProjectPath(path.join(root,'generated-expressions'))}`,
+        resume: requests.deferredExpressions.length ? `still2rig-psd expression-requests ${jobId}${options.only ? ` --only ${options.only}` : ''}` : null,
+      },
+    } : {}),
     note: 'Local requests only. Ask the image owner before sending these crops to an image generation service.',
   };
 }

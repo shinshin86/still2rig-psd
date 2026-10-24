@@ -41,7 +41,7 @@ def render(layers: list[tuple[str, Path]], state: str) -> Image.Image:
     first = Image.open(layers[0][1]).convert("RGBA")
     composite = Image.new("RGBA", first.size)
     definitions = load_expressions()
-    hidden = {item["name"] for item in definitions if item["prompt"] is not None}
+    hidden = {item["name"] for item in definitions if item["prompt"] is not None and item["name"] != "mouth_close"}
     if state == "open":
         hidden = {item["name"] for item in definitions if item["prompt"] is not None and item["registration"] != "mouth"}
         hidden.update(item["placeholderFrom"] for item in definitions if item["registration"] == "mouth" and item["placeholderFrom"])
