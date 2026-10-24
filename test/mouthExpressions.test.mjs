@@ -70,13 +70,13 @@ test('rebuilding an avatar retains the hysteresis choice near a mouth handoff',(
   assert.equal(restored.resolve({mouthOpen:.1}).drawing,frame.drawing);
 });
 
-test('missing round art uses a separate resting floor that neutral clears',()=>{
+test('missing round art keeps the drawn closed mouth instead of a half-open stand-in',()=>{
   const values=expressionPresetValues('surprised',[]);
-  assert.equal(values.mouthRound,0);assert.equal(values.expressionMouthOpen,.75);
+  assert.equal(values.mouthRound,0);assert.equal(values.expressionMouthOpen,0);
   assert.equal(Object.hasOwn(values,'mouthOpen'),false);
   const c=createMouthController({mouth_close:contours.mouth_close,mouth_open:contours.mouth_open});
-  assert.equal(c.resolve(values).openness,.75);
-  assert.equal(c.resolve(values,mouthRestWeight(0,1)).openness,0);
+  assert.equal(c.resolve(values).openness,0);
+  assert.equal(c.resolve(values).drawing,'mouth_close');
   assert.equal(c.resolve(expressionPresetValues('neutral',[])).openness,0);
   assert.equal(expressionPresetValues('joy',[]).mouthForm,0);
 });
