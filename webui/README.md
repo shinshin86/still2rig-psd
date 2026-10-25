@@ -235,3 +235,87 @@ Track processing is used when the browser provides it, with a local video-frame
 fallback. Some browsers or operating systems can still slow down minimized
 pages; the camera tab displays a notice when background capture falls below
 approximately 15 frames per second. Bringing the page forward can restore it.
+
+## Switching expressions from other apps
+
+Switch expressions from Stream Deck or macOS Shortcuts while using OBS or
+another app. Select a saved PSD from the list, then open **他のアプリから切り替える**
+(switch from other apps) under **表情** (expressions). Copy the destination URL
+and access key. Keep the control page and server open. Expression changes sent
+to the stream view finish even when the control page is hidden.
+
+### Request format
+
+Send `POST http://127.0.0.1:<port>/__live/expression` using the URL copied from
+the control page. Set the headers `Content-Type: application/json` and
+`X-Studio-Token: <token>`, with a JSON body such as `{"expression":"joy"}`.
+You can also pass the access key as `Authorization: Bearer <token>`.
+
+| Expression | Name | Alias |
+|---|---|---|
+| Neutral | `neutral` | — |
+| Smile | `joy` | `smile` |
+| Shy | `shy` | — |
+| Angry | `angry` | — |
+| Sad | `sad` | — |
+| Surprised | `surprised` | `surprise` |
+| Flustered | `flustered` | — |
+| Unamused | `unamused` | `halfLidded` |
+| Wink | `wink` | — |
+
+Sending the current expression again leaves it unchanged. Use `neutral` to
+restore the normal face. Numeric values are not accepted. If several control
+pages are open, the page currently sending motion to the stream view takes
+priority; otherwise, the request reaches only the most recently connected page.
+Add the optional `"psd":"<generated-psd id>"` field to target a control page
+with that saved PSD open. Its ID is the `psd=` value in the stream URL.
+
+Successful delivery returns `200 {"ok":true,"expression":"joy"}`. Aliases are
+returned as their canonical names. A missing or incorrect access key returns
+401; an unknown name or invalid body returns 400; a body larger than 4096 bytes
+returns 413; and no matching control page returns 409. The control page ignores
+expressions with missing artwork. Delivery still returns 200 in that case.
+
+### macOS Shortcuts.app
+
+1. In Shortcuts, open Settings → Advanced and enable **Allow Running Scripts**.
+2. Add **Run Shell Script** to a new shortcut and paste the curl example below.
+   Replace its URL and access key with the values copied from the control page.
+3. Assign a keyboard shortcut in the shortcut's details.
+4. Duplicate it for each expression, changing the expression name and key combination.
+
+If the frontmost app prevents the keyboard shortcut from working, send the same
+request through Raycast, Hammerspoon, or Stream Deck.
+
+### Stream Deck
+
+Use an action from a plugin that sends web requests in the background. Set its
+method to `POST`, its destination to the copied URL, and its headers and JSON
+body as shown above. Check that the plugin supports your operating system.
+The standard **Website** action opens a browser and is unsuitable for this use.
+
+### curl example
+
+```bash
+curl --fail-with-body -X POST 'http://127.0.0.1:<port>/__live/expression' \
+  -H 'Content-Type: application/json' \
+  -H 'X-Studio-Token: <token>' \
+  --data '{"expression":"joy"}'
+```
+
+Replace `<port>` and `<token>` with the port from the copied URL and the access
+key. Change the expression to `wink` for a wink or `neutral` to restore the
+normal face.
+
+### Access key storage and rotation
+
+The access key is saved in `.still2rig-psd/expression-token` and persists across
+server restarts. The file is initially created with permissions 0600. Use
+**合言葉を作り直す** (create a new access key) to rotate it. The old key immediately
+stops working; update the values in Stream Deck and Shortcuts too. Do not leave
+the key displayed on screen or include it in public files.
+
+This feature accepts requests from apps on the same computer. Requests from
+other computers or unrelated browser sites are rejected. Both the development
+server and the built preview server support it. Use the port of the server you
+started in the URL.

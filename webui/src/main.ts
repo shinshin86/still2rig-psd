@@ -5,6 +5,8 @@ import { expressionShortcut } from './expressionShortcuts.mjs';
 import { installVoiceControls } from './voice/controls';
 import { createLivePublisher } from './live/publisher';
 import { installStreamControls } from './live/controls';
+import { installExpressionRemoteControls } from './live/expressionRemote';
+import { createExpressionTransition } from './expressionTransition.mjs';
 import { installCameraControls } from './tracking/controls';
 import type { TrackingInput } from './tracking/pose.mjs';
 import { detectAnime25RigFromBuffer } from './rig/anime25Rig';
@@ -245,6 +247,7 @@ let voiceMouth: number | null = null;
 let liveInput: Partial<TrackingInput> | null = null;
 let liveWeight = 0;
 let livePublisher: ReturnType<typeof createLivePublisher> | null = null;
+let expressionRemote: ReturnType<typeof installExpressionRemoteControls> | null = null;
 let streamControls: ReturnType<typeof installStreamControls> | null = null;
 let generatedPsds: GeneratedPsd[] = [];
 let eyeOpen = 1;
@@ -460,7 +463,22 @@ function syncAdvancedParameterControl(name: PsdMotionParameterName): void {
 }
 
 let expressionAnimation = 0;
+const expressionTransition = createExpressionTransition(expressionParameterNames);
 let selectedExpressionId: string | null = 'neutral';
+function stopExpressionTransition(): void {
+  cancelAnimationFrame(expressionAnimation);
+  expressionTransition.cancel();
+}
+function advanceExpression(now: number): void {
+  const values = expressionTransition.sample(now);
+  if (!values) return;
+  for (const name of expressionParameterNames) {
+    const key = name as PsdMotionParameterName;
+    profileParameters[key] = values[key];
+    syncAdvancedParameterControl(key);
+  }
+  applyAvatarMotionMode(currentMode);
+}
 function syncExpressionSelection(id: string | null): void {
   selectedExpressionId = id;
   for (const button of document.querySelectorAll<HTMLButtonElement>('[data-expression-preset]')) {
@@ -471,22 +489,19 @@ function syncExpressionSelection(id: string | null): void {
 }
 
 function selectExpression(id: string): void {
-  if (!expressionPresetAvailability(id, avatarParts).available) return;
+  if (!expressionPresets.some(item => item.id === id) || !expressionPresetAvailability(id, avatarParts).available || selectedExpressionId === id) return;
+  const began = performance.now();
+  // Retarget from the current wall-clock value, even if no animation frame ran.
+  advanceExpression(began);
   cancelAnimationFrame(expressionAnimation);
-  const start = { ...profileParameters };
   const values = expressionPresetValues(id, avatarParts);
   avatar?.setEyeExpressionTarget(values);
-  const began = performance.now();
+  expressionTransition.start({ ...profileParameters }, values, began);
   syncExpressionSelection(id);
+  void livePublisher?.orderChanged();
   const advance = (now: number) => {
-    const t = Math.min(1, (now - began) / 250), eased = t * t * (3 - 2 * t);
-    for (const name of expressionParameterNames) {
-      const key = name as PsdMotionParameterName;
-      profileParameters[key] = start[key] + (values[key] - start[key]) * eased;
-      syncAdvancedParameterControl(key);
-    }
-    applyAvatarMotionMode(currentMode);
-    if (t < 1) expressionAnimation = requestAnimationFrame(advance);
+    advanceExpression(now);
+    if (expressionTransition.active()) expressionAnimation = requestAnimationFrame(advance);
   };
   expressionAnimation = requestAnimationFrame(advance);
 }
@@ -496,7 +511,7 @@ function applyProfileParameter(
   value: number,
   announce = true,
 ): void {
-  cancelAnimationFrame(expressionAnimation);
+  stopExpressionTransition();
   if (expressionParameterNames.includes(definition.key)) avatar?.setEyeExpressionTarget(null);
   if (expressionParameterNames.includes(definition.key)) syncExpressionSelection(null);
   profileParameters = {
@@ -515,7 +530,7 @@ function applyProfileParameter(
 }
 
 function resetAdvancedProfileParameters(): void {
-  cancelAnimationFrame(expressionAnimation);
+  stopExpressionTransition();
   avatar?.setEyeExpressionTarget(null);
   syncExpressionSelection('neutral');
   profileParameters = { ...DEFAULT_PSD_MOTION_PARAMETERS };
@@ -1638,7 +1653,7 @@ async function activatePsd(
   voiceControls?.stop();
   avatar = nextAvatar;
   avatarParts = new Set(detection.summary.partsFound);
-  cancelAnimationFrame(expressionAnimation);
+  stopExpressionTransition();
   if (!options.editorRefresh && selectedExpressionId) {
     Object.assign(profileParameters, expressionPresetValues(selectedExpressionId, avatarParts));
     for (const key of expressionParameterNames) syncAdvancedParameterControl(key as PsdMotionParameterName);
@@ -1689,6 +1704,7 @@ async function loadLocalPsd(file: File): Promise<void> {
   voiceControls?.stop();
   generatedPsdSelect.value = '';
   activeGeneratedPsdId = '';
+  expressionRemote?.connect('');
   generatedPsdOpenFolder.disabled = true;
   expressionRequestSource = 'local';
   expressionRequestControl.open = false;
@@ -1712,6 +1728,7 @@ async function loadGeneratedPsd(item: GeneratedPsd): Promise<void> {
   voiceControls?.stop();
   const token = ++loadToken;
   activeGeneratedPsdId = '';
+  expressionRemote?.connect('');
   expressionRequestSource = 'generated';
   syncExpressionRequestControl();
   setLoadingState(item.name);
@@ -1724,6 +1741,7 @@ async function loadGeneratedPsd(item: GeneratedPsd): Promise<void> {
   await activatePsd(buffer, item.name);
   generatedPsdSelect.value = item.id;
   activeGeneratedPsdId = item.id;
+  expressionRemote?.connect(item.id);
   generatedPsdOpenFolder.disabled = false;
   expressionRequestControl.open = false;
   expressionChoicesControl.open = false;
@@ -2020,12 +2038,16 @@ function installEventListeners(): void {
     active(active) { voiceActive = active; setCameraConflicts(cameraActive); if (active) livePublisher?.enable(); },
   });
   streamControls = installStreamControls(() => activeGeneratedPsdId, () => livePublisher?.enable());
-  livePublisher = createLivePublisher(() => activeGeneratedPsdId && avatar ? {
+  livePublisher = createLivePublisher(() => {
+    advanceExpression(performance.now());
+    return activeGeneratedPsdId && avatar ? {
     psd: activeGeneratedPsdId, input: liveInput, weight: liveWeight, voiceMouth,
     layerOrder: layerOrderSignature(currentLayerOrder) === layerOrderSignature(originalLayerOrder) ? null : [...currentLayerOrder],
     settings: { mode: currentMode, autoBlink: autoBlinkEnabled, eyeOpen, mouthOpen,
       parameters: { ...profileParameters }, tuning: { ...motionTuning } },
-  } : null, message => streamControls?.status(message));
+    } : null;
+  }, message => streamControls?.status(message));
+  expressionRemote = installExpressionRemoteControls(livePublisher.source, selectExpression);
   canvas.getContext('webgl', {
     alpha: true,
     stencil: true,

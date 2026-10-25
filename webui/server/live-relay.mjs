@@ -14,8 +14,8 @@ async function readState(request) {
 }
 
 export function liveRelayPlugin({ listPsds, trusted, sendJson }) {
+  const channels = new Map();
   function install(server) {
-    const channels = new Map();
     const layerOrders = new Map();
     const channel = psd => {
       if (!channels.has(psd)) channels.set(psd, { latest: null, clients: new Set(), sent: null });
@@ -41,7 +41,7 @@ export function liveRelayPlugin({ listPsds, trusted, sendJson }) {
     });
     server.middlewares.use((request, response, next) => {
       const url = new URL(request.url ?? '/', 'http://127.0.0.1');
-      if (!url.pathname.startsWith('/api/live/')) return next();
+      if (!['/api/live/state', '/api/live/status', '/api/live/events'].includes(url.pathname)) return next();
       if (!trusted(request, request.method === 'POST' ? 'live-state' : null)) return sendJson(response, { error: 'この操作を受け付けられませんでした。' }, 403);
       if (request.method === 'POST' && url.pathname === '/api/live/state') {
         void (async () => {
@@ -85,5 +85,10 @@ export function liveRelayPlugin({ listPsds, trusted, sendJson }) {
       response.on('close', () => room.clients.delete(client));
     });
   }
-  return { name: 'still2rig-live', configureServer: install, configurePreviewServer: install };
+  return { name: 'still2rig-live', configureServer: install, configurePreviewServer: install,
+    activeSource(psd) {
+      const latest = channels.get(psd)?.latest;
+      return latest && Date.now() - latest.at < 1500 ? { source: latest.source, at: latest.at } : null;
+    },
+  };
 }

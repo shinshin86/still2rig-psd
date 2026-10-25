@@ -4,6 +4,7 @@ import { spawn } from 'node:child_process';
 
 import { defineConfig } from 'vite';
 import { liveRelayPlugin } from './server/live-relay.mjs';
+import { expressionRemotePlugin } from './server/expression-remote.mjs';
 import { createRequire } from 'node:module';
 import { ensureFaceModel, faceModelFile, faceModelReady } from '../src/face-model.mjs';
 
@@ -247,7 +248,15 @@ function faceAssetsPlugin() {
   };
 }
 
+const liveRelay = liveRelayPlugin({ listPsds: listGeneratedPsds, trusted: isTrustedActionRequest, sendJson });
 export default defineConfig({
-  plugins: [generatedPsdPlugin(), faceAssetsPlugin(), liveRelayPlugin({ listPsds: listGeneratedPsds, trusted: isTrustedActionRequest, sendJson })],
+  // All app APIs are local/same-origin; let protected endpoints reject OPTIONS themselves.
+  server: { cors: false },
+  preview: { cors: false },
+  plugins: [generatedPsdPlugin(), faceAssetsPlugin(), liveRelay, expressionRemotePlugin({
+    listPsds: listGeneratedPsds, trusted: isTrustedActionRequest, sendJson,
+    tokenFile: path.join(repositoryRoot, '.still2rig-psd', 'expression-token'),
+    activeSource: psd => liveRelay.activeSource(psd),
+  })],
   build: { rolldownOptions: { input: { main: path.join(import.meta.dirname, 'index.html'), stream: path.join(import.meta.dirname, 'stream.html') } } },
 });

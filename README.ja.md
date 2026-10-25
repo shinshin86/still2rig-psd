@@ -10,6 +10,8 @@
 
 生成したPSDを組み込みWebUIで読み込み、目・口の切り替え、自動まばたき、髪・全身の
 動き、表示位置、拡大縮小を確認できます。
+OBSを操作中でも、Stream Deckやショートカット、curlから表情を切り替えられます。
+設定は[他のアプリから表情を切り替える](webui/README.md#switching-expressions-from-other-apps)（英語）を参照してください。
 
 Still2Rig PSDは、AIコーディングエージェントから使います。画像を添付して変換を
 依頼すると、エージェントが作業の準備、See-throughでの分解、結果の検証、
