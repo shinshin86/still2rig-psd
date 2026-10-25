@@ -177,6 +177,7 @@
       .tuning-item { display: grid; gap: 5px; }
       .tuning-item .field-head { font-size: 11px; }
       .tuning-note { margin: 9px 0 0; color: #8f9ab7; font-size: 11px; line-height: 1.45; }
+      #expression-remote label { font-size: 11px; font-weight: 400; }
       .request-steps { margin: 0; padding-left: 18px; color: #c4cde0; font-size: 11px; line-height: 1.55; }
       .request-steps li + li { margin-top: 4px; }
       #expression-request-body { display: grid; gap: 10px; }
@@ -492,6 +493,21 @@
             <p id="expression-status" class="tuning-note" role="status">いつもの顔</p>
             <p id="expression-add-hint" class="tuning-note" hidden>足りない絵は、上の<a href="#expression-request-control">「表情の絵を作ってもらう」</a>から依頼できます。</p>
             <p class="tuning-note">数字キー1〜9でも切り替えられます。選んだあと「細かい設定」で調整できます。</p>
+            <details id="expression-remote" class="advanced-panel">
+              <summary>他のアプリから切り替える</summary>
+              <div class="advanced-content">
+                <p class="tuning-note">OBSなど他のアプリを操作中でも、Stream Deck やショートカットから表情を切り替えられます。この画面は開いたままにしてください。</p>
+                <label class="tuning-item" for="expression-remote-url">送り先URL
+                  <input id="expression-remote-url" type="text" readonly aria-label="表情の送り先URL" />
+                </label>
+                <button id="expression-remote-copy-url" type="button">URLをコピー</button>
+                <p class="tuning-note">合言葉: <span aria-label="合言葉は非表示">••••••••</span></p>
+                <button id="expression-remote-copy-secret" type="button">合言葉をコピー</button>
+                <button id="expression-remote-rotate" type="button">合言葉を作り直す</button>
+                <p class="tuning-note">作り直すと、前に設定したショートカットは使えなくなります。</p>
+                <p id="expression-remote-status" class="tuning-note" role="status" aria-live="polite"></p>
+              </div>
+            </details>
           </section>
           <details id="advanced-parameters" class="advanced-panel">
             <summary><span>細かい設定</span><span class="parameter-count">50項目</span></summary>

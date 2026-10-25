@@ -42,6 +42,7 @@ export function createLivePublisher(snapshot: () => Omit<LiveState, 'source'> | 
   const close = () => { closed = true; clock.terminate(); abort.abort(); };
   window.addEventListener('pagehide', close, { once: true });
   return {
+    source,
     enable(value = true) { enabled = value; },
     async orderChanged() {
       if (enabled || closed) return;

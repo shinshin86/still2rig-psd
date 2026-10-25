@@ -10,6 +10,8 @@ motion preview.
 
 Load a generated PSD in the built-in WebUI to check eye and mouth states,
 automatic blinking, hair and full-body motion, positioning, and zoom.
+While working in OBS, you can also switch expressions from Stream Deck,
+Shortcuts, or curl. See [external expression controls](webui/README.md#switching-expressions-from-other-apps).
 
 Still2Rig PSD is designed to be used from an AI coding agent. Attach an image,
 ask the agent to convert it, and the agent prepares the run, runs See-through,
