@@ -35,6 +35,59 @@ def register_mouth_overlay(source, reference_mouth, crop_box, request_size, maxi
                     "dyNative":round(dy,4), "maximumShiftNative":maximum_shift}
 
 
+def register_closed_eyes(artwork, outline, editable, tolerance=8, maximum_shift=12):
+    """Translate each closed drawing horizontally; keep its ink and height.
+
+    Use the same alpha-weighted eye-outline reference as PSD QA. Already
+    registered drawings stay byte-identical. Large drift needs new artwork,
+    and moving outside the original editable region is never silently clipped.
+    """
+    if artwork.size != outline.size or artwork.size != editable.size:
+        raise ValueError('Eye registration requires one shared canvas.')
+    result = Image.new('RGBA', artwork.size)
+    width, height = artwork.size
+    report = {'reference':'eyelash union eyewhite alpha centroid, iris fallback',
+              'horizontalToleranceNative':tolerance, 'maximumShiftNative':maximum_shift, 'sides':{}}
+    for name,box in [('left',(0,0,width//2,height)),('right',(width//2,0,width,height))]:
+        part = artwork.crop(box)
+        try:
+            target_x,_ = alpha_centroid(outline.crop(box))
+            source_x,_ = alpha_centroid(part)
+        except ValueError as exc:
+            raise ValueError(f'{name}: visible open and closed eyes are required for registration.') from exc
+        offset = target_x-source_x
+        if abs(offset) > maximum_shift:
+            raise ValueError(f'{name}: closed-eye registration shift {offset:.3f} exceeds {maximum_shift} native pixels.')
+        dx = round(offset) if abs(offset) > tolerance else 0
+        moved = Image.new('RGBA',part.size)
+        moved.paste(part,(dx,0))
+        if moved.getchannel('A').histogram() != part.getchannel('A').histogram():
+            raise ValueError(f'{name}: closed-eye registration would clip artwork.')
+        outside = ImageChops.multiply(moved.getchannel('A'),ImageChops.invert(editable.crop(box)))
+        if outside.point(lambda a:255 if a>16 else 0).getbbox():
+            raise ValueError(f'{name}: registered closed eye leaves the original editable region.')
+        removed_noise = sum(a>0 for a in outside.tobytes())
+        moved.putalpha(ImageChops.multiply(moved.getchannel('A'),editable.crop(box)))
+        result.paste(moved,box[:2])
+        report['sides'][name] = {'dxNative':dx,'beforeXErrorNative':round(abs(offset),4),
+                                'afterXErrorNative':round(abs(offset-dx),4),'applied':dx!=0,
+                                'removedOutsideNoisePixels':removed_noise}
+    return result,report
+
+
+def register_adopted_closed_eyes(artwork, adopted, outline, tolerance=8, maximum_shift=12):
+    """Reposition previously adopted ink; never accept different new artwork."""
+    if artwork.size != adopted.size:
+        raise ValueError('Adopted eye canvas changed.')
+    for current, previous in zip(artwork.getdata(),adopted.getdata()):
+        if current[3] != previous[3] or (current[3] and current != previous):
+            raise ValueError('Eye artwork is not the previously adopted drawing.')
+    result,report = register_closed_eyes(artwork,outline,Image.new('L',artwork.size,255),tolerance,maximum_shift)
+    if result.getchannel('A').histogram() != artwork.getchannel('A').histogram():
+        raise ValueError('Adopted eye registration must preserve all ink.')
+    return result,report
+
+
 def validate_overlay_artwork(result, editable, name, skin_reference=None):
     alpha = result.getchannel("A")
     histogram = alpha.histogram()

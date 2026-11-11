@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 from PIL import Image, ImageChops, ImageDraw, ImageFont, ImageOps
-from expression_requests_common import neutral_layers
+from expression_requests_common import neutral_layers, unpad_request
 from import_expression_results import compensate_result
 
 
@@ -84,7 +84,7 @@ def main():
                     crop = Image.composite(generated, reference, mask)
                 # Accepted previews come from the exact import extraction and
                 # registration, including mouth-overlay placement compensation.
-                native = Image.open(details['preview']['composite']).convert('RGBA') if evaluation.get('ok') and details.get('preview', {}).get('composite') else crop.resize((box[2]-box[0],box[3]-box[1]),Image.Resampling.LANCZOS)
+                native = Image.open(details['preview']['composite']).convert('RGBA') if evaluation.get('ok') and details.get('preview', {}).get('composite') else unpad_request(crop,item).resize((box[2]-box[0],box[3]-box[1]),Image.Resampling.LANCZOS)
                 candidate.paste(native,box[:2])
                 for image in foreground:
                     candidate.alpha_composite(image)

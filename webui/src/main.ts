@@ -51,6 +51,8 @@ interface GeneratedPsd {
 }
 
 interface RigQaApi {
+  setFaceInspectionCapture: (enabled: boolean) => void;
+  getFaceInspectionFrame: () => ReturnType<Anime25RigAvatar['getFaceInspectionFrame']>;
   getDrawingState: () => ReturnType<Anime25RigAvatar['getDrawingState']> | null;
   setVoiceMouth: (value: number | null) => void;
   getMouthState: () => ReturnType<Anime25RigAvatar['getMouthState']> | null;
@@ -1503,6 +1505,8 @@ function setVoiceMouth(value: number | null): void {
 }
 
 const api: RigQaApi = {
+  setFaceInspectionCapture(enabled) { avatar?.setFaceInspectionCapture(enabled); },
+  getFaceInspectionFrame() { return avatar?.getFaceInspectionFrame() ?? null; },
   getDrawingState() { return avatar?.getDrawingState() ?? null; },
   getMouthState() { return avatar?.getMouthState() ?? null; },
   setVoiceMouth,

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import shutil
@@ -181,6 +182,8 @@ def main() -> None:
     parser.add_argument("--contact-sheet", type=Path, required=True)
     parser.add_argument("--expressions", type=Path)
     parser.add_argument("--layer-overrides", type=Path)
+    parser.add_argument("--adopted-eye-proof", type=Path)
+    parser.add_argument("--conserved-alpha-proof", type=Path)
     parser.add_argument("--alpha-threshold", type=int, default=16)
     parser.add_argument("--minimum-component-pixels", type=int, default=40)
     parser.add_argument("--drop-optional-below", type=int, default=1000)
@@ -213,6 +216,7 @@ def main() -> None:
 
     canvas = None
     rows = []
+    conserved = json.loads(args.conserved_alpha_proof.read_text()) if args.conserved_alpha_proof else None
     for name, source in sorted(sources.items()):
         image = Image.open(source).convert("RGBA")
         if canvas is None:
@@ -225,7 +229,13 @@ def main() -> None:
         elif name in override_names:
             # Supplied artwork can intentionally contain tiny highlights/ink.
             cleaned = image.copy()
-            cleaned.putalpha(image.getchannel("A").point(lambda value: value if value > args.alpha_threshold else 0))
+            if conserved and name in conserved['files']:
+                if hashlib.sha256(source.read_bytes()).hexdigest() != conserved['files'][name]:
+                    raise ValueError('Conserved override hash changed: '+name)
+                # Source-conserving white-matte recovery deliberately encodes
+                # faint edge coverage. Removing it breaks the white composite.
+            else:
+                cleaned.putalpha(image.getchannel("A").point(lambda value: value if value > args.alpha_threshold else 0))
             meaningful = sum(value > args.alpha_threshold for value in cleaned.getchannel("A").tobytes())
         else:
             cleaned, meaningful = clean_alpha(image, args.alpha_threshold, args.minimum_component_pixels)
@@ -245,6 +255,31 @@ def main() -> None:
             if row["name"] == "neck.png":
                 row.update(geometry(Image.open(args.output_dir / "neck.png"), args.alpha_threshold))
 
+    adopted_registration = None
+    if args.adopted_eye_proof:
+        from PIL import ImageChops
+        from overlay_expression import register_adopted_closed_eyes
+        proof = json.loads(args.adopted_eye_proof.read_text())
+        if hashlib.sha256(Path(proof['source']).read_bytes()).hexdigest() != proof['inputSha256'] or hashlib.sha256(Path(proof['adopted']).read_bytes()).hexdigest() != proof['adoptedSha256']:
+            raise ValueError('Adopted eye proof changed.')
+        eye_file = args.output_dir/'eye_close.png'
+        eye = Image.open(eye_file).convert('RGBA')
+        outline = Image.new('RGBA',eye.size);alpha = Image.new('L',eye.size)
+        for name in ('eyelash.png','eyewhite.png'):
+            file = args.output_dir/name
+            if file.is_file():alpha=ImageChops.lighter(alpha,Image.open(file).convert('RGBA').getchannel('A'))
+        for box in ((0,0,eye.width//2,eye.height),(eye.width//2,0,eye.width,eye.height)):
+            if not alpha.crop(box).point(lambda v:255 if v>16 else 0).getbbox():
+                alpha.paste(Image.open(args.output_dir/'irides.png').convert('RGBA').getchannel('A').crop(box),box[:2])
+        outline.putalpha(alpha)
+        quality=json.loads((Path(__file__).resolve().parent.parent/'configs/default.json').read_text())['quality']
+        registered,adopted_registration=register_adopted_closed_eyes(eye,Image.open(proof['adopted']).convert('RGBA'),outline,quality['registrationTolerancePixels'],12)
+        registered.save(eye_file)
+        adopted_registration.update(proof)
+        adopted_registration['outputSha256']=hashlib.sha256(eye_file.read_bytes()).hexdigest()
+        for row in rows:
+            if row['name']=='eye_close.png':row.update(geometry(registered,args.alpha_threshold))
+
     written = sorted(path for path in args.output_dir.glob("*.png") if path.is_file())
     make_contact_sheet(written, args.contact_sheet)
     report = {
@@ -254,6 +289,8 @@ def main() -> None:
         "expressionFiles": expression_names,
         "layerOverrides": override_names,
         "neckTuck": neck_tuck,
+        "adoptedEyeRegistration": adopted_registration,
+        "conservedOverrideAlpha": conserved,
         "counts": {"source": len(sources), "written": len(written), "dropped": sum(row["dropped"] for row in rows)},
     }
     args.report.parent.mkdir(parents=True, exist_ok=True)

@@ -1,5 +1,6 @@
 import { createMouthController, mouthContour, mouthRestWeight, type MouthContour, type MouthFrame, type MouthSelection } from './mouthExpression.mjs';
 import { expressionParameterNames } from '../../../src/expressionPresets.mjs';
+import { updateHairMotionInput, limitHairMotion, type HairMotionInput, type HairMotionLimitState } from './hairMotionLimit.mjs';
 import { drawnEyeFeatures, morphDrawnEye, drawnBlinkOpacity, type DrawnEyeFeatures } from './drawnEye.mjs';
 import { drawnEyeDefinitions, type DrawnEye, createEyeDrawingSlot, eyeDrawingAlpha, eyeSlotParameters, type EyeDrawing, type EyeDrawingFrame, type EyeDrawingSnapshot } from './eyeDrawing.mjs';
 import { composeTrackedExpression, morphClosedWink, shapeBrow, shapeUpperLid, shapeWink, smileForSide, upperLidShape } from './expressionParts.mjs';
@@ -73,6 +74,8 @@ interface StrandSpring {
 }
 
 interface RenderLayer extends Anime25RigLayer {
+  hairLimitReference?: boolean;
+  hairLimitState?: HairMotionLimitState;
   x: number;
   y: number;
   w: number;
@@ -121,6 +124,8 @@ interface AnimationState {
 }
 
 export interface Anime25RigAvatar {
+  setFaceInspectionCapture: (enabled: boolean) => void;
+  getFaceInspectionFrame: () => { width: number; height: number; data: Uint8ClampedArray } | null;
   setEyeExpressionTarget: (values: Partial<PsdMotionParameters> | null) => void;
   getDrawingState: () => { eyes: Record<'L'|'R', EyeDrawingFrame & { drawing: EyeDrawing; open: number }>; layers: { name: string; side: string; drawing: string; alpha: number }[] };
   setVoiceMouth: (value: number | null) => void;
@@ -667,8 +672,15 @@ export function createAnime25RigAvatar(
   canvas.height = canvasHeight;
 
   let disposed = false;
+  // QA-only face pass: copy the already deformed feature draw calls, excluding
+  // ALL hair/accessories/clothing. No second deformation or simulation tick.
+  let faceInspection: { texture: WebGLTexture; framebuffer: WebGLFramebuffer } | null = null;
+  let captureFaceInspection = false;
+  const inspectionLayers = new Set(['face', 'eyebrow', 'eyelash', 'eyewhite', 'irides', 'eye_close', 'eye_smile',
+    ...drawnEyeDefinitions.map(def => def.part)]);
   let animationFrame = 0;
   let last = performance.now();
+  let hairLimitInput: HairMotionInput | null = null;
   let blinkT = -1;
   let nextBlink = last + 1800;
   let nextRandom = 0;
@@ -1077,6 +1089,17 @@ export function createAnime25RigAvatar(
       }
     }
 
+    if (!layer.hairLimitReference && layer.bn.includes('hair') && layer.spr?.length &&
+        (params.physAmp || params.fhAmp || params.bangL || params.bangC || params.bangR)) {
+      const reference = { ...layer, hairLimitReference: true,
+        cur: new Float32Array(layer.cur.length),
+        inkVisibility: new Float32Array(layer.inkVisibility.length),
+        lidShade: new Float32Array(layer.lidShade.length) };
+      deform(reference, { ...params, physAmp: 0, fhAmp: 0, bangL: 0, bangC: 0, bangR: 0 });
+      layer.hairLimitState = limitHairMotion(output, reference.cur,
+        anchors.face.x1 - anchors.face.x0, hairLimitInput, layer.hairLimitState);
+    }
+
     void centerX;
     void centerY;
   }
@@ -1230,6 +1253,7 @@ export function createAnime25RigAvatar(
         (0.5 + 0.5 * Math.sin((time * 2 * Math.PI) / 3.4 - 0.6)) -
       dragInertia.y * 0.14 * motionTuning.dragScale;
 
+    hairLimitInput = updateHairMotionInput(hairLimitInput, params, time);
     const headDX =
       (params.angleX * 14 +
         params.angleZ * 0.07 * (neckPivot.cy - faceCenter.y)) *
@@ -1276,6 +1300,11 @@ export function createAnime25RigAvatar(
     gl.clearColor(0, 0, 0, 0);
     gl.clearStencil(0);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.STENCIL_BUFFER_BIT);
+    if (captureFaceInspection && faceInspection) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, faceInspection.framebuffer);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    }
     gl.bindFramebuffer(gl.FRAMEBUFFER,eyeMaskFramebuffer);gl.clear(gl.COLOR_BUFFER_BIT);gl.bindFramebuffer(gl.FRAMEBUFFER,null);
     gl.uniform2f(locRes, canvasWidth, canvasHeight);
     gl.uniform2f(locViewOffset, viewOffsetX, viewOffsetY);
@@ -1338,6 +1367,12 @@ export function createAnime25RigAvatar(
         gl.activeTexture(gl.TEXTURE1);gl.bindTexture(gl.TEXTURE_2D,eyeMaskTexture);gl.activeTexture(gl.TEXTURE0);
       }
       gl.drawElements(gl.TRIANGLES,layer.nIdx,gl.UNSIGNED_SHORT,0);
+      if (captureFaceInspection && faceInspection && !sampledMouth &&
+          (inspectionLayers.has(layer.bn) || layer.bn.startsWith('mouth_'))) {
+        gl.bindFramebuffer(gl.FRAMEBUFFER, faceInspection.framebuffer);
+        gl.drawElements(gl.TRIANGLES, layer.nIdx, gl.UNSIGNED_SHORT, 0);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      }
       if(sampledMouth) {
         gl.bindFramebuffer(gl.FRAMEBUFFER,null);
         gl.viewport(0,0,canvasWidth,canvasHeight);
@@ -1348,6 +1383,12 @@ export function createAnime25RigAvatar(
         gl.uniform2f(locResolveTexel,1/(3*canvasWidth),1/(3*canvasHeight));
         gl.disableVertexAttribArray(locShade);gl.vertexAttrib1f(locShade,0);
         gl.drawArrays(gl.TRIANGLES,0,6);
+        // Copy the same resolved mouth quad, retaining its fractional coverage.
+        if (captureFaceInspection && faceInspection) {
+          gl.bindFramebuffer(gl.FRAMEBUFFER, faceInspection.framebuffer);
+          gl.drawArrays(gl.TRIANGLES, 0, 6);
+          gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        }
         gl.enableVertexAttribArray(locShade);
         gl.uniform2f(locResolveTexel,0,0);
         gl.uniform2f(locViewOffset,viewOffsetX,viewOffsetY);gl.uniform1f(locViewScale,viewScale);
@@ -1365,6 +1406,33 @@ export function createAnime25RigAvatar(
   animationFrame = requestAnimationFrame(tick);
 
   return {
+    setFaceInspectionCapture(enabled) {
+      if (enabled && !faceInspection) {
+        const texture = gl.createTexture(), framebuffer = gl.createFramebuffer();
+        if (!texture || !framebuffer) throw new Error('Could not allocate QA face inspection.');
+        gl.bindTexture(gl.TEXTURE_2D, texture);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, canvasWidth, canvasHeight, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+        const complete = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        if (!complete) { gl.deleteTexture(texture); gl.deleteFramebuffer(framebuffer); throw new Error('QA face inspection is unavailable.'); }
+        faceInspection = { texture, framebuffer };
+      }
+      captureFaceInspection = enabled;
+    },
+    getFaceInspectionFrame() {
+      if (!captureFaceInspection || !faceInspection) return null;
+      const raw = new Uint8Array(canvasWidth * canvasHeight * 4);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, faceInspection.framebuffer);
+      gl.readPixels(0, 0, canvasWidth, canvasHeight, gl.RGBA, gl.UNSIGNED_BYTE, raw);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      const data = new Uint8ClampedArray(raw.length), stride = canvasWidth * 4;
+      for (let y = 0; y < canvasHeight; y++) data.set(raw.subarray((canvasHeight - y - 1) * stride, (canvasHeight - y) * stride), y * stride);
+      return { width: canvasWidth, height: canvasHeight, data };
+    },
     getMouthState() {
       return { ...mouthFrame, weights: { ...mouthFrame.weights },
         sampleScale:mouthFramebuffer?sampleScale:1,
@@ -1512,6 +1580,7 @@ export function createAnime25RigAvatar(
       disposed = true;
       cancelAnimationFrame(animationFrame);
       gl.deleteTexture(eyeMaskTexture);gl.deleteFramebuffer(eyeMaskFramebuffer);
+      if (faceInspection) { gl.deleteTexture(faceInspection.texture); gl.deleteFramebuffer(faceInspection.framebuffer); }
       for (const layer of layers) {
         gl.deleteTexture(layer.tex);
         gl.deleteBuffer(layer.vboPos);

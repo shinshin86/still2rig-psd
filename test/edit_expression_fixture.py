@@ -18,6 +18,9 @@ for name in requests["variants"]:
     item = requests["variants"][name]
     scale = item["scale"]
     left, top, _, _ = item["cropBox"]
+    padding = item.get("padding", [0,0,0,0])
+    left -= padding[0]
+    top -= padding[1]
     image = Image.open(args.request_dir / name / "input.png").convert("RGBA")
     mask = Image.open(args.request_dir / name / "mask.png").convert("RGBA")
     underlay = Image.open(args.request_dir / name / "underlay.png").convert("RGBA")

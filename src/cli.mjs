@@ -15,6 +15,7 @@ import {
   loadDefaults,
   loadLayerMap,
   parseOptions,
+  readJson,
   relativeProjectPath,
   sha256File,
   writeJson,
@@ -29,18 +30,32 @@ Usage:
   still2rig-psd prepare IMAGE [--name JOB]
   still2rig-psd colab-url [--json]
   still2rig-psd cell JOB CELL_FILE
+  still2rig-psd split-landmarks JOB --landmarks FILE.json
+  still2rig-psd split-auto JOB [--method difference]
+  still2rig-psd split-import JOB [RESULTS_DIR] [--request-dir DIR]
+  still2rig-psd split-requests JOB --stage p2|p3|ownership|face-parts
+    [--p1 FILE] [--renew-request]  前の依頼と結果を履歴に保存して作り直す
+  still2rig-psd split-result JOB --stage STAGE --image FILE
+  still2rig-psd split-peel-preview JOB --p1 FILE --p2 FILE --request-dir DIR --p1-check FILE
+    [--ownership FILE --ownership-request FILE] [--p3 FILE --p3-request FILE] [--refine-ownership]
+    [--face-source generated|original]  generated: 生成した顔全体を使う（既定） / original: 元の顔を保つ
+    [--face-parts FILE --face-parts-request FILE]
+  still2rig-psd split-rig-layers JOB --candidate DIR
   still2rig-psd import JOB RESULT.zip
   still2rig-psd finalize JOB [--expressions DIR | --preview-expressions DIR] [--layer-overrides DIR] [--preview-placeholders]
   still2rig-psd repair JOB [--expressions DIR | --preview-expressions DIR | --no-expressions] [--layer-overrides DIR | --no-layer-overrides] [--preview-placeholders]
+    [--register-adopted-eyes]  取込検査済みで採用済みの閉じ目だけを横方向に合わせる
   still2rig-psd derive-expressions JOB
   still2rig-psd expression-requests JOB [--only eye_smile,blush | all]
+    [--keep-closed-mouth --review-note TEXT]  現在の閉じ口を残す（品質判定は変えず、理由を記録）
+    [--reuse-framing]  前の依頼と同じ切り抜き位置を使う
   still2rig-psd expression-candidates JOB [--only eyes_sad] [--request-dir DIR] [--preview-dir DIR]
   still2rig-psd import-expressions JOB [DIR] [--max-outside-mean 6] [--max-outside-p99 20]
     [--only eyes_sad,mouth_frown | --pick eyes_sad=3,mouth_frown=1]
     [--max-band-local-mean 24] [--max-band-flat-mean 12]
     [--protected-band 8] [--alignment-radius 24] [--max-alignment-shift 12] [--max-alignment-scale 0.03]
     [--artwork-threshold 8] [--minimum-component-pixels 4]
-    [--protected-check strict|seam] [--read-only [--request-dir DIR] [--preview-dir DIR]]
+    [--protected-check strict|seam] [--review-note TEXT] [--read-only [--request-dir DIR] [--preview-dir DIR]]
   still2rig-psd motion-qa JOB [--negative-fixture]
   still2rig-psd status [JOB] [--json]
   still2rig-psd self-test
@@ -126,6 +141,61 @@ function runPython(script, args, input) {
   return (result.stdout || '').trim();
 }
 
+function splitCommand(command, jobId, directory, options) {
+  const { root } = loadJob(jobId);
+  const args = [command.slice('split-'.length), '--job-root', relativeProjectPath(root)];
+  if (command === 'split-landmarks') {
+    if (typeof options.landmarks !== 'string') throw new Error('目印のJSONを --landmarks で指定してください。');
+    args.push('--landmarks', path.resolve(options.landmarks));
+  }
+  if (command === 'split-auto') args.push('--method', options.method || 'difference');
+  if (command === 'split-import' && directory) args.push('--results', path.resolve(directory));
+  if (command === 'split-import' && options['request-dir']) args.push('--request-dir', path.resolve(options['request-dir']));
+  const result = JSON.parse(runPython('split_image.py', args));
+  updateJob(jobId, job => ({ ...job, split: { ...job.split, [command]: result } }));
+  return result;
+}
+
+function peelPreview(jobId, options) {
+  const { root } = loadJob(jobId);
+  const args = ['--job-root', relativeProjectPath(root)];
+  for (const name of ['p1', 'p2', 'request-dir', 'p1-check']) {
+    if (typeof options[name] !== 'string') throw new Error(`--${name} が必要です。`);
+    args.push(`--${name}`, path.resolve(options[name]));
+  }
+  for (const name of ['ownership', 'ownership-request', 'p3', 'p3-request', 'face-parts', 'face-parts-request']) {
+    if (options[name] !== undefined) args.push(`--${name}`, path.resolve(options[name]));
+  }
+  if (options['refine-ownership']) args.push('--refine-ownership');
+  if (options['p1-fringe-face']) args.push('--p1-fringe-face');
+  if (options['face-source']) args.push('--face-source', options['face-source']);
+  const result = JSON.parse(runPython('split_peel.py', args));
+  updateJob(jobId, job => ({ ...job, peelPreview: result }));
+  return result;
+}
+
+function splitGeneration(command, jobId, options) {
+  const { root } = loadJob(jobId);
+  if (typeof options.stage !== 'string') throw new Error('--stage が必要です。');
+  const args = [command === 'split-requests' ? 'requests' : 'result', '--job-root', relativeProjectPath(root), '--stage', options.stage];
+  if (options.image) args.push('--image', path.resolve(options.image));
+  if (options.p1) args.push('--p1', path.resolve(options.p1));
+  if (options['renew-request']) args.push('--renew-request');
+  const result = JSON.parse(runPython('split_requests.py', args));
+  updateJob(jobId, job => ({ ...job, split: { ...job.split, [`${command}:${options.stage}`]: result } }));
+  return result;
+}
+
+function splitRigLayers(jobId, options) {
+  const { root } = loadJob(jobId);
+  if (typeof options.candidate !== 'string') throw new Error('確認済みの分離結果を --candidate で指定してください。');
+  const result = JSON.parse(runPython('split_ownership_layers.py', [
+    '--job-root', relativeProjectPath(root), '--candidate', path.resolve(options.candidate),
+  ]));
+  updateJob(jobId, job => ({ ...job, split: { ...job.split, 'split-rig-layers': result } }));
+  return result;
+}
+
 function importBundle(jobId, archiveValue) {
   const { root, manifest } = loadJob(jobId);
   if (!archiveValue) throw new Error('Usage: still2rig-psd import JOB RESULT.zip');
@@ -171,7 +241,41 @@ function inspectArtifacts({ root, options, layerDir, reportsRoot }) {
   }
   const expressionDir = options.expressions || options['preview-expressions'];
   if (expressionDir) inspectArgs.push('--expressions', path.resolve(expressionDir));
-  if (options['layer-overrides']) inspectArgs.push('--layer-overrides', path.resolve(options['layer-overrides']));
+  if (options['layer-overrides']) {
+    const directory = path.resolve(options['layer-overrides']);
+    inspectArgs.push('--layer-overrides', directory);
+    const manifest = readJson(path.join(root,'job.json'));
+    const conserved = manifest.split?.['split-rig-layers'];
+    if (conserved && path.resolve(PROJECT_ROOT,conserved.layers) === directory) {
+      const report = readJson(path.resolve(PROJECT_ROOT,conserved.report));
+      if (!report.staticConservation?.pass || report.sourceSha256 !== manifest.input.sha256 ||
+          Object.entries(report.outputLayers || {}).some(([name,hash]) =>
+            !fs.existsSync(path.join(directory,`${name}.png`)) || sha256File(path.join(directory,`${name}.png`)) !== hash) ||
+          !Object.keys(report.outputLayers || {}).length) {
+        throw new Error('Conserved overrides changed; rebuild split-rig-layers before assembly.');
+      }
+      const proof = path.join(reportsRoot,'conserved-alpha-source.json');
+      writeJson(proof,{ reportSha256:sha256File(path.resolve(PROJECT_ROOT,conserved.report)),
+        files:Object.fromEntries(Object.entries(report.outputLayers).map(([name,hash])=>[`${name}.png`,hash])) });
+      inspectArgs.push('--conserved-alpha-proof',proof);
+    }
+  }
+  if (options['register-adopted-eyes']) {
+    if (!options.expressions) throw new Error('Adopted-eye registration requires previously imported expression files.');
+    const source = path.join(path.resolve(options.expressions), 'eye_close.png');
+    const reviews = readJson(path.join(path.resolve(options.expressions), 'import-review.json'));
+    if (!fs.existsSync(source) || reviews.eye_close?.artworkSha256 !== sha256File(source)) {
+      throw new Error('Only previously imported and adopted closed-eye artwork can be registered.');
+    }
+    const previous = currentLayerDir(root, readJson(path.join(root, 'job.json')));
+    const adopted = path.join(previous, 'eye_close.png');
+    if (!fs.existsSync(adopted)) throw new Error('No adopted closed-eye artwork exists.');
+    const proof = path.join(reportsRoot, 'adopted-eye-source.json');
+    writeJson(proof, { source: relativeProjectPath(source), inputSha256: sha256File(source),
+      adopted: relativeProjectPath(adopted), adoptedSha256: sha256File(adopted),
+      importedResultSha256: reviews.eye_close.resultSha256 });
+    inspectArgs.push('--adopted-eye-proof', proof);
+  }
   runPython('inspect_layers.py', inspectArgs);
   return { inspectionReport, contactSheet };
 }
@@ -186,6 +290,16 @@ function assembleArtifacts({ jobId, root, options, outputPsd, layerDir, reportsR
     previewPlaceholders: Boolean(options['preview-placeholders']),
     previewExpressionTargets: options['expression-preview-targets'] ?? (options['preview-expressions'] ? previewExpressionTargets(inspectionReport) : []),
   });
+  const expressionDir = options.expressions || options['preview-expressions'];
+  const reviewFile = expressionDir && path.join(path.resolve(expressionDir), 'import-review.json');
+  if (reviewFile && fs.existsSync(reviewFile)) {
+    const reviews = JSON.parse(fs.readFileSync(reviewFile, 'utf8'));
+    build.expressionImportReview = Object.fromEntries(Object.entries(reviews).filter(([name, review]) => {
+      const file = path.join(path.resolve(expressionDir), `${name}.png`);
+      return fs.existsSync(file) && sha256File(file) === review.artworkSha256;
+    }));
+    writeJson(buildReportFile, build);
+  }
   const qaReportFile = path.join(reportsRoot, 'qa-report.json');
   const qa = runQa({ psdFile: outputPsd, layerDir, buildReportFile, reportFile: qaReportFile });
   return { build, qa, outputPsd, qaReportFile, contactSheet, buildReportFile, inspectionReport };
@@ -328,8 +442,10 @@ function mergeExpressionInputs(root, manifest, repairRoot, options, inheritedArt
   let imported = [];
   let importedVariants = {};
   let selectedCandidates = {};
+  let importReviews = {};
   try { const report = JSON.parse(fs.readFileSync(path.join(incoming, 'report.json'), 'utf8')); imported = Array.isArray(report.accepted) ? report.accepted : []; importedVariants = report.variants || {}; } catch { /* Supplied PNGs need no import report. */ }
   try { selectedCandidates=JSON.parse(fs.readFileSync(path.join(incoming,'selections.json'),'utf8')); } catch { /* Direct artwork has no candidate history. */ }
+  try { importReviews=JSON.parse(fs.readFileSync(path.join(incoming,'import-review.json'),'utf8')); } catch { /* Drawn artwork has no import review. */ }
   const preview = new Set();
   for (const item of retained) {
     const old = latest?.expressionProvenance?.[item.name];
@@ -342,6 +458,7 @@ function mergeExpressionInputs(root, manifest, repairRoot, options, inheritedArt
     provenance[item.name] = { kind: derived ? 'derived-preview' : 'supplied-artwork', importedResult: imported.includes(item.name), inheritedFromRepair: null };
     const candidate = importedVariants[item.name]?.candidate ?? selectedCandidates[item.name];
     if(candidate?.artworkSha256===sha256File(path.join(incoming,`${item.name}.png`)))provenance[item.name].candidate=candidate;
+    if(importReviews[item.name]?.artworkSha256===sha256File(path.join(incoming,`${item.name}.png`)))provenance[item.name].importReview=importReviews[item.name];
     if (derived) preview.add(item.name);
   }
   if (retained.length) {
@@ -349,6 +466,9 @@ function mergeExpressionInputs(root, manifest, repairRoot, options, inheritedArt
     fs.mkdirSync(snapshot, { recursive: true });
     for (const item of retained) fs.copyFileSync(path.join(previous, `${item.name}.png`), path.join(snapshot, `${item.name}.png`));
     for (const item of supplied) fs.copyFileSync(path.join(incoming, `${item.name}.png`), path.join(snapshot, `${item.name}.png`));
+    const reviews = Object.fromEntries(Object.entries(provenance).filter(([,entry])=>entry.importReview).map(([name,entry])=>
+      [name,{...entry.importReview,sourceArtworkSha256:entry.importReview.artworkSha256,artworkSha256:sha256File(path.join(snapshot,`${name}.png`))}]));
+    if(Object.keys(reviews).length)writeJson(path.join(snapshot,'import-review.json'),reviews);
     options.expressions = snapshot;
     delete options['preview-expressions'];
   }
@@ -393,6 +513,23 @@ function repair(jobId, options) {
     layerDir: path.join(afterRoot, 'processed', 'layers'),
     reportsRoot: path.join(afterRoot, 'reports'),
   });
+
+  // Retain the transformation as a new repair input, without changing its
+  // original imported artwork or claiming a newly generated source.
+  const eyeRegistration = readJson(assembled.inspectionReport).adoptedEyeRegistration;
+  if (eyeRegistration) {
+    const source = path.resolve(effective.expressions);
+    const snapshot = path.join(repairRoot, 'inputs', 'registered-expressions');
+    fs.mkdirSync(snapshot, { recursive: true });
+    for (const file of fs.readdirSync(source).filter(name => name.endsWith('.png'))) fs.copyFileSync(path.join(source,file),path.join(snapshot,file));
+    fs.copyFileSync(path.join(afterRoot,'processed','layers','eye_close.png'),path.join(snapshot,'eye_close.png'));
+    const reviews = readJson(path.join(source,'import-review.json'));
+    reviews.eye_close = { ...reviews.eye_close, sourceArtworkSha256: eyeRegistration.inputSha256,
+      artworkSha256: sha256File(path.join(snapshot,'eye_close.png')), assemblyRegistration: eyeRegistration };
+    writeJson(path.join(snapshot,'import-review.json'),reviews);
+    writeJson(path.join(snapshot,'assembly-registration.json'),eyeRegistration);
+    effective.expressions = snapshot;
+  }
 
   const beforeRoot = path.join(repairRoot, 'before');
   const beforePsd = path.join(beforeRoot, 'output', path.basename(currentPsd));
@@ -486,6 +623,9 @@ function expressionRequests(jobId, options) {
     '--layer-dir', currentLayerDir(root, manifest),
     '--output-dir', outputDir,
     ...(options.only !== undefined ? ['--only', options.only] : []),
+    ...(options['keep-closed-mouth'] ? ['--keep-closed-mouth'] : []),
+    ...(options['reuse-framing'] ? ['--reuse-framing'] : []),
+    ...(options['review-note'] !== undefined ? ['--review-note', options['review-note']] : []),
   ]));
   return {
     jobId,
@@ -496,6 +636,8 @@ function expressionRequests(jobId, options) {
     layerSha256: requests.layerSha256,
     stage: requests.stage,
     closedMouth: requests.closedMouth,
+    closedMouthReuse: requests.closedMouthReuse,
+    framingReuse: requests.framingReuse,
     deferredExpressions: requests.deferredExpressions,
     next: requests.stage === 'closed-mouth' ? `still2rig-psd import-expressions ${jobId} --only mouth_close --read-only` : `still2rig-psd expression-candidates ${jobId}`,
     ...(requests.stage === 'closed-mouth' ? {
@@ -530,6 +672,7 @@ function importExpressions(jobId, directory, options) {
   if (options['read-only']) args.push('--read-only');
   if (options.pick !== undefined) args.push('--pick', options.pick);
   if (options.only !== undefined && !options.candidateReview) args.push('--only', options.only);
+  if (options['review-note'] !== undefined) args.push('--review-note', options['review-note']);
   if (options['protected-check'] !== undefined) {
     if (!['strict', 'seam'].includes(options['protected-check'])) throw new Error('--protected-check must be strict or seam.');
     args.push('--protected-check', options['protected-check']);
@@ -705,6 +848,14 @@ export async function main(argv = process.argv.slice(2)) {
     const file = path.join(jobRoot(jobId), 'colab', cellName);
     if (!fs.existsSync(file)) throw new Error(`Unknown cell: ${cellName}`);
     process.stdout.write(fs.readFileSync(file, 'utf8'));
+  } else if (['split-landmarks', 'split-auto', 'split-import'].includes(command)) {
+    print(splitCommand(command, positional[0], positional[1], options), true);
+  } else if (command === 'split-peel-preview') {
+    print(peelPreview(positional[0], options), true);
+  } else if (['split-requests', 'split-result'].includes(command)) {
+    print(splitGeneration(command, positional[0], options), true);
+  } else if (command === 'split-rig-layers') {
+    print(splitRigLayers(positional[0], options), true);
   } else if (command === 'import') {
     print(importBundle(positional[0], positional[1]), true);
   } else if (command === 'finalize') {

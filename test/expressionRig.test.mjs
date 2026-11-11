@@ -21,6 +21,29 @@ const psd = () => ({ width: 128, height: 128, children: [
   layer('mouth_close', [[57, 80, 71, 84]]),
 ] });
 
+test('optional eyewear follows the face and preserves rigs without glasses', () => {
+  const script = fs.readFileSync(new URL('../webui/public/rigger.js', import.meta.url), 'utf8');
+  const previous = { module: { exports: {} } };
+  vm.runInNewContext(script.replace(/^.*'eyewear':.*\n/m, ''), previous);
+  assert.deepEqual(JSON.parse(JSON.stringify(rigger.buildRig(psd()))), JSON.parse(JSON.stringify(previous.module.exports.buildRig(psd()))));
+  const input = psd();
+  input.children.push(layer('eyewear', [[27, 33, 53, 47], [75, 33, 101, 47]]));
+  input.children.push(layer('front hair', [[18, 5, 110, 28]]));
+  const rig = rigger.buildRig(input);
+  const face = rig.layers.find(part => part.name === 'face');
+  const glasses = rig.layers.find(part => part.name === 'eyewear');
+  assert.equal(glasses.depth, face.depth); assert.equal(glasses.group, face.group);
+  assert.equal(glasses.phys, null); assert.equal(glasses.fade, null); assert.equal(glasses.side, null);
+  assert.ok(glasses.z > rig.layers.find(part => part.name === 'mouth_close').z);
+  assert.ok(glasses.z < rig.layers.find(part => part.name === 'front hair').z);
+  assert.ok(!rig.warnings.some(warning => /eyewear/.test(warning)));
+  const mapping = JSON.parse(fs.readFileSync(new URL('../configs/layer-map.json', import.meta.url), 'utf8')).layers;
+  const index = mapping.findIndex(item => item.target === 'eyewear');
+  assert.equal(mapping[index].required, false);
+  assert.ok(index > mapping.findIndex(item => item.target === 'eye_close'));
+  assert.ok(index < mapping.findIndex(item => item.target === 'front hair'));
+});
+
 test('smiling eyes split per side without changing closed-eye anchors; faint blush survives cleanup', () => {
   const input = psd(); const baseline = rigger.buildRig(input);
   input.children.push(layer('eye_smile', [[30, 30, 50, 33], [78, 30, 98, 33]]));

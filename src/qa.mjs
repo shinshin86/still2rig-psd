@@ -32,13 +32,13 @@ function findLayerFile(layerDir, names) {
   return names.map((name) => path.join(layerDir, name)).find((file) => fs.existsSync(file));
 }
 
-function artworkStats(image, alphaThreshold) {
+export function artworkStats(image, alphaThreshold, skinImage = null) {
   let left = image.width;
   let top = image.height;
   let right = 0;
   let bottom = 0;
   let visiblePixels = 0;
-  let brightPixels = 0;
+
   for (let y = 0; y < image.height; y += 1) {
     for (let x = 0; x < image.width; x += 1) {
       const index = (y * image.width + x) * 4;
@@ -48,17 +48,38 @@ function artworkStats(image, alphaThreshold) {
       top = Math.min(top, y);
       right = Math.max(right, x + 1);
       bottom = Math.max(bottom, y + 1);
-      const luminance = (image.data[index] * 299 + image.data[index + 1] * 587 + image.data[index + 2] * 114) / 1000;
-      if (luminance > 235) brightPixels += 1;
+
     }
   }
   if (!visiblePixels) return { bbox: null, visiblePixels: 0, fillRatio: null, brightPixelRatio: null };
   const bboxPixels = (right - left) * (bottom - top);
+  const samples = [];
+  const luminance = (data, i) => (data[i]*299 + data[i+1]*587 + data[i+2]*114)/1000;
+  if (skinImage) {
+    for (let y = Math.max(0, top-20); y < Math.min(skinImage.height, bottom+20); y++) {
+      for (let x = Math.max(0, left-20); x < Math.min(skinImage.width, right+20); x++) {
+        const distance = Math.max(left-x, x-right+1, top-y, y-bottom+1, 0);
+        const i = (y*skinImage.width+x)*4;
+        if (distance >= 8 && distance <= 20 && skinImage.data[i+3] >= 200) samples.push(luminance(skinImage.data,i));
+      }
+    }
+  }
+  samples.sort((a,b) => a-b);
+  const middle = Math.floor(samples.length/2);
+  const skin = samples.length ? (samples[middle] + samples[Math.floor((samples.length-1)/2)])/2 : null;
+  // Measure only opaque highlights relative to local skin; preserve contrast on dark skin.
+  const difference = skin === null ? null : Math.max(8, (255-skin)*0.2);
+  let brightPixels = 0;
+  for (let i=0; i<image.data.length; i+=4) {
+    if (image.data[i+3] >= 200 && image.data[i+3] > alphaThreshold && skin !== null && luminance(image.data,i) > skin+difference) brightPixels++;
+  }
   return {
     bbox: [left, top, right, bottom],
     visiblePixels,
     fillRatio: Number((visiblePixels / bboxPixels).toFixed(4)),
-    brightPixelRatio: Number((brightPixels / visiblePixels).toFixed(4)),
+    brightPixelRatio: skin === null ? null : Number((brightPixels / visiblePixels).toFixed(4)),
+    skinRingLuminance: skin, skinRingPixels: samples.length, brightPixels,
+    minimumBrightAlpha: 200, minimumLuminanceDifference: difference,
   };
 }
 
@@ -116,9 +137,10 @@ function overlayExpressionQuality(layerDir, definition, quality) {
 function mouthArtworkQuality(layerDir, canvasWidth, canvasHeight, quality) {
   const mouthOpenFile = findLayerFile(layerDir, mouthDefinition.sources);
   const mouthCloseFile = findLayerFile(layerDir, mouthReference.sources);
-  const open = mouthOpenFile ? artworkStats(readPngRgba(mouthOpenFile), quality.alphaThreshold) : null;
-  const close = mouthCloseFile ? artworkStats(readPngRgba(mouthCloseFile), quality.alphaThreshold) : null;
   const faceFile = findLayerFile(layerDir, ['face.png']);
+  const skin = faceFile ? readPngRgba(faceFile) : null;
+  const open = mouthOpenFile ? artworkStats(readPngRgba(mouthOpenFile), quality.alphaThreshold, skin) : null;
+  const close = mouthCloseFile ? artworkStats(readPngRgba(mouthCloseFile), quality.alphaThreshold, skin) : null;
   const face = faceFile ? artworkStats(readPngRgba(faceFile), quality.alphaThreshold) : null;
   const faceWidth = face?.bbox ? face.bbox[2] - face.bbox[0] : 0;
   const faceHeight = face?.bbox ? face.bbox[3] - face.bbox[1] : 0;
@@ -145,6 +167,7 @@ function mouthArtworkQuality(layerDir, canvasWidth, canvasHeight, quality) {
       closedMouthIsLineArtwork: Boolean(close && close.fillRatio <= quality.mouthCloseMaxFillRatio),
       noBrightMouthFill: Boolean(
         close && open
+        && close.brightPixelRatio !== null && open.brightPixelRatio !== null
         && close.brightPixelRatio <= quality.mouthMaxBrightPixelRatio
         && open.brightPixelRatio <= quality.mouthMaxBrightPixelRatio
       ),
@@ -274,10 +297,11 @@ export function runQa({ psdFile, layerDir, buildReportFile, reportFile }) {
     productionExpressions: build.missingProduction.length === 0 && build.placeholders.length === 0 && (build.previewExpressions || []).length === 0,
     expressionRegistration: Object.values(registration.checks).every(Boolean),
     expressionArtwork: Object.values(mouthArtwork.checks).every(Boolean),
+    expressionImportWithinDefaults: !Object.values(build.expressionImportReview || {}).some(item => item.requiresReview),
   };
-  const blockingChecks = Object.fromEntries(Object.entries(checks).filter(([name]) => !['productionExpressions', 'expressionRegistration', 'expressionArtwork'].includes(name)));
+  const blockingChecks = Object.fromEntries(Object.entries(checks).filter(([name]) => !['productionExpressions', 'expressionRegistration', 'expressionArtwork', 'expressionImportWithinDefaults'].includes(name)));
   const structuralPass = Object.values(blockingChecks).every(Boolean);
-  const productionReady = structuralPass && checks.productionExpressions && checks.expressionRegistration && checks.expressionArtwork;
+  const productionReady = structuralPass && checks.productionExpressions && checks.expressionRegistration && checks.expressionArtwork && checks.expressionImportWithinDefaults;
   const report = {
     schemaVersion: 1,
     psd: relativeProjectPath(psdFile),
@@ -287,6 +311,7 @@ export function runQa({ psdFile, layerDir, buildReportFile, reportFile }) {
     structuralPass,
     productionReady,
     previewExpressions: build.previewExpressions || [],
+    expressionImportReview: build.expressionImportReview || {},
     registration,
     mouthArtwork,
     limitations: [
