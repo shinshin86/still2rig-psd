@@ -10,11 +10,11 @@ export const expressionPartCases = [
 export const expressionTransitionPairs = [['neutral','joy'],['joy','neutral'],['neutral','shy'],['shy','neutral'],['neutral','angry'],['angry','neutral'],['neutral','sad'],['sad','neutral'],['neutral','surprised'],['surprised','neutral'],['neutral','flustered'],['flustered','neutral'],['neutral','unamused'],['unamused','neutral'],['neutral','wink'],['wink','neutral'],['joy','angry'],['sad','surprised'],['wink','joy'],['unamused','surprised']];
 
 /** Official renderer captures, shared by motion QA and close-up inspection. */
-export async function captureExpressionSet({ page, capture, parts, settleMs = 350, partSteps = 20, pairs = expressionTransitionPairs, cases = expressionPartCases }) {
+export async function captureExpressionSet({ page, capture, parts, settleMs = 350, partSteps = 20, pairs = expressionTransitionPairs, cases = expressionPartCases, settle = ms => page.waitForTimeout(ms) }) {
   const base = expressionPresetValues('neutral', parts), captures = {};
   const state = async (values, eye = 1, waitMs = settleMs) => {
     await page.evaluate(({ values, eye }) => window.rigQa.setState(eye, 0, values), { values: { ...base, ...values }, eye });
-    await page.waitForTimeout(waitMs);
+    await settle(waitMs);
   };
   for (const item of cases) {
     const name = `part-${item.id}`; captures[name] = [];

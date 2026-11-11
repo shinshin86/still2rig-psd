@@ -1,6 +1,6 @@
 ---
 name: still2rig-psd
-description: Convert a user-provided static anime character image into a verified rig-ready PSD by coordinating the Still2Rig PSD local job CLI with a user-approved Google Colab session through Colab MCP Go. Use for Still2Rig PSD conversion, repair, import, or QA requests; do not use for unrelated PSD editing or general browser automation.
+description: Convert a user-provided static anime character image into a verified rig-ready PSD by coordinating the Still2Rig PSD local job CLI with a user-approved Google Colab session through Colab MCP Go, or with Codex image generation instead of See-through. Use for Still2Rig PSD conversion, repair, import, or QA requests; do not use for unrelated PSD editing or general browser automation.
 ---
 
 # Still2Rig PSD
@@ -16,6 +16,89 @@ cells. Run commands from the repository root.
 2. Run `npm run still2rig-psd -- prepare <image> [--name <job>]`.
 3. Confirm the copied input hash in `.still2rig-psd/jobs/<job>/job.json` before any
    remote execution.
+
+There are two routes after `prepare`. Use See-through (the Colab sections
+below) unless the user asks for Codex image generation or for a PSD without
+See-through. Then follow "Codex image generation route" instead and skip the
+Colab sections.
+
+## Codex image generation route (no See-through)
+
+This route splits the image by comparing it with drawings from Codex's built-in
+image generation. It needs no Colab or GPU. Only an agent that can call Codex
+imagegen can run it.
+
+Consent: every stage sends the source image or a crop of it to Codex imagegen.
+Explain this once and get approval before the first generation, unless the
+request already states that the user agreed to Codex image generation. The
+approval covers Codex imagegen only. Preparing request files sends nothing.
+
+Below, `R` is `.still2rig-psd/jobs/<job>`. For every generation, send the
+request's `input.png` (and `mask.png` when present) with its `prompt.txt`
+unchanged. Register the untouched result with `split-result`. Never edit a
+generated image or write a per-image fix script.
+
+1. Look at the source and write sparse landmarks as JSON, `schemaVersion: 1`,
+   with `canvas` equal to the image size. Required keys: `eyes`, `brows`, `ears`
+   (two boxes each, listed left to right), `mouth` and `nose` (boxes),
+   `chin` and `hairPart` (points), `bangTips` (2–6 points) and `collar`
+   (3 points), all left to right. A box is `{center: [x, y], width, height}`.
+   Add `accessories: [{layer: "eyewear" | "headwear", box}]` for glasses and
+   hats; put other props in the nearest layer from `configs/layer-map.json`,
+   and ask before adding a layer.
+2. Run `split-landmarks <job> --landmarks FILE`, then open `R/split/landmarks.png`
+   and check every mark before continuing.
+3. Run `split-auto <job>`. It prepares the first request in
+   `R/split/requests/without-front-hair/`. Check that the square crop does not
+   cut through hair tips.
+4. Generate the image without front hair, glasses and hats (P1). Register and
+   check it:
+
+   ```bash
+   npm run still2rig-psd -- split-result <job> --stage p1 --image RESULT
+   npm run still2rig-psd -- split-import <job>
+   npm run still2rig-psd -- import <job> R/split/bundle.zip
+   ```
+
+5. For each stage `p2` (all hair removed), `p3` (hidden back hair),
+   `ownership` (visible-part color map) and `face-parts` (eye, brow, nose and
+   mouth color map), run `split-requests <job> --stage STAGE`, generate from the
+   request in `R/split/generated/STAGE/`, then run
+   `split-result <job> --stage STAGE --image RESULT`.
+6. Build and check the layers, then assemble the first PSD:
+
+   ```bash
+   npm run still2rig-psd -- split-peel-preview <job> --p1 R/split/results/without-front-hair.png \
+     --p2 R/split/generated/p2/result.png --request-dir R/split --p1-check R/split/generation-check.json \
+     --ownership R/split/generated/ownership/result.png --ownership-request R/split/generated/ownership/request.json \
+     --p3 R/split/generated/p3/result.png --p3-request R/split/generated/p3/request.json --refine-ownership
+   npm run still2rig-psd -- split-rig-layers <job> --candidate R/ownership-refined-preview
+   npm run still2rig-psd -- finalize <job> --layer-overrides R/ownership-rig/layers
+   ```
+
+   `split-peel-preview` uses the registered face-parts map and the generated
+   face by default. Pass `--face-source original` only when the user wants
+   the original face kept exactly.
+7. Make the expressions:
+   - Run `expression-requests <job> --only eye_close,mouth_open`. If it asks for
+     a closed mouth first, follow "Image-generated expressions" below for
+     `mouth_close`.
+   - Register each result with `split-result <job> --stage eye_close|mouth_open --image RESULT`.
+   - Run `import-expressions <job> --only eye_close,mouth_open --read-only`.
+     When the checks pass, run it again without `--read-only`.
+   - Rebuild with
+     `repair <job> --layer-overrides R/ownership-rig/layers --expressions R/generated-expressions`.
+8. Run `motion-qa <job>` and inspect the preview. Report as described in
+   "Completion report".
+
+Budget and stops: the CLI records every call in `R/split/generations.json`.
+It refuses a 13th registration, and a typical image uses 7–8. Each result must
+pass its import checks; never loosen a threshold. If a stage fails twice, or a
+check rejects a result that looks right, stop and report the cause and options.
+Outside the face, the stacked layers must match the source (white background,
+at most 1/255 difference, nothing missing or added). The generated face may
+differ only inside the declared face area. Report the small remaining edge
+differences honestly.
 
 ## Colab consent boundary
 

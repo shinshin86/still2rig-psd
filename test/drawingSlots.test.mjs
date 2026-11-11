@@ -40,7 +40,7 @@ test('interrupted presets keep one eye drawing per side and one mouth at 30 fps'
   assert.ok(seen.L.has('angry'));assert.ok(seen.R.has('angry'));
 });
 
-test('eye slot restores the displayed drawing and allows only the blink exception', () => {
+test('eye slot restores the displayed drawing and switches exclusively to the closed drawing', () => {
   const slot=createEyeDrawingSlot();slot.resolve(0,1);slot.setState(slot.getState());
   assert.equal(slot.getState(),'angry');
   for(const open of [0,.05,.5,.95,1]) {
@@ -54,6 +54,18 @@ test('eye slot restores the displayed drawing and allows only the blink exceptio
   }
   slot.resolve(1,0);assert.equal(slot.getState(),'smile');
   slot.resolve(0,0);assert.equal(slot.getState(),'neutral');
+});
+
+test('a synthetic open and closed eye image never contributes both drawings to a pixel', () => {
+  const openPixels = [255, 255, 0];
+  const closedPixels = [0, 255, 255];
+  for (const openness of [...Array.from({length: 21}, (_, i) => i / 20), 0.12, 0.120001]) {
+    const blink = drawnBlinkOpacity(openness);
+    const openAlpha = eyeDrawingAlpha('eyeOpen', 'eyelash', 'neutral', blink, 1);
+    const closedAlpha = eyeDrawingAlpha('eyeClose', 'eye_close', 'neutral', blink, 0.5);
+    const image = openPixels.map((pixel, i) => pixel * openAlpha + closedPixels[i] * closedAlpha);
+    assert.deepEqual(image, openness > 0.12 ? openPixels : closedPixels);
+  }
 });
 
 test('blink freezes an interrupted transition and commits the latest request at closure', () => {

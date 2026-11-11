@@ -53,6 +53,28 @@ test('valid closed mouth keeps the default request pair and only explicit redos 
  ok('expression-requests',f.id,'--only','mouth_close');assert.deepEqual(Object.keys(JSON.parse(fs.readFileSync(path.join(f.requests,'requests.json'))).variants),['mouth_close']);
 });
 
+test('an explicit existing-mouth decision records failed quality without changing the PSD or defaults',()=>{
+ const f=fixture('open'),first=ok('expression-requests',f.id);
+ const psd=path.join(f.jobRoot,'output',`${f.id}.psd`),before=fs.readFileSync(psd);
+ assert.equal(first.stage,'closed-mouth');assert.equal(first.closedMouth.usable,false);
+ const missingReason=run('expression-requests',f.id,'--keep-closed-mouth');
+ assert.notEqual(missingReason.status,0);assert.match(missingReason.stderr,/requires --review-note/);
+ const continued=ok('expression-requests',f.id,'--only','eye_close,mouth_open','--keep-closed-mouth','--review-note','Approved existing drawing for this preview; quality remains failed.');
+ assert.equal(continued.stage,'expressions');assert.deepEqual(continued.closedMouth,first.closedMouth);
+ assert.equal(continued.closedMouthReuse.qualityChecksPassed,false);
+ assert.equal(continued.closedMouthReuse.qualityCriteriaUnchanged,true);
+ const request=JSON.parse(fs.readFileSync(path.join(f.requests,'requests.json')));
+ assert.deepEqual(Object.keys(request.variants),['eye_close','mouth_open']);
+ assert.deepEqual(request.closedMouthReuse,continued.closedMouthReuse);
+ assert.deepEqual(fs.readFileSync(psd),before);
+ assert.equal(ok('expression-requests',f.id).stage,'closed-mouth');
+});
+
+test('retaining an existing mouth cannot invent missing mouth artwork',()=>{
+ const f=fixture('missing'),result=run('expression-requests',f.id,'--only','eye_close,mouth_open','--keep-closed-mouth','--review-note','Retain the current drawing.');
+ assert.notEqual(result.status,0);assert.match(result.stderr,/Cannot keep missing/);
+});
+
 test('non-mouth drawings can be prepared without mouth ink and a closed-only repair has no resume step',()=>{
  const f=fixture('missing'),request=ok('expression-requests',f.id,'--only','eye_close,blush');
  assert.equal(request.stage,'expressions');assert.equal(request.closedMouth.usable,false);

@@ -30,6 +30,7 @@
     'earwear':     { depth: 0.97, group: 'head' },
     'ears':        { depth: 0.96, group: 'head' },
     'face':        { depth: 1.00, group: 'head' },
+    'eyewear':     { depth: 1.00, group: 'head' },
     'blush':       { depth: 1.03, group: 'head', fade: 'blush' },
     'tears':       { depth: 1.12, group: 'head', split: true, fade: 'tears' },
     'sweat':       { depth: 1.30, group: 'head', fade: 'sweat' },

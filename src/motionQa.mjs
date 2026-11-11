@@ -15,6 +15,8 @@ export const SILHOUETTE_EROSION_PX = 8;
 export const TRACK_RADIUS_PX = 36;
 export const HAIR_SEAM_MARGIN_PX = 16;
 export const FRAME_MARGIN_PX = 4;
+export const FIXED_FEATURE_MINIMUM_VISIBLE_RATIO = 0.5;
+export const FIXED_FEATURE_MINIMUM_VISIBLE_PIXELS = 64;
 
 export function loadMotionContract() {
   return JSON.parse(fs.readFileSync(path.join(PROJECT_ROOT, 'configs', 'motion-qa-contract.json'), 'utf8'));
@@ -204,7 +206,8 @@ function patchCost(refLum, frameLum, width, box, dx, dy, step) {
 
 /**
  * Find where the reference patch `box` moved to in `frame` (SSD on luminance,
- * coarse-to-fine). Returns the displacement in pixels.
+ * full native-pixel search). Sparse coarse samples can miss a thin lip entirely.
+ * Status is explicit for flat/lost patches and equally good distant matches.
  */
 export function trackPatch(reference, frame, box, radius = TRACK_RADIUS_PX, cache = new Map()) {
   const width = reference.width;
@@ -215,24 +218,26 @@ export function trackPatch(reference, frame, box, radius = TRACK_RADIUS_PX, cach
   cache.set(frame, frameLum);
   const inBounds = (dx, dy) => box.x0 + dx >= 0 && box.x1 + dx <= width && box.y0 + dy >= 0 && box.y1 + dy <= height;
   let best = { dx: 0, dy: 0, cost: Infinity };
-  for (let dy = -radius; dy <= radius; dy += 3) {
-    for (let dx = -radius; dx <= radius; dx += 3) {
-      if (!inBounds(dx, dy)) continue;
-      const cost = patchCost(refLum, frameLum, width, box, dx, dy, 2);
-      if (cost < best.cost) best = { dx, dy, cost };
-    }
+  const candidates = [];
+  let low = Infinity, high = -Infinity;
+  for (let y = box.y0; y < box.y1; y++) for (let x = box.x0; x < box.x1; x++) {
+    const value = refLum[y * width + x]; low = Math.min(low, value); high = Math.max(high, value);
   }
-  // Refine at full resolution; coarse costs used a sparser sample, so restart.
-  const coarse = best;
-  best = { dx: coarse.dx, dy: coarse.dy, cost: Infinity };
-  for (let dy = coarse.dy - 3; dy <= coarse.dy + 3; dy += 1) {
-    for (let dx = coarse.dx - 3; dx <= coarse.dx + 3; dx += 1) {
+  for (let dy = -radius; dy <= radius; dy += 1) {
+    for (let dx = -radius; dx <= radius; dx += 1) {
       if (!inBounds(dx, dy)) continue;
       const cost = patchCost(refLum, frameLum, width, box, dx, dy, 1);
+      candidates.push({ dx, dy, cost });
       if (cost < best.cost) best = { dx, dy, cost };
     }
   }
-  return best;
+  const alternative = candidates.filter(c => Math.hypot(c.dx - best.dx, c.dy - best.dy) > 2)
+    .reduce((value, c) => Math.min(value, c.cost), Infinity);
+  const lost = !Number.isFinite(best.cost) || high - low <= 1;
+  const ambiguous = alternative - best.cost <= Math.max(1e-8, best.cost * 1e-6);
+  return { ...best, status: lost ? 'lost' : ambiguous ? 'ambiguous' : 'matched',
+    alternativeCost: Number.isFinite(alternative) ? alternative : null,
+    costMargin: Number.isFinite(alternative) ? alternative - best.cost : null, luminanceRange: high - low };
 }
 
 function center(box) {
@@ -279,9 +284,10 @@ export function featureBoxes(anchors, width, height) {
 function locateFeatures(reference, frame, boxes, cache) {
   const out = {};
   for (const [name, box] of Object.entries(boxes)) {
-    const { dx, dy } = trackPatch(reference, frame, box, TRACK_RADIUS_PX, cache);
+    const match = trackPatch(reference, frame, box, TRACK_RADIUS_PX, cache);
+    const { dx, dy } = match;
     const c = center(box);
-    out[name] = { x: c.x + dx, y: c.y + dy };
+    out[name] = { x: c.x + dx, y: c.y + dy, ...match };
   }
   return out;
 }
@@ -293,6 +299,33 @@ function frameOf(capture, label) {
 }
 
 const round = (value, digits = 3) => Number(value.toFixed(digits));
+
+/** Compare entire feature rectangles in the isolated face pass. Moving foreground
+ * hair/accessories are absent, not masked out of the measurement. Missing/empty
+ * face captures cannot establish a vacuous PASS; alpha only validates support.
+ */
+export function fixedFeatureComparison(neutral, frame, anchors) {
+  const validFrames = Boolean(neutral && frame && neutral.width === frame.width && neutral.height === frame.height);
+  if (!validFrames) return { measurable: false, maePercent: null, regions: {}, reason: 'missing-face-inspection-frame' };
+  const { width, height } = neutral;
+  const boxes = { eyeL: padBox(anchors.eyeL, 6, width, height),
+    eyeR: padBox(anchors.eyeR, 6, width, height), mouth: padBox(anchors.mouth, 10, width, height) };
+  const regionMask = new Uint8Array(width * height), regions = {};
+  for (const [name, box] of Object.entries(boxes)) {
+    let total = 0, count = 0;
+    for (let y = box.y0; y < box.y1; y++) for (let x = box.x0; x < box.x1; x++) {
+      const i = y * width + x; total++;
+      regionMask[i] = 1;
+      if (neutral.data[i * 4 + 3] > 16 && frame.data[i * 4 + 3] > 16) count++;
+    }
+    regions[name] = { totalPixels: total, faceSupportPixels: count, comparedPixels: total,
+      faceSupportRatio: total ? count / total : 0,
+      measurable: count >= FIXED_FEATURE_MINIMUM_VISIBLE_PIXELS && count >= total * FIXED_FEATURE_MINIMUM_VISIBLE_RATIO };
+  }
+  const measurable = Object.values(regions).every(r => r.measurable);
+  return { measurable, maePercent: measurable ? maePercent(neutral, frame, regionMask) : null, regions,
+    reason: !measurable ? 'insufficient-face-render-support' : null };
+}
 
 /**
  * Evaluate captured frames against the contract.
@@ -341,18 +374,16 @@ export function evaluateMotionQa({ reference, captures, hairTipMask, visibleHair
 
   // Hair physics only: hair tips move while fixed facial features stay put.
   const neutral = captures.neutral[0].frame;
-  const featureMask = boxMask(width, height, [
-    padBox(anchors.eyeL, 6, width, height),
-    padBox(anchors.eyeR, 6, width, height),
-    padBox(anchors.mouth, 10, width, height),
-  ]);
   let tipTotal = 0;
   for (const value of hairTipMask) tipTotal += value;
   let hairTipChangeRatio = 0;
   let fixedFeatureMae = 0;
-  for (const { frame } of captures['hair-physics-only']) {
+  const fixedFeatureFrames = [];
+  for (const { label, frame, faceInspection } of captures['hair-physics-only']) {
     if (tipTotal) hairTipChangeRatio = Math.max(hairTipChangeRatio, changedPixels(neutral, frame, hairTipMask) / tipTotal);
-    fixedFeatureMae = Math.max(fixedFeatureMae, maePercent(neutral, frame, featureMask));
+    const comparison = fixedFeatureComparison(captures.neutral[0].faceInspection, faceInspection, anchors);
+    fixedFeatureFrames.push({ label, ...comparison });
+    if (comparison.measurable) fixedFeatureMae = Math.max(fixedFeatureMae, comparison.maePercent);
   }
 
   // Feature layout stability against the reference registration.
@@ -362,12 +393,20 @@ export function evaluateMotionQa({ reference, captures, hairTipMask, visibleHair
   let leftRightEyeResidual = 0;
   let mouthToEyesResidual = 0;
   const residualFrames = [];
+  const trackingFailures = [];
+  const recordFailures = (features, capture, label) => {
+    for (const [feature, match] of Object.entries(features)) if (match.status !== 'matched')
+      trackingFailures.push({ capture, label, feature, status: match.status, cost: match.cost, costMargin: match.costMargin });
+  };
+  recordFailures(referenceFeatures, 'reference', 'neutral');
   for (const name of ['neutral', 'hair-physics-only', 'full-body-idle', 'drag-inertia']) {
     for (const { label, frame } of captures[name]) {
-      const residual = featureResiduals(referenceFeatures, locateFeatures(reference.frame, frame, boxes, cache));
+      const features = locateFeatures(reference.frame, frame, boxes, cache);
+      recordFailures(features, name, label);
+      const residual = featureResiduals(referenceFeatures, features);
       leftRightEyeResidual = Math.max(leftRightEyeResidual, residual.leftRightEyePx);
       mouthToEyesResidual = Math.max(mouthToEyesResidual, residual.mouthToEyesPx);
-      residualFrames.push({ capture: name, label, ...Object.fromEntries(Object.entries(residual).map(([k, v]) => [k, round(v)])) });
+      residualFrames.push({ capture: name, label, features, ...Object.fromEntries(Object.entries(residual).map(([k, v]) => [k, round(v)])) });
     }
     for (const { frame } of captures[name]) cache.delete(frame);
   }
@@ -393,7 +432,7 @@ export function evaluateMotionQa({ reference, captures, hairTipMask, visibleHair
     mouthChangedPixels: mouthChanged,
     nonMouthMaePercent: round(nonMouthMae, 4),
     hairTipChangeRatio: round(hairTipChangeRatio, 5),
-    fixedFeatureMaePercent: round(fixedFeatureMae, 4),
+    fixedFeatureMaePercent: fixedFeatureFrames.every(f => f.measurable) ? round(fixedFeatureMae, 4) : null,
     leftRightEyeRelativeResidualPx: round(leftRightEyeResidual),
     mouthToEyesRelativeResidualPx: round(mouthToEyesResidual),
     unexpectedSeamPixels: unexpectedSeams,
@@ -403,9 +442,11 @@ export function evaluateMotionQa({ reference, captures, hairTipMask, visibleHair
     nonEyeMae: nonEyeMae <= t.nonEyeMaeMaximum,
     mouthChangedPixels: mouthChanged >= t.mouthChangedPixelsMinimum,
     hairTipChangeRatio: hairTipChangeRatio >= t.hairTipChangeRatioMinimum,
-    fixedFeatureMae: fixedFeatureMae <= t.fixedFeatureMaeMaximum,
-    leftRightEyeRelativeResidual: leftRightEyeResidual <= t.leftRightEyeRelativeResidualPxMaximum,
-    mouthToEyesRelativeResidual: mouthToEyesResidual <= t.mouthToEyesRelativeResidualPxMaximum,
+    fixedFeatureMeasurable: fixedFeatureFrames.every(f => f.measurable),
+    fixedFeatureMae: fixedFeatureFrames.every(f => f.measurable) && fixedFeatureMae <= t.fixedFeatureMaeMaximum,
+    featureTracking: trackingFailures.length === 0,
+    leftRightEyeRelativeResidual: !trackingFailures.some(f => f.feature !== 'mouth') && leftRightEyeResidual <= t.leftRightEyeRelativeResidualPxMaximum,
+    mouthToEyesRelativeResidual: trackingFailures.length === 0 && mouthToEyesResidual <= t.mouthToEyesRelativeResidualPxMaximum,
     unexpectedSeamPixels: unexpectedSeams <= t.unexpectedSeamPixelsMaximum,
   };
   const expressions = evaluateExpressionCaptures(captures, expressionMasks);
@@ -417,7 +458,9 @@ export function evaluateMotionQa({ reference, captures, hairTipMask, visibleHair
     metrics,
     checks,
     thresholds: t,
-    details: { seamByCapture, residualFrames, hairTipPixels: tipTotal, expressions: expressions.metrics },
+    details: { seamByCapture, residualFrames, trackingFailures, fixedFeatureFrames,
+      fixedFeatureSupport: { minimumFaceSupportRatio: FIXED_FEATURE_MINIMUM_VISIBLE_RATIO, minimumFaceSupportPixels: FIXED_FEATURE_MINIMUM_VISIBLE_PIXELS, supportAlphaAbove: 16, pixelExclusion: false },
+      hairTipPixels: tipTotal, expressions: expressions.metrics },
     units: {
       mae: 'percent of full RGB scale (0-100)',
       changedPixels: `pixels whose max channel delta exceeds ${CHANGE_THRESHOLD}`,

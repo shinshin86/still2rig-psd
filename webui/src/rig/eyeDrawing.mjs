@@ -49,14 +49,14 @@ export function createEyeDrawingSlot(initial = 'neutral') {
   };
 }
 
-/** All layers of a drawing share the slot; only blink closure may overlap it. */
+/** All layers of an eye share one drawing at each blink state. */
 export function eyeDrawingAlpha(fade, baseName, drawing, blink, fallback) {
   const drawn = drawnEyeDefinitions.find(def=>def.parameter===fade);
   if (drawn) return drawing === drawn.drawing ? blink.open : 0;
   // Smiling eyes are already closed arcs, so a blink leaves them unchanged.
   if (fade === 'eyeSmile') return drawing === 'smile' ? 1 : 0;
   if (fade === 'eyeOpen') return drawing === 'neutral' ? fallback * blink.open : 0;
-  if (fade === 'eyeClose') return drawing === 'neutral' ? Math.max(fallback,blink.closed) : drawing === 'smile' ? 0 : blink.closed;
+  if (fade === 'eyeClose') return drawing === 'smile' ? 0 : blink.closed;
   if (baseName === 'eyebrow' && drawnEyeDefinitions.some(def=>def.drawing===drawing)) return blink.closed;
   return fallback;
 }

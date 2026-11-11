@@ -82,6 +82,7 @@ def main():
     image.save(args.output / "front hair.png")
     if args.hair_over_eyes:
         save_rect(args.output, "headwear.png", (20, 5, 76, 38), (10, 240, 10, 255))
+        save_rect(args.output, "eyewear.png", (32, 29, 64, 42), (240, 10, 240, 255))
     if args.collar_source:
         # The neck layer reaches y=78, but the source shows the collar from y=72 down.
         source = layer()

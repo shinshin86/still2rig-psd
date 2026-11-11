@@ -1,4 +1,6 @@
+import { captureModelFrame } from './motion-capture.mjs';
 import { captureExpressionSet } from './expression-set-captures.mjs';
+import { installFixedMotionClock, advanceMotionClock } from './fixed-motion-clock.mjs';
 // Renderer adapter for configs/motion-qa-contract.json.
 //
 // Loads a PSD into the built-in preview renderer, records every required
@@ -66,12 +68,23 @@ async function startServer(port, jobsRoot) {
   throw new Error(`Preview server did not start.\n${log}`);
 }
 
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
 async function loadPsd(page, file) {
-  await page.evaluate(() => { if (window.rigQa) window.rigQa.ready = false; });
+  await page.evaluate(() => {
+    if (window.rigQa) window.rigQa.ready = false;
+    globalThis.__motionQaClock.resetRandom();
+  });
   await page.setInputFiles('#psd-file-input', file);
-  await page.waitForFunction(() => window.rigQa?.ready === true || window.rigQa?.error, null, { timeout: 60_000 });
+  let ready = false;
+  for (let attempt = 0; attempt < 1200; attempt++) {
+    ready = await page.evaluate(() => {
+      globalThis.__motionQaClock.flush();
+      return window.rigQa?.ready === true || Boolean(window.rigQa?.error);
+    });
+    if (ready) break;
+    // Readiness polling is wall time only; the renderer's clock stays frozen.
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+  if (!ready) throw new Error(`Renderer load timed out: ${path.basename(file)}`);
   const error = await page.evaluate(() => window.rigQa.error);
   if (error) throw new Error(`Renderer could not load ${path.basename(file)}: ${error}`);
   await page.evaluate(() => {
@@ -80,8 +93,9 @@ async function loadPsd(page, file) {
     window.rigQa.setBackground('solid');
     window.rigQa.setViewTransform(0, 0, 1);
     window.rigQa.setState(1, 0);
+    window.rigQa.setFaceInspectionCapture(true);
   });
-  await sleep(800);
+  await advanceMotionClock(page, 800);
   return page.evaluate(() => ({
     anchors: window.rigQa.anchors,
     summary: window.rigQa.summary,
@@ -121,26 +135,27 @@ async function main() {
 
     // Size the page so the canvas element screenshot is exactly model scale.
     const probe = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+    await probe.addInitScript(installFixedMotionClock);
     await probe.goto(`${baseUrl}/?autoload=0`, { waitUntil: 'domcontentloaded' });
     const probeInfo = await loadPsd(probe, referencePsd);
     const cssWidth = await probe.evaluate(() => document.querySelector('#rig-canvas').getBoundingClientRect().width);
     await probe.close();
     const deviceScaleFactor = probeInfo.canvas.width / cssWidth;
     const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor });
+    await page.addInitScript(installFixedMotionClock);
     const consoleErrors = [];
     page.on('console', (message) => { if (message.type() === 'error') consoleErrors.push(message.text()); });
     await page.goto(`${baseUrl}/?autoload=0`, { waitUntil: 'domcontentloaded' });
+    const sleep = milliseconds => advanceMotionClock(page, milliseconds);
 
     const canvas = page.locator('#rig-canvas');
+    const nativeCapture = probeInfo.canvas.width !== probeInfo.canvas.height;
     let frameCounter = 0;
     const mouthStates = [];
+    const faceInspectionCaptures = {};
     const capture = async (name, label) => {
       // Clip to an integer-aligned CSS box so the capture is exactly model scale.
-      const rect = await canvas.boundingBox();
-      const buffer = await page.screenshot({
-        animations: 'allow',
-        clip: { x: Math.round(rect.x), y: Math.round(rect.y), width: cssWidth, height: cssWidth },
-      });
+      const buffer = await captureModelFrame(page, canvas, cssWidth, nativeCapture);
       const frame = decodePngRgba(buffer, `${name}-${label}.png`);
       if (frame.width !== probeInfo.canvas.width || frame.height !== probeInfo.canvas.height) {
         throw new Error(`Capture is ${frame.width}x${frame.height}, expected ${probeInfo.canvas.width}x${probeInfo.canvas.height}.`);
@@ -150,7 +165,23 @@ async function main() {
       frameCounter += 1;
       const file = path.join(framesDir, `${String(frameCounter).padStart(3, '0')}-${name}-${label}.png`);
       await fs.writeFile(file, buffer);
-      return { label, frame, file: path.relative(outDir, file) };
+      let faceInspection;
+      if (['reference', 'neutral', 'hair-physics-only'].includes(name)) {
+        const png = Buffer.from(await page.evaluate(() => {
+          const coverage = window.rigQa.getFaceInspectionFrame();
+          if (!coverage) throw new Error('Missing face inspection frame.');
+          const canvas = document.createElement('canvas');
+          canvas.width = coverage.width; canvas.height = coverage.height;
+          canvas.getContext('2d').putImageData(new ImageData(coverage.data, coverage.width, coverage.height), 0, 0);
+          return canvas.toDataURL('image/png').split(',')[1];
+        }), 'base64');
+        faceInspection = decodePngRgba(png, 'face-inspection');
+        const maskFile = path.join(outDir, 'face-inspection', path.basename(file));
+        await fs.mkdir(path.dirname(maskFile), { recursive: true });
+        await fs.writeFile(maskFile, png);
+        (faceInspectionCaptures[name] ??= []).push({ label, file: path.relative(outDir, maskFile) });
+      }
+      return { label, frame, file: path.relative(outDir, file), faceInspection };
     };
 
     const reference = await loadPsd(page, referencePsd);
@@ -238,12 +269,14 @@ async function main() {
     await page.mouse.move(startX, startY);
     await page.mouse.down();
     for (let step = 1; step <= 8; step += 1) {
-      await page.mouse.move(startX + step * 18, startY + step * 4);
       await sleep(16);
+      await page.mouse.move(startX + step * 18, startY + step * 4);
     }
     await page.mouse.up();
     // Dragging also pans the view; restore 1:1 while the inertia keeps moving.
     await page.evaluate(() => window.rigQa.setViewTransform(0, 0, 1));
+    // Render the restored view before the first inertia capture.
+    await sleep(1000 / 60);
     const dragMotion = [];
     for (let step = 0; step < 10; step += 1) {
       dragMotion.push(await page.evaluate(() => window.rigQa.getDragMotion()));
@@ -252,8 +285,7 @@ async function main() {
     }
     await setMode('static');
 
-    // Keep the legacy motion sequence before added expression captures: wind
-    // follows elapsed time, so an earlier capture changes its sampled phase.
+    // Keep the motion sequence stable: wind follows the fixed simulation time.
     // Reload to remove drag inertia before checking expression isolation.
     await loadPsd(page, psdFile);
     for (const name of ['tears','sweat','anger_mark','mouth_laugh','mouth_round'].filter(name=>expressionMasks[name])) {
@@ -276,6 +308,7 @@ async function main() {
       captures['mouth-fine-opening'].push(await capture('mouth-fine-opening',`open-${(i/100).toFixed(2)}`));
     }
     Object.assign(captures, await captureExpressionSet({ page, capture,
+      settle: sleep,
       parts: info.summary.partsFound, partSteps: 2, settleMs: 500,
       pairs: [['neutral','joy'],['joy','neutral'],['joy','angry'],['sad','surprised'],['wink','joy'],['unamused','surprised']],
     }));
@@ -299,13 +332,18 @@ async function main() {
     const report = {
       schemaVersion: 1,
       adapter: 'still2rig-psd built-in preview renderer (Playwright, headless Chromium)',
+      captureMode: 'native canvas on solid QA background, fixed simulation clock',
       contract: 'configs/motion-qa-contract.json',
       psd: path.basename(psdFile),
       referencePsd: path.basename(referencePsd),
+      clock: await page.evaluate(() => globalThis.__motionQaClock.snapshot()),
       canvas: info.canvas,
       ...evaluation,
       drag: { peakMotion: Number(dragPeak.toFixed(4)), responded: dragPeak > 0.001, samples: dragMotion },
       captures: Object.fromEntries(Object.entries(captures).map(([name, items]) => [name, items.map((item) => item.file)])),
+      faceInspectionCaptures,
+      fixedFeaturePolicy: 'face/eyes/brows/mouth only; same clock, deformed meshes and resolved mouth; no hair/accessories; compare entire feature rectangles',
+      featureAnchors: reference.anchors,
       consoleErrors,
       mouthStates,
     };

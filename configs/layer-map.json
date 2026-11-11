@@ -31,6 +31,7 @@
     { "source": "eye_close.png", "target": "eye_close", "requiredForProduction": true },
     { "source": "eye_smile.png", "target": "eye_smile", "required": false },
     { "source": "tears.png", "target": "tears", "required": false },
+    { "source": "eyewear.png", "target": "eyewear", "required": false },
     { "source": "front hair.png", "target": "front hair", "required": false },
     { "source": "headwear.png", "target": "headwear", "required": false },
     { "source": "sweat.png", "target": "sweat", "required": false },

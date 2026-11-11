@@ -1,6 +1,29 @@
 """Closed-mouth eligibility and face-relative placement using the QA limits."""
 
 from PIL import Image, ImageDraw
+from statistics import median
+
+
+def mouth_brightness(mouth, face, box, visible_pixels):
+    """Opaque paint above skin by 20% of remaining white headroom (at least 8)."""
+    samples = []
+    if box:
+        x0, y0, x1, y1 = box
+        for y in range(max(0, y0-20), min(face.height, y1+20)):
+            for x in range(max(0, x0-20), min(face.width, x1+20)):
+                distance = max(x0-x, x-x1+1, y0-y, y-y1+1, 0)
+                pixel = face.getpixel((x, y))
+                if 8 <= distance <= 20 and pixel[3] >= 200:
+                    samples.append((pixel[0]*299+pixel[1]*587+pixel[2]*114)/1000)
+    skin = median(samples) if samples else None
+    difference = max(8, (255-skin)*0.2) if skin is not None else None
+    bright = sum(p[3] >= 200 and skin is not None and
+                 (p[0]*299+p[1]*587+p[2]*114)/1000 > skin+difference
+                 for p in mouth.getdata()) if mouth is not None else 0
+    return {"brightPixelRatio": round(bright/visible_pixels, 4) if visible_pixels and skin is not None else None,
+            "skinRingLuminance": skin, "skinRingPixels": len(samples),
+            "brightPixels": bright, "minimumBrightAlpha": 200, "minimumLuminanceDifference": difference}
+
 
 
 def closed_mouth_quality(mouth, face, quality):
@@ -15,7 +38,8 @@ def closed_mouth_quality(mouth, face, quality):
                max(p[0] for p in pixels)+1, max(p[1] for p in pixels)+1]
     count = len(pixels)
     fill = round(count / ((box[2]-box[0])*(box[3]-box[1])), 4) if box else None
-    bright = round(sum((p[2][0]*299+p[2][1]*587+p[2][2]*114)/1000 > 235 for p in pixels)/count, 4) if count else None
+    brightness = mouth_brightness(mouth, face, box, count)
+    bright = brightness["brightPixelRatio"]
     checks = {
         "artworkPresent": count >= quality["minimumComponentPixels"],
         "compactCloseMouth": bool(box and count <= limits["maximumVisiblePixels"]
@@ -24,7 +48,7 @@ def closed_mouth_quality(mouth, face, quality):
         "noBrightMouthFill": bright is not None and bright <= quality["mouthMaxBrightPixelRatio"],
     }
     return {"usable": all(checks.values()), "checks": checks,
-            "artwork": {"bbox": box, "visiblePixels": count, "fillRatio": fill, "brightPixelRatio": bright},
+            "artwork": {"bbox": box, "visiblePixels": count, "fillRatio": fill, **brightness},
             "thresholds": {**limits, "minimumVisiblePixels": quality["minimumComponentPixels"],
                 "maximumFillRatio": quality["mouthCloseMaxFillRatio"], "maximumBrightPixelRatio": quality["mouthMaxBrightPixelRatio"]}}
 

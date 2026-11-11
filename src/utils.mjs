@@ -76,7 +76,7 @@ export function parseOptions(argv) {
       continue;
     }
     const key = token.slice(2);
-    if (['preview-placeholders', 'json', 'negative-fixture', 'no-layer-overrides', 'no-expressions', 'read-only'].includes(key)) {
+    if (['preview-placeholders', 'json', 'negative-fixture', 'no-layer-overrides', 'no-expressions', 'read-only', 'refine-ownership', 'p1-fringe-face', 'keep-closed-mouth', 'reuse-framing', 'renew-request', 'register-adopted-eyes'].includes(key)) {
       options[key] = true;
       continue;
     }

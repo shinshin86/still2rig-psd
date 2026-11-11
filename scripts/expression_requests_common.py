@@ -11,6 +11,18 @@ from render_expression_states import selected_layers
 from expression_definitions import load_expressions
 
 
+def pad_image(image, padding, fill=0):
+    left, top, right, bottom = padding
+    result = Image.new(image.mode, (image.width + left + right, image.height + top + bottom), fill)
+    result.paste(image, (left, top))
+    return result
+
+
+def unpad_request(image, item):
+    left, top, right, bottom = [v * item['scale'] for v in item.get('padding', [0, 0, 0, 0])]
+    return image.crop((left, top, image.width - right, image.height - bottom))
+
+
 def mouth_limits(face: Image.Image, quality: dict) -> dict:
     box = face.getchannel("A").point(lambda value: 255 if value > quality["alphaThreshold"] else 0).getbbox()
     if not box:
@@ -49,7 +61,7 @@ def neutral_layers(layer_dir: Path, layer_map: dict, definitions=None, include_f
     # Expressions must stay independent of hair/accessories animated above them.
     allowed = set(order[:max(order.index(item["name"]) for item in definitions) + 1])
     layers = {name: Image.open(file).convert("RGBA") for name, file in selected
-              if name in allowed and (include_front or name not in ("front hair", "headwear"))}
+              if name in allowed and (include_front or name not in ("front hair", "headwear", "eyewear"))}
     size = next(iter(layers.values())).size
     if any(image.size != size for image in layers.values()):
         raise ValueError("Current PSD layers have different canvas sizes.")

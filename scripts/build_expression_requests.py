@@ -12,11 +12,15 @@ from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
 from expression_definitions import load_expressions
 from expression_masks import alpha_union, cheek_mask, overlay_mask, whole_eye_mask, expand_up, exclude_eye_obstacles, expand_eye_sides
-from expression_requests_common import composite_layers, file_hash, layer_hash, mouth_limits, neutral_layers
+from expression_requests_common import composite_layers, file_hash, layer_hash, mouth_limits, neutral_layers, pad_image
 from closed_mouth import closed_mouth_quality, mouth_support
+from expression_color import mouth_skin_ring
 
 
-def build_requests(job_id: str, layer_dir: Path, layer_map: Path, output_dir: Path, definitions=None, only=None):
+def build_requests(job_id: str, layer_dir: Path, layer_map: Path, output_dir: Path, definitions=None, only=None,
+                   keep_closed_mouth=False, review_note=None, reuse_framing=False):
+    if keep_closed_mouth and (not isinstance(review_note, str) or not review_note.strip()):
+        raise ValueError('Keeping the current closed mouth requires --review-note with the approval reason.')
     mapping = json.loads(layer_map.read_text(encoding="utf-8"))
     definitions = load_expressions(mapping) if definitions is None else definitions
     available = [item for item in definitions if item["prompt"] is not None]
@@ -34,7 +38,10 @@ def build_requests(job_id: str, layer_dir: Path, layer_map: Path, output_dir: Pa
     _, base_layers = neutral_layers(layer_dir, mapping, definitions)
     quality = json.loads((Path(__file__).resolve().parent.parent / "configs" / "default.json").read_text(encoding="utf-8"))["quality"]
     closed = closed_mouth_quality(base_layers.get("mouth_close"), base_layers["face"], quality)
-    needs_closed = not closed["usable"] and any(item["registration"] == "mouth" for item in requested)
+    if keep_closed_mouth and not closed['checks']['artworkPresent']:
+        raise ValueError('Cannot keep missing closed-mouth artwork.')
+    rejected_closed = not closed["usable"] and any(item["registration"] == "mouth" for item in requested)
+    needs_closed = rejected_closed and not keep_closed_mouth
     if needs_closed:
         requested = [next(item for item in available if item["name"] == "mouth_close")]
     overlays = any(item["extraction"] == "overlay" for item in requested)
@@ -53,15 +60,36 @@ def build_requests(job_id: str, layer_dir: Path, layer_map: Path, output_dir: Pa
         left = max(0,min(composite.width-side,round(cx-side/2)))
         top = max(0,min(composite.height-side,round(cy-side/2)))
         crop_box = [left,top,left+side,top+side]
+    framing_reuse = None
+    if reuse_framing:
+        previous_file = output_dir / 'requests.json'
+        previous = json.loads(previous_file.read_text(encoding='utf-8'))
+        boxes = {tuple(item['cropBox']) for item in previous['variants'].values()}
+        if (previous.get('schemaVersion') != 2 or previous.get('jobId') != job_id
+                or previous.get('canvas') != list(composite.size) or len(boxes) != 1):
+            raise ValueError('Previous request framing does not match this job and canvas.')
+        old_box = list(next(iter(boxes)))
+        if (len(old_box) != 4 or any(type(v) is not int for v in old_box)
+                or not (0 <= old_box[0] <= box[0] < box[2] <= old_box[2] <= composite.width
+                        and 0 <= old_box[1] <= box[1] < box[3] <= old_box[3] <= composite.height)):
+            raise ValueError('The current face does not fit the previous request framing.')
+        if overlays and old_box[2]-old_box[0] != old_box[3]-old_box[1]:
+            raise ValueError('Transparent overlays need square native framing.')
+        framing_reuse = {'previousRequestsSha256': file_hash(previous_file), 'cropBox': old_box,
+                         'reason': 'Preserve generated-image coordinates after layer ownership changes.'}
+        crop_box = old_box
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "results").mkdir(exist_ok=True)
     variants = {}
     crop_size = (crop_box[2] - crop_box[0], crop_box[3] - crop_box[1])
     scale = min(4, max(1, math.ceil(1024 / max(crop_size))))
-    request_size = (crop_size[0] * scale, crop_size[1] * scale)
+    side = max(crop_size)
+    left_pad, top_pad = (side - crop_size[0]) // 2, (side - crop_size[1]) // 2
+    padding = [left_pad, top_pad, side - crop_size[0] - left_pad, side - crop_size[1] - top_pad]
+    request_size = (side * scale, side * scale)
     for definition in requested:
         name, targets, mask_options = definition["name"], definition["editableLayers"], definition["mask"]
-        variant_layers = layers if definition["extraction"] == "overlay" else {key:value for key,value in layers.items() if key not in ("front hair","headwear")}
+        variant_layers = layers if definition["extraction"] == "overlay" else {key:value for key,value in layers.items() if key not in ("front hair","headwear","eyewear")}
         variant_composite = composite_layers(variant_layers,definitions=definitions)
         region = mask_options.get("region")
         mask_layers = layers
@@ -107,18 +135,27 @@ def build_requests(job_id: str, layer_dir: Path, layer_map: Path, output_dir: Pa
         if definition["registration"] == "mouth" and definition["extraction"] == "overlay":
             editable = ImageChops.multiply(editable, alpha_union(layers, ["face"], composite.size).filter(ImageFilter.MinFilter(9)))
         editable_box = editable.getbbox()
-        editable = editable.crop(crop_box).resize(request_size, Image.Resampling.NEAREST)
+        editable = pad_image(editable.crop(crop_box), padding).resize(request_size, Image.Resampling.NEAREST)
         variant_dir = output_dir / name
         variant_dir.mkdir(exist_ok=True)
-        variant_composite.crop(crop_box).resize(request_size, Image.Resampling.LANCZOS).save(variant_dir / "input.png")
-        composite_layers(variant_layers, [] if region == "cheeks" or (definition["extraction"] == "overlay" and definition["registration"] == "face") else targets, definitions).crop(crop_box).resize(request_size, Image.Resampling.LANCZOS).save(variant_dir / "underlay.png")
+        pad_image(variant_composite.crop(crop_box), padding).resize(request_size, Image.Resampling.LANCZOS).save(variant_dir / "input.png")
+        pad_image(composite_layers(variant_layers, [] if region == "cheeks" or (definition["extraction"] == "overlay" and definition["registration"] == "face") else targets, definitions).crop(crop_box), padding).resize(request_size, Image.Resampling.LANCZOS).save(variant_dir / "underlay.png")
         mask = Image.new("RGBA", editable.size, (255, 255, 255, 255))
         mask.putalpha(ImageChops.invert(editable))
         mask.save(variant_dir / "mask.png")
+        skin_reference = {}
+        if definition['registration'] == 'mouth' and definition['extraction'] == 'diff':
+            support, _ = mouth_support(layers, quality)
+            ring = mouth_skin_ring(layers, support)
+            ring_file = variant_dir / 'skin-ring.png'
+            pad_image(ring.crop(crop_box), padding).resize(request_size, Image.Resampling.NEAREST).save(ring_file)
+            skin_reference = {'skinRing': f'{name}/skin-ring.png', 'skinRingSha256': file_hash(ring_file),
+                              'skinRingInnerPx': 8, 'skinRingOuterPx': 20}
         prompt = (definition["prompt"] + " Use input.png as the reference and mask.png as the edit mask: "
                   "transparent mask pixels may change; opaque mask pixels must stay identical. "
                   f"Return a PNG of exactly {request_size[0]}x{request_size[1]} pixels, with no crop, shift or added border. "
                   "Do not change any pixels outside the editable mask. "
+                  "Keep the transparent square padding transparent and unchanged. "
                   "Front hair and head accessories are intentionally hidden to keep expression layers separate. "
                   "Do not add hair or accessories.\n")
         if definition["extraction"] == "overlay":
@@ -129,12 +166,13 @@ def build_requests(job_id: str, layer_dir: Path, layer_map: Path, output_dir: Pa
                       "Never draw a checkerboard or white background. Do not crop or center the small artwork.\n")
         (variant_dir / "prompt.txt").write_text(prompt, encoding="utf-8")
         variants[name] = {
-            "cropBox": crop_box, "scale": scale, "size": list(editable.size),
+            "cropBox": crop_box, "scale": scale, "padding": padding, "size": list(editable.size),
             "input": f"{name}/input.png", "mask": f"{name}/mask.png", "prompt": f"{name}/prompt.txt",
             "underlay": f"{name}/underlay.png",
             "inputSha256": file_hash(variant_dir / "input.png"),
             "maskSha256": file_hash(variant_dir / "mask.png"),
             "underlaySha256": file_hash(variant_dir / "underlay.png"),
+            **skin_reference,
             **({"outputMode": "transparent-overlay"} if definition["extraction"] == "overlay" else {}),
             "result": f"results/{name}.png", "dilationPx": dilation,
             "editableBox": list(editable_box),
@@ -148,7 +186,11 @@ def build_requests(job_id: str, layer_dir: Path, layer_map: Path, output_dir: Pa
         "schemaVersion": 2, "jobId": job_id, "canvas": list(composite.size),
         "layerDir": layer_dir.relative_to(Path.cwd()).as_posix(),
         "layerSha256": layer_hash(layer_dir, layer_map), "variants": variants,
+        "framingReuse": framing_reuse,
         "closedMouth": closed, "stage": "closed-mouth" if needs_closed else "expressions",
+        "closedMouthReuse": {'source': 'current PSD layers', 'reviewNote': review_note.strip(),
+                             'qualityChecksPassed': closed['usable'], 'qualityCriteriaUnchanged': True}
+                            if keep_closed_mouth else None,
         "requestedExpressions": original_names,
         "deferredExpressions": [name for name in original_names if name != "mouth_close"] if needs_closed else [],
         "resumeOnly": only,
@@ -170,6 +212,9 @@ def build_requests(job_id: str, layer_dir: Path, layer_map: Path, output_dir: Pa
         f"`npm run still2rig-psd -- import-expressions {job_id} --only NAME --read-only` "
         "and inspect the extracted artwork. Regenerate a failed drawing at most twice; "
         "skip it with a reason if it still fails, and continue with the others.\n\n"
+        + ("The existing closed mouth is deliberately retained by an explicit review decision. "
+           "Its recorded quality result is unchanged; preparing other expressions does not make it pass.\n"
+           if keep_closed_mouth else "")
         + ("The closed mouth is missing or unusable. Generate and validate only mouth_close first, "
            f"import with `npm run still2rig-psd -- import-expressions {job_id} --only mouth_close`, "
            f"then run `npm run still2rig-psd -- repair {job_id} --expressions .still2rig-psd/jobs/{job_id}/generated-expressions`. "
@@ -191,8 +236,13 @@ def main():
     parser.add_argument("--layer-map", type=Path, default=Path("configs/layer-map.json"))
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--only")
+    parser.add_argument("--keep-closed-mouth", action="store_true")
+    parser.add_argument("--review-note")
+    parser.add_argument("--reuse-framing", action="store_true")
     args = parser.parse_args()
-    print(json.dumps(build_requests(args.job_id, args.layer_dir, args.layer_map, args.output_dir, only=args.only)))
+    print(json.dumps(build_requests(args.job_id, args.layer_dir, args.layer_map, args.output_dir, only=args.only,
+                                   keep_closed_mouth=args.keep_closed_mouth, review_note=args.review_note,
+                                   reuse_framing=args.reuse_framing)))
 
 
 if __name__ == "__main__":

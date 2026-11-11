@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { afterEach, test } from 'node:test';
@@ -49,6 +50,52 @@ afterEach(() => {
   while (roots.length) fs.rmSync(roots.pop(), { recursive: true, force: true });
 });
 
+test('verified source-conserving overrides retain faint matte coverage and reject changed inputs', () => {
+  const f = fixture();
+  const directory = path.join(f.root,'synthetic-conserved'); fs.mkdirSync(directory);
+  const file = path.join(directory,'back hair.png');
+  fs.copyFileSync(path.join(f.layers,'back hair.png'),file);
+  const edit = spawnSync('python3',['-c','from PIL import Image; import sys; p=sys.argv[1]; im=Image.open(p).convert("RGBA"); im.putpixel((0,0),(70,30,10,12)); im.save(p)',file]);
+  assert.equal(edit.status,0);
+  const jobFile = path.join(f.root,'job.json');
+  const job = JSON.parse(fs.readFileSync(jobFile));
+  const report = path.join(directory,'report.json');
+  fs.writeFileSync(report,JSON.stringify({sourceSha256:job.input.sha256,staticConservation:{pass:true},
+    outputLayers:{'back hair':createHash('sha256').update(fs.readFileSync(file)).digest('hex')}}));
+  job.split = {'split-rig-layers':{layers:path.relative(PROJECT_ROOT,directory),report:path.relative(PROJECT_ROOT,report)}};
+  fs.writeFileSync(jobFile,JSON.stringify(job));
+  ok('repair',f.id,'--layer-overrides',directory);
+  const current = JSON.parse(fs.readFileSync(jobFile));
+  const output = path.join(PROJECT_ROOT,path.dirname(path.dirname(current.result.qaReport)),'processed','layers','back hair.png');
+  assert.deepEqual([...readPngRgba(output).data.subarray(0,4)],[70,30,10,12]);
+  fs.appendFileSync(file,'changed');
+  assert.match(run('repair',f.id,'--layer-overrides',directory).stderr,/Conserved overrides changed/);
+});
+
+test('assembly registration only accepts previously imported adopted eyes and retains its provenance', () => {
+  const f = fixture();
+  ok('expression-requests', f.id);
+  python('edit_expression_fixture.py', f.requestDir, f.resultDir, 'artwork');
+  const imported = ok('import-expressions', f.id);
+  ok('repair', f.id, '--expressions', imported.outputDir);
+  const registered = ok('repair', f.id, '--expressions', imported.outputDir, '--register-adopted-eyes');
+  const job = JSON.parse(fs.readFileSync(path.join(f.root,'job.json')));
+  const latest = job.result.repairs.at(-1);
+  const snapshot = path.join(PROJECT_ROOT,latest.options.expressions);
+  const receipt = JSON.parse(fs.readFileSync(path.join(snapshot,'assembly-registration.json')));
+  assert.match(receipt.inputSha256,/^[a-f0-9]{64}$/);
+  assert.match(receipt.adoptedSha256,/^[a-f0-9]{64}$/);
+  assert.equal(receipt.horizontalToleranceNative,8);
+  assert.equal(receipt.maximumShiftNative,12);
+  assert.equal(registered.qa.checks.expressionRegistration,true);
+  const inherited = ok('repair',f.id);
+  assert.equal(inherited.qa.checks.expressionRegistration,true);
+  const source = path.join(PROJECT_ROOT,imported.outputDir,'eye_close.png');
+  const mutation = spawnSync('python3',['-c','from PIL import Image; import sys; p=sys.argv[1]; im=Image.open(p).convert("RGBA"); im.putpixel((37,34),(0,255,0,255)); im.save(p)',source]);
+  assert.equal(mutation.status,0);
+  assert.match(run('repair',f.id,'--expressions',imported.outputDir,'--register-adopted-eyes').stderr,/previously imported and adopted/);
+});
+
 test('requests use the current neutral PSD canvas, face crops, alpha masks and relative provenance', () => {
   const f = fixture();
   // Source dimensions intentionally differ, as they do after See-through padding.
@@ -67,8 +114,10 @@ test('requests use the current neutral PSD canvas, face crops, alpha masks and r
     const input = readPngRgba(path.join(f.requestDir, item.input));
     const mask = readPngRgba(path.join(f.requestDir, item.mask));
     assert.deepEqual([input.width, input.height], item.size);
-    assert.equal(input.width, (item.cropBox[2] - item.cropBox[0]) * item.scale);
-    assert.equal(input.height, (item.cropBox[3] - item.cropBox[1]) * item.scale);
+    assert.equal(input.width, input.height);
+    assert.equal(mask.data[3], 255);
+    assert.equal(input.width, (item.cropBox[2] - item.cropBox[0] + item.padding[0] + item.padding[2]) * item.scale);
+    assert.equal(input.height, (item.cropBox[3] - item.cropBox[1] + item.padding[1] + item.padding[3]) * item.scale);
     assert.equal(item.scale, Math.min(4, Math.ceil(1024 / Math.max(item.cropBox[2] - item.cropBox[0], item.cropBox[3] - item.cropBox[1]))));
     assert.deepEqual([mask.width, mask.height], item.size);
     const alphas = Array.from(mask.data).filter((_, index) => index % 4 === 3);
@@ -82,8 +131,8 @@ test('requests use the current neutral PSD canvas, face crops, alpha masks and r
       for (let x = 0; x < mouth.width; x += 1) {
         const offset = (y * mouth.width + x) * 4;
         if (mouth.data[offset + 3] !== 255) continue;
-        const cropOffset = (((y - item.cropBox[1]) * item.scale + Math.floor(item.scale / 2)) * input.width
-          + (x - item.cropBox[0]) * item.scale + Math.floor(item.scale / 2)) * 4;
+        const cropOffset = (((y - item.cropBox[1] + item.padding[1]) * item.scale + Math.floor(item.scale / 2)) * input.width
+          + (x - item.cropBox[0] + item.padding[0]) * item.scale + Math.floor(item.scale / 2)) * 4;
         assert.equal(input.data[cropOffset + 3], 255);
         for (let c = 0; c < 3; c += 1) assert.ok(Math.abs(input.data[cropOffset + c] - mouth.data[offset + c]) <= 40);
       }
@@ -123,14 +172,36 @@ test('drops skin matching the underlay and keeps only registered mouth and eyeli
   assert.equal(repaired.qa.productionReady, true);
 });
 
-test('excludes overlapping front hair and headwear from requests and imported eyelids', () => {
+test('explicit framing reuse preserves generated coordinates when face and ear ownership changes', () => {
+  const f = fixture();
+  const first = ok('expression-requests', f.id);
+  const before = JSON.parse(fs.readFileSync(path.join(f.requestDir, 'requests.json')));
+  const moved = spawnSync('python3', ['-c',
+    'from PIL import Image; from pathlib import Path; import sys; p=Path(sys.argv[1]); face=Image.open(p/"face.png").convert("RGBA"); ears=Image.new("RGBA",face.size); ears.paste(face.crop((24,15,28,68)),(24,15)); face.paste((0,0,0,0),(24,15,28,68)); face.save(p/"face.png"); ears.save(p/"ears.png")',
+    path.join(PROJECT_ROOT, first.layerDir)]);
+  assert.equal(moved.status, 0, moved.stderr?.toString());
+  const continued = ok('expression-requests', f.id, '--reuse-framing');
+  const after = JSON.parse(fs.readFileSync(path.join(f.requestDir, 'requests.json')));
+  assert.notEqual(after.layerSha256, before.layerSha256);
+  assert.match(continued.framingReuse.previousRequestsSha256, /^[0-9a-f]{64}$/);
+  for (const name of ['eye_close', 'mouth_open']) {
+    assert.deepEqual(after.variants[name].cropBox, before.variants[name].cropBox);
+    assert.equal(after.variants[name].inputSha256, before.variants[name].inputSha256);
+  }
+  const malformed = {...after, canvas: [1, 1]};
+  fs.writeFileSync(path.join(f.requestDir, 'requests.json'), JSON.stringify(malformed));
+  assert.match(run('expression-requests', f.id, '--reuse-framing').stderr, /framing does not match/);
+});
+
+test('excludes overlapping front hair, headwear and eyewear from requests and imported eyelids', () => {
   const f = fixture('--hair-over-eyes');
   assert.ok(fs.existsSync(path.join(f.root, 'processed', 'layers', 'headwear.png')));
+  assert.ok(fs.existsSync(path.join(f.root, 'processed', 'layers', 'eyewear.png')));
   ok('expression-requests', f.id);
   const requests = JSON.parse(fs.readFileSync(path.join(f.requestDir, 'requests.json')));
   const item = requests.variants.eye_close;
   const input = readPngRgba(path.join(f.requestDir, item.input));
-  const index = (((34 - item.cropBox[1]) * item.scale + 2) * input.width + (37 - item.cropBox[0]) * item.scale + 2) * 4;
+  const index = (((34 - item.cropBox[1] + item.padding[1]) * item.scale + 2) * input.width + (37 - item.cropBox[0] + item.padding[0]) * item.scale + 2) * 4;
   assert.deepEqual(Array.from(input.data.slice(index, index + 4)), [30, 120, 150, 255]);
   const underlay = readPngRgba(path.join(f.requestDir, item.underlay));
   assert.deepEqual(Array.from(underlay.data.slice(index, index + 4)), [250, 205, 175, 255]);
@@ -161,6 +232,20 @@ test('removes isolated speckles and uses configurable soft alpha for low-contras
   assert.match(run('import-expressions', f.id, '--minimum-component-pixels', '0').stderr, /at least 1/);
 });
 
+test('records an explicitly relaxed import without declaring production readiness', () => {
+  const f = fixture();
+  ok('expression-requests', f.id);
+  python('edit_expression_fixture.py', f.requestDir, f.resultDir, 'skin-patch');
+  const imported = ok('import-expressions', f.id, '--only', 'eye_close', '--max-outside-mean', '255', '--max-outside-p99', '255', '--max-band-local-mean', '255', '--max-band-flat-mean', '255', '--review-note', 'Synthetic exception requiring visual review');
+  assert.equal(imported.variants.eye_close.review.requiresReview, true);
+  const repaired = ok('repair', f.id, '--expressions', imported.outputDir);
+  assert.equal(repaired.qa.checks.expressionImportWithinDefaults, false);
+  assert.equal(repaired.qa.productionReady, false);
+  assert.equal(repaired.qa.expressionImportReview.eye_close.note, 'Synthetic exception requiring visual review');
+  const again = ok('repair', f.id);
+  assert.equal(again.qa.checks.expressionImportWithinDefaults, false);
+});
+
 test('in-mask edits become full-canvas registered layers and still pass through existing QA', () => {
   const f = fixture();
   ok('expression-requests', f.id);
@@ -170,15 +255,17 @@ test('in-mask edits become full-canvas registered layers and still pass through 
   assert.match(imported.next, /repair .* --expressions/);
   const requests = JSON.parse(fs.readFileSync(path.join(f.requestDir, 'requests.json')));
   for (const name of imported.accepted) {
-    assert.equal(imported.variants[name].meanAbsoluteDiff, 0);
+    // Padding changes the registration sampling grid; bounded subpixel
+    // compensation may introduce less than one RGB level of interpolation.
+    assert.ok(imported.variants[name].meanAbsoluteDiff <= 1);
     const output = readPngRgba(path.join(PROJECT_ROOT, imported.outputDir, `${name}.png`));
     assert.deepEqual([output.width, output.height], [96, 96]);
     const item = requests.variants[name];
     const mask = readPngRgba(path.join(f.requestDir, item.mask));
     for (let y = 0; y < output.height; y += 1) {
       for (let x = 0; x < output.width; x += 1) {
-        const cx = (x - item.cropBox[0]) * item.scale;
-        const cy = (y - item.cropBox[1]) * item.scale;
+        const cx = (x - item.cropBox[0] + item.padding[0]) * item.scale;
+        const cy = (y - item.cropBox[1] + item.padding[1]) * item.scale;
         const allowed = cx >= 0 && cy >= 0 && cx < mask.width && cy < mask.height && mask.data[(cy * mask.width + cx) * 4 + 3] === 0;
         const alpha = output.data[(y * output.width + x) * 4 + 3];
         if (allowed) assert.ok(alpha >= 200);
@@ -252,11 +339,11 @@ test('neutral request compositing honors mouth_close overrides in the PSD layer 
   // around the thin ink, rather than expecting the native color to survive.
   const expectedFile = path.join(overrides, 'expected-input.png');
   const expected = spawnSync('python3', ['-c',
-    'from PIL import Image; import json,sys; face=Image.open(sys.argv[1]).convert("RGBA"); mouth=Image.open(sys.argv[2]).convert("RGBA"); item=json.loads(sys.argv[3]); Image.alpha_composite(face,mouth).crop(tuple(item["cropBox"])).resize(tuple(item["size"]),Image.Resampling.LANCZOS).save(sys.argv[4])',
+    'from PIL import Image; import json,sys; sys.path.insert(0,"scripts"); from expression_requests_common import pad_image; face=Image.open(sys.argv[1]).convert("RGBA"); mouth=Image.open(sys.argv[2]).convert("RGBA"); item=json.loads(sys.argv[3]); pad_image(Image.alpha_composite(face,mouth).crop(tuple(item["cropBox"])),item.get("padding",[0,0,0,0])).resize(tuple(item["size"]),Image.Resampling.LANCZOS).save(sys.argv[4])',
     path.join(f.layers, 'face.png'), path.join(overrides, 'mouth_close.png'), JSON.stringify(item), expectedFile]);
   assert.equal(expected.status, 0);
   const expectedInput = readPngRgba(expectedFile);
-  const index = (((54 - item.cropBox[1]) * item.scale + 2) * input.width + (48 - item.cropBox[0]) * item.scale + 2) * 4;
+  const index = (((54 - item.cropBox[1] + item.padding[1]) * item.scale + 2) * input.width + (48 - item.cropBox[0] + item.padding[0]) * item.scale + 2) * 4;
   assert.deepEqual(Array.from(input.data.slice(index, index + 4)), Array.from(expectedInput.data.slice(index, index + 4)));
 });
 
