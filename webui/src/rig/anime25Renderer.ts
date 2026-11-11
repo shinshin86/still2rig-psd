@@ -333,8 +333,13 @@ function fadeAlpha(
   if (layer.side === 'L' || layer.side === 'R') {
     const drawing = eyeDrawings[layer.side];
     const sideParams = eyeSlotParameters(params, layer.side, drawing, eyeFrames[layer.side]);
+    const eyeOpen = layer.side === 'L' ? sideParams.eyeOpenL : sideParams.eyeOpenR;
+    const wink = hasEyeSmile[layer.side] ? 0 : layer.side === 'L' ? sideParams.eyeWinkL : sideParams.eyeWinkR;
+    const blink = hasEyeClose[layer.side]
+      ? drawnBlinkOpacity(Math.min(eyeOpen, 1 - wink))
+      : { open: 1, closed: 0 };
     const alpha = eyeDrawingAlpha(layer.fade, layer.bn, drawing,
-      drawnBlinkOpacity(layer.side === 'L' ? params.eyeOpenL : params.eyeOpenR),
+      blink,
       baseFadeAlpha(layer, sideParams, hasEyeClose, hasEyeSmile, mouthDrawing, hasEyeAngry));
     return alpha;
   }
@@ -358,11 +363,13 @@ function baseFadeAlpha(
   if (layer.fade === 'tears' || layer.fade === 'sweat' || layer.fade === 'angerMark') return params[layer.fade];
   if (layer.fade === 'eyeOpen') {
     const value = expression.eyeOpen;
+    const hasClosedDrawing = Boolean(layer.side && hasEyeClose[layer.side as 'L' | 'R']);
     if(layer.bn==='eyewhite' && layer.side && !hasEyeSmile[layer.side as 'L'|'R'] && params.eyeNarrow>0) {
       const aperture=value*(1-params.eyeNarrow*.8);
-      return originalAlpha*smooth((aperture-.16)/.12)*smooth((value-(.1+params.eyeEase*.45))/.15);
+      const closureFade = hasClosedDrawing ? 1 : smooth((value - (0.1 + params.eyeEase * 0.45)) / 0.15);
+      return originalAlpha * smooth((aperture - 0.16) / 0.12) * closureFade;
     }
-    if (wink > 0 && !expression.smileProgress && layer.side && hasEyeClose[layer.side as 'L'|'R']) return value <= 0.1 ? 0 : 1;
+    if (hasClosedDrawing) return originalAlpha;
     if (expression.smileProgress > 0 && layer.bn === 'eyelash') return originalAlpha;
     if (
       (layer.side === 'L' || layer.side === 'R') &&
@@ -373,12 +380,7 @@ function baseFadeAlpha(
     }
     return originalAlpha * smooth((value - (0.1 + params.eyeEase * 0.45)) / 0.15);
   }
-  if (layer.fade === 'eyeClose') {
-    if (wink > 0 && !expression.smileProgress) return expression.eyeOpen <= 0.1 ? 1 : 0;
-    if (expression.smileProgress > 0) return 0;
-    const value = expression.eyeOpen;
-    return originalAlpha * (1 - smooth((value - (0.1 + params.eyeEase * 0.45)) / 0.15));
-  }
+  if (layer.fade === 'eyeClose') return 0;
   if (layer.bn.startsWith('mouth_')) return layer.bn === mouthDrawing ? 1 : 0;
   return 1;
 }

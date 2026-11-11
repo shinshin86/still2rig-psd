@@ -41,14 +41,15 @@ test('drawn eyes share halfway bounds and return to unchanged artwork at the end
   assert.deepEqual(morphDrawnEye(80,70,anchor,features,.5,false),morphDrawnEye(78,68,anchor,features,.5,true));
 });
 
-test('the drawn anger blink fades only between single-drawing endpoints', () => {
+test('the blink switches drawings at 0.12 without a crossfade', () => {
   assert.deepEqual(drawnBlinkOpacity(1),{open:1,closed:0});
   assert.deepEqual(drawnBlinkOpacity(0),{open:0,closed:1});
-  assert.deepEqual(drawnBlinkOpacity(.5),{open:.5,closed:.5});
+  assert.deepEqual(drawnBlinkOpacity(.12),{open:0,closed:1});
+  assert.deepEqual(drawnBlinkOpacity(.120001),{open:1,closed:0});
   for(const value of [-1,.1,.25,.75,.9,2]) {
     const frame=drawnBlinkOpacity(value);
     assert.equal(frame.open+frame.closed,1);
-    assert.ok(frame.open>=0&&frame.open<=1);
+    assert.ok(frame.open===0||frame.open===1);
   }
 });
 

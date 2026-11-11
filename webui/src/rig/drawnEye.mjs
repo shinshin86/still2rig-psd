@@ -2,10 +2,10 @@ import { upperLidY } from './eyeExpression.mjs';
 const clamp = value => Math.max(0, Math.min(1, value));
 const mix = (a,b,t) => a+(b-a)*t;
 
-/** Blend only during the blink; each endpoint shows exactly one drawing. */
+/** Select one drawing at the blink handoff. */
 export function drawnBlinkOpacity(eyeOpen) {
-  const t=clamp(eyeOpen),open=t*t*(3-2*t);
-  return {open,closed:1-open};
+  const open = eyeOpen > 0.12 ? 1 : 0;
+  return { open, closed: 1 - open };
 }
 
 /** Read the drawing's visible whites and brow, without character-specific coordinates. */
