@@ -21,7 +21,8 @@ Colab, you remain in control of Google sign-in, the Chrome profile, GPU
 selection, and Colab connection approval.
 It works with Codex, Claude Code, and other AI coding agents, and See-through
 can run on your own GPU instead of Colab. See "Using another agent or a local
-See-through" below.
+See-through" below. You can also skip See-through and build the PSD with Codex
+image generation; see "Making a PSD with Codex image generation" below.
 
 > **Status: v0.1 alpha.** A single neutral image cannot reliably provide real
 > closed-eye and alternate-mouth artwork. Still2Rig PSD reports missing
@@ -56,6 +57,42 @@ See-through can run on your own GPU instead of Colab.
   set up and run See-through together with your agent. Once the separated
   layers are imported in this project's format, PSD assembly, QA, and the WebUI
   preview work the same way as with Colab.
+
+## Making a PSD with Codex image generation (no See-through)
+
+You can also build the PSD without See-through, using Codex's built-in image
+generation. This route needs neither Colab nor a GPU. Codex draws the parts
+hidden behind the front hair and other front parts, and the local tools split
+the layers by comparing those drawings with your image.
+
+- **What you need:** Codex with built-in image generation. Other agents can
+  follow the same steps only if they can call Codex's image generation.
+- **What is sent:** your image and crops of it go to Codex image generation.
+  Codex asks before sending anything.
+- **How to ask:** attach the image and say, for example, "Make a PSD from this
+  image with Codex image generation, without See-through."
+
+Codex marks a few points by eye (eyes, brows, ears, mouth, nose, chin, hair
+part, bang tips, collar, and a box for glasses or a hat). It then generates the
+images the split needs, one at a time:
+
+1. The image with the front hair, glasses and hats removed
+2. The head with all hair removed, showing the hidden skin, neck and clothing
+3. The back hair hidden behind the face
+4. A flat color map showing which part each visible pixel belongs to
+5. A flat color map of the eyes, brows, nose and mouth
+6. Closed eyes and an open mouth (and a closed mouth when the image lacks one)
+
+A typical image takes 7–8 generations. Each image is capped at 12, and every
+generated original is kept under the ignored job directory. Each result must
+pass the same import checks before it is used. Outside the face, the stacked
+layers match the original image; the generated face replaces the original face
+skin, eyes, brows, nose and mouth. Finish with `motion-qa` as in the See-through
+route.
+
+Limits: front-facing bust-up images work best. Small differences can remain
+at the edges of generated parts, such as a one-pixel shift along the mouth line.
+Check the preview before you use the PSD.
 
 ## Quick start
 
